@@ -18,3 +18,4 @@ weasyprint==62.3
 playwright==1.49.0
 pywebpush==1.14.1
 Pillow==11.3.0
+boto3==1.35.99

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import os, uuid, re, aiofiles, base64, urllib.request, json
 from database import get_db
-import models, schemas
+import models, schemas, storage
 from auth import get_current_user
 
 _FD_DOMAIN  = os.getenv("FRESHDESK_DOMAIN", "")
@@ -84,12 +84,8 @@ async def upload_attachment(
         raise HTTPException(status_code=400, detail="El archivo excede 20MB")
 
     stored_name = f"{uuid.uuid4()}{ext}"
-    ticket_dir = os.path.join(UPLOAD_DIR, str(ticket_id))
-    os.makedirs(ticket_dir, exist_ok=True)
-    file_path = os.path.join(ticket_dir, stored_name)
-
-    async with aiofiles.open(file_path, "wb") as f:
-        await f.write(content)
+    storage_key = f"{ticket_id}/{stored_name}"
+    storage.save_file(storage_key, content, file.content_type)
 
     # B53: clean up file if DB commit fails
     try:
@@ -115,8 +111,7 @@ async def upload_attachment(
         return attachment
     except Exception:
         db.rollback()
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        storage.delete_file(storage_key)
         raise HTTPException(status_code=500, detail="Error guardando adjunto")
 
 
@@ -180,11 +175,15 @@ def download_attachment(
     # against path traversal in case a record was ever created with a bad value.
     if not att.filename or not _SAFE_FNAME.match(att.filename):
         raise HTTPException(status_code=404)
-    file_path = os.path.join(UPLOAD_DIR, str(ticket_id), att.filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
+    storage_key = f"{ticket_id}/{att.filename}"
+    if not storage.file_exists(storage_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
-    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type)
+    return Response(
+        content=storage.read_file(storage_key),
+        media_type=att.content_type or "application/octet-stream",
+        headers={"Content-Disposition": _safe_cd_filename(att.original_name or att.filename)},
+    )
 
 
 @router.delete("/{ticket_id}/attachments/{attachment_id}")
@@ -204,9 +203,7 @@ def delete_attachment(
         raise HTTPException(status_code=403)
 
     if att.filename:
-        file_path = os.path.join(UPLOAD_DIR, str(ticket_id), att.filename)
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        storage.delete_file(f"{ticket_id}/{att.filename}")
 
     db.delete(att)
     db.commit()

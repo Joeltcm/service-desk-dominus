@@ -10,6 +10,7 @@ load_dotenv()
 
 from database import engine, SessionLocal, is_sqlite, get_db as _get_db_main
 import models
+import storage
 from auth import get_password_hash, get_current_user
 from routers import auth, users, tickets, attachments, calendar, knowledge_base, dashboard, reports, contacts, suppliers, orders, warranties, despacho, companies, quotes, invoices, ventas, settings, expenses, letters, papelera, audit, inventory, opportunities, licenses, push, canned_responses, projects, contracts, printers, supplies, system, stats
 
@@ -2133,11 +2134,13 @@ def serve_upload(
         raise HTTPException(status_code=404)
     if current_user.role == models.UserRole.client and ticket.client_id != current_user.id:
         raise HTTPException(status_code=403)
-    base = os.path.abspath(os.path.join(upload_dir, str(ticket_id)))
-    path = os.path.abspath(os.path.join(base, filename))
-    if not path.startswith(base) or not os.path.isfile(path):
+    _key = f"{ticket_id}/{filename}"
+    if not storage.file_exists(_key):
         raise HTTPException(status_code=404)
-    return FileResponse(path)
+    import mimetypes
+    from fastapi.responses import Response as _Resp
+    return _Resp(content=storage.read_file(_key),
+                 media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream")
 
 
 _FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

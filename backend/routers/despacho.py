@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta, time as _time
@@ -8,7 +8,7 @@ PANAMA_TZ = timezone(timedelta(hours=-5))
 import os, uuid, json
 from database import get_db
 from auth import require_staff
-import models, schemas
+import models, schemas, storage
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -199,13 +199,9 @@ async def upload_dispatch_attachment(
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="El archivo excede 20MB")
-    dispatch_dir = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id))
-    os.makedirs(dispatch_dir, exist_ok=True)
     ext = os.path.splitext(file.filename or "file")[1]
     stored_name = f"{uuid.uuid4()}{ext}"
-    file_path = os.path.join(dispatch_dir, stored_name)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    storage.save_file(f"dispatches/{dispatch_id}/{stored_name}", content, file.content_type)
     attachment = models.DispatchAttachment(
         dispatch_id=dispatch_id,
         doc_type=doc_type,
@@ -234,10 +230,11 @@ def download_dispatch_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id), att.filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type)
+    _key = f"dispatches/{dispatch_id}/{att.filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
 
 
 @router.delete("/{dispatch_id}/attachments/{att_id}")
@@ -253,9 +250,7 @@ def delete_dispatch_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id), att.filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    storage.delete_file(f"dispatches/{dispatch_id}/{att.filename}")
     db.delete(att)
     db.commit()
     return {"ok": True}

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
@@ -8,7 +8,7 @@ import os, uuid, logging, json, re
 from database import get_db
 from auth import get_current_user, require_staff
 from audit_helper import log_action
-import models, schemas
+import models, schemas, storage
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -306,13 +306,9 @@ async def upload_attachment(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="El archivo excede 20MB")
 
-    order_dir = os.path.join(UPLOAD_DIR, "orders", str(order_id))
-    os.makedirs(order_dir, exist_ok=True)
     ext = os.path.splitext(file.filename or "file")[1]
     stored_name = f"{uuid.uuid4()}{ext}"
-    file_path = os.path.join(order_dir, stored_name)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    storage.save_file(f"orders/{order_id}/{stored_name}", content, file.content_type)
 
     attachment = models.OrderAttachment(
         order_id=order_id,
@@ -342,10 +338,11 @@ def download_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(UPLOAD_DIR, "orders", str(order_id), att.filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type)
+    _key = f"orders/{order_id}/{att.filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
 
 
 @router.delete("/{order_id}/attachments/{att_id}")
@@ -361,9 +358,7 @@ def delete_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(UPLOAD_DIR, "orders", str(order_id), att.filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    storage.delete_file(f"orders/{order_id}/{att.filename}")
     db.delete(att)
     db.commit()
     return {"ok": True}

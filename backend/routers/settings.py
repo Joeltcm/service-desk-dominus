@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_user
 import models
+import storage
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -305,11 +306,10 @@ def _resolve_inline_images(content: str, ticket_id: int, db) -> tuple[str, dict]
         img_style = 'style="max-width:100%;max-height:400px;border-radius:4px;border:1px solid #e5e7eb;margin:6px 0;display:block"'
         if railway_domain:
             return f'<img src="https://{railway_domain}/u/{ticket_id}/{att.filename}" {img_style} />'
-        # CID path: load file
-        file_path = os.path.join(upload_dir, str(ticket_id), att.filename)
-        if os.path.exists(file_path):
-            with open(file_path, "rb") as fh:
-                inline_images[aid] = (att.original_name, fh.read(), att.content_type or "image/jpeg")
+        # CID path: load from storage
+        _key = f"{ticket_id}/{att.filename}"
+        if storage.file_exists(_key):
+            inline_images[aid] = (att.original_name, storage.read_file(_key), att.content_type or "image/jpeg")
             return f'<img src="cid:img_{aid}" {img_style} />'
         return "[imagen adjunta]"
 

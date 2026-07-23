@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
@@ -21,7 +21,7 @@ from database import get_db
 from auth import require_staff, get_current_user
 from routers.settings import _get_setting, _send_with_logo, _load_logo
 from audit_helper import log_action
-import models, schemas
+import models, schemas, storage
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 
@@ -1191,18 +1191,12 @@ async def upload_dgi_attachment(
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="El archivo excede 20MB")
 
-    inv_dir = os.path.join(UPLOAD_DIR, "invoices_dgi", str(invoice_id))
-    os.makedirs(inv_dir, exist_ok=True)
-
     # Remove old file if exists
     if inv.dgi_filename:
-        old_path = os.path.join(inv_dir, inv.dgi_filename)
-        if os.path.exists(old_path):
-            os.remove(old_path)
+        storage.delete_file(f"invoices_dgi/{invoice_id}/{inv.dgi_filename}")
 
     stored_name = f"{uuid.uuid4()}.pdf"
-    with open(os.path.join(inv_dir, stored_name), "wb") as f:
-        f.write(content)
+    storage.save_file(f"invoices_dgi/{invoice_id}/{stored_name}", content, "application/pdf")
 
     inv.dgi_filename = stored_name
     inv.dgi_original_name = file.filename or stored_name
@@ -1221,10 +1215,11 @@ def download_dgi_attachment(
         raise HTTPException(status_code=404, detail="No hay factura DGI adjunta")
     if not _SAFE_FNAME.match(inv.dgi_filename):
         raise HTTPException(status_code=404)
-    file_path = os.path.join(UPLOAD_DIR, "invoices_dgi", str(invoice_id), inv.dgi_filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=inv.dgi_original_name, media_type="application/pdf")
+    _key = f"invoices_dgi/{invoice_id}/{inv.dgi_filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{inv.dgi_original_name or inv.dgi_filename}"'})
 
 
 @router.get("/{invoice_id}/dgi-attachment/my")
@@ -1249,10 +1244,11 @@ def download_dgi_attachment_client(
         raise HTTPException(status_code=404, detail="No hay factura DGI adjunta")
     if not _SAFE_FNAME.match(inv.dgi_filename):
         raise HTTPException(status_code=404)
-    file_path = os.path.join(UPLOAD_DIR, "invoices_dgi", str(invoice_id), inv.dgi_filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=inv.dgi_original_name, media_type="application/pdf")
+    _key = f"invoices_dgi/{invoice_id}/{inv.dgi_filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{inv.dgi_original_name or inv.dgi_filename}"'})
 
 
 @router.delete("/{invoice_id}/dgi-attachment")
@@ -1264,9 +1260,7 @@ def delete_dgi_attachment(
     inv = _get_invoice_or_404(invoice_id, db)
     if not inv.dgi_filename:
         raise HTTPException(status_code=404, detail="No hay factura DGI adjunta")
-    file_path = os.path.join(UPLOAD_DIR, "invoices_dgi", str(invoice_id), inv.dgi_filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    storage.delete_file(f"invoices_dgi/{invoice_id}/{inv.dgi_filename}")
     inv.dgi_filename = None
     inv.dgi_original_name = None
     db.commit()
@@ -1325,10 +1319,7 @@ async def upload_invoice_attachment(
 
     ext = os.path.splitext(file.filename or "file")[1].lower()
     stored_name = f"{uuid.uuid4()}{ext}"
-    att_dir = _attachment_dir(invoice_id)
-    os.makedirs(att_dir, exist_ok=True)
-    with open(os.path.join(att_dir, stored_name), "wb") as f:
-        f.write(content)
+    storage.save_file(f"invoice_attachments/{invoice_id}/{stored_name}", content, file.content_type)
 
     att = models.InvoiceAttachment(
         invoice_id=invoice_id,
@@ -1356,10 +1347,11 @@ def download_invoice_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(_attachment_dir(invoice_id), att.filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type or "application/octet-stream")
+    _key = f"invoice_attachments/{invoice_id}/{att.filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
 
 
 @router.get("/{invoice_id}/attachments/{att_id}/my")
@@ -1377,10 +1369,11 @@ def download_invoice_attachment_client(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(_attachment_dir(invoice_id), att.filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
-    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type or "application/octet-stream")
+    _key = f"invoice_attachments/{invoice_id}/{att.filename}"
+    if not storage.file_exists(_key):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
 
 
 @router.delete("/{invoice_id}/attachments/{att_id}")
@@ -1396,9 +1389,7 @@ def delete_invoice_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    file_path = os.path.join(_attachment_dir(invoice_id), att.filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    storage.delete_file(f"invoice_attachments/{invoice_id}/{att.filename}")
     db.delete(att)
     db.commit()
     return {"ok": True}

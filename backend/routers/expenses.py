@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -17,6 +17,7 @@ from auth import get_current_user, require_staff
 from audit_helper import log_action
 import models
 import schemas
+import storage
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
@@ -376,14 +377,9 @@ async def upload_attachment(
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="Archivo demasiado grande (máx 20 MB)")
 
-    exp_dir = os.path.join(UPLOAD_DIR, "expenses", str(expense_id))
-    os.makedirs(exp_dir, exist_ok=True)
-
     ext = os.path.splitext(file.filename or "")[1]
     stored_name = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(exp_dir, stored_name)
-    with open(file_path, "wb") as f:
-        f.write(data)
+    storage.save_file(f"expenses/{expense_id}/{stored_name}", data, file.content_type)
 
     att = models.ExpenseAttachment(
         expense_id=expense_id,
@@ -412,9 +408,7 @@ def delete_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404)
-    file_path = os.path.join(UPLOAD_DIR, "expenses", str(expense_id), att.filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    storage.delete_file(f"expenses/{expense_id}/{att.filename}")
     db.delete(att)
     db.commit()
     return {"ok": True}
@@ -435,11 +429,11 @@ def download_attachment(
         raise HTTPException(status_code=404)
     if not _SAFE_FNAME.match(att.filename):
         raise HTTPException(status_code=404)
-    file_path = os.path.join(UPLOAD_DIR, "expenses", str(expense_id), att.filename)
-    if not os.path.exists(file_path):
+    _key = f"expenses/{expense_id}/{att.filename}"
+    if not storage.file_exists(_key):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    return FileResponse(
-        file_path,
+    return Response(
+        content=storage.read_file(_key),
         media_type=att.content_type or "application/octet-stream",
-        filename=att.original_name,
+        headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'},
     )

@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 import os, uuid
 from database import get_db
 from auth import get_current_user, require_admin, require_admin_or_ventas, require_staff
-import models, schemas
+import models, schemas, storage
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -73,8 +73,8 @@ def delete_supplier(
     supplier = db.query(models.Supplier).filter(models.Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-    if supplier.logo_path and os.path.exists(supplier.logo_path):
-        os.remove(supplier.logo_path)
+    if supplier.logo_path:
+        storage.delete_file(supplier.logo_path)
     db.delete(supplier)
     db.commit()
     return {"ok": True}
@@ -97,19 +97,15 @@ async def upload_logo(
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="La imagen no puede superar 5MB")
 
-    logo_dir = os.path.join(UPLOAD_DIR, "suppliers", str(supplier_id))
-    os.makedirs(logo_dir, exist_ok=True)
-
     # Remove old logo
-    if supplier.logo_path and os.path.exists(supplier.logo_path):
-        os.remove(supplier.logo_path)
+    if supplier.logo_path:
+        storage.delete_file(supplier.logo_path)
 
     ext = os.path.splitext(file.filename or "logo.jpg")[1] or ".jpg"
-    stored = os.path.join(logo_dir, f"logo{ext}")
-    with open(stored, "wb") as f:
-        f.write(content)
+    storage_key = f"suppliers/{supplier_id}/logo{ext}"
+    storage.save_file(storage_key, content, file.content_type)
 
-    supplier.logo_path = stored
+    supplier.logo_path = storage_key
     db.commit()
     db.refresh(supplier)
     return supplier
@@ -124,13 +120,13 @@ def get_logo(
     supplier = db.query(models.Supplier).filter(models.Supplier.id == supplier_id).first()
     if not supplier or not supplier.logo_path:
         raise HTTPException(status_code=404, detail="Sin logo")
-    expected_dir = os.path.normpath(os.path.join(UPLOAD_DIR, "suppliers", str(supplier_id)))
-    actual_path = os.path.normpath(supplier.logo_path)
-    if not actual_path.startswith(expected_dir):
+    import mimetypes
+    if not supplier.logo_path.startswith(f"suppliers/{supplier_id}/"):
         raise HTTPException(status_code=403, detail="Acceso denegado")
-    if not os.path.exists(actual_path):
+    if not storage.file_exists(supplier.logo_path):
         raise HTTPException(status_code=404, detail="Sin logo")
-    return FileResponse(actual_path)
+    return Response(content=storage.read_file(supplier.logo_path),
+                    media_type=mimetypes.guess_type(supplier.logo_path)[0] or "image/jpeg")
 
 
 @router.delete("/{supplier_id}/logo", response_model=schemas.SupplierOut)
@@ -142,8 +138,8 @@ def delete_logo(
     supplier = db.query(models.Supplier).filter(models.Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-    if supplier.logo_path and os.path.exists(supplier.logo_path):
-        os.remove(supplier.logo_path)
+    if supplier.logo_path:
+        storage.delete_file(supplier.logo_path)
     supplier.logo_path = None
     db.commit()
     db.refresh(supplier)
