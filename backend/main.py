@@ -2047,113 +2047,45 @@ def seed_database():
             db.commit()
             print("✓ Categorías de ticket creadas")
 
-        if db.query(models.User).first():
-            return
+        # Admin inicial — en su propia transacción para que exista SIEMPRE,
+        # aunque falle cualquier otro seed. Credenciales por variable de entorno.
+        if not db.query(models.User).first():
+            admin = models.User(
+                name="Administrador",
+                email=os.getenv("INITIAL_ADMIN_EMAIL", "admin@sistema.com"),
+                password_hash=get_password_hash(os.getenv("INITIAL_ADMIN_PASSWORD", "changeme")),
+                role=models.UserRole.admin,
+            )
+            db.add(admin)
+            db.commit()
+            print("✓ Admin inicial creado")
 
-        # Admin — credenciales iniciales por variable de entorno (se definen al
-        # aprovisionar cada instancia). Fallback obligatorio a cambiar en el primer login.
-        admin = models.User(
-            name="Administrador",
-            email=os.getenv("INITIAL_ADMIN_EMAIL", "admin@sistema.com"),
-            password_hash=get_password_hash(os.getenv("INITIAL_ADMIN_PASSWORD", "changeme")),
-            role=models.UserRole.admin,
-        )
-        db.add(admin)
+        # Estados de ticket (estructural)
+        if not db.query(models.TicketStatus).first():
+            for st in [
+                models.TicketStatus(name="Abierto",             color="#3B82F6", icon="circle",         order=1, is_default=True),
+                models.TicketStatus(name="Pendiente",           color="#F59E0B", icon="clock",          order=2),
+                models.TicketStatus(name="Por Cotizar",         color="#8B5CF6", icon="tag",            order=3),
+                models.TicketStatus(name="Esperando Parte",     color="#EF4444", icon="package",        order=4),
+                models.TicketStatus(name="Esperando Detalles",  color="#EAB308", icon="help-circle",    order=5),
+                models.TicketStatus(name="En Progreso",         color="#06B6D4", icon="activity",       order=6),
+                models.TicketStatus(name="Resuelto",            color="#10B981", icon="check-circle",   order=7),
+                models.TicketStatus(name="Por Coordinar",       color="#0EA5E9", icon="calendar-clock", order=8),
+                models.TicketStatus(name="Programado",          color="#F97316", icon="calendar-check", order=9),
+            ]:
+                db.add(st)
+            db.commit()
 
-        # Agente demo
-        agent = models.User(
-            name="Agente Demo",
-            email="agente@sistema.com",
-            password_hash=get_password_hash("agente123"),
-            role=models.UserRole.agent,
-        )
-        db.add(agent)
-
-        # Cliente demo
-        client = models.User(
-            name="Cliente Demo",
-            email="cliente@empresa.com",
-            password_hash=get_password_hash("cliente123"),
-            role=models.UserRole.client,
-            company="Empresa Demo S.A.",
-        )
-        db.add(client)
-        db.flush()
-
-        # Estados de ticket
-        statuses = [
-            models.TicketStatus(name="Abierto",             color="#3B82F6", icon="circle",        order=1, is_default=True),
-            models.TicketStatus(name="Pendiente",           color="#F59E0B", icon="clock",         order=2),
-            models.TicketStatus(name="Por Cotizar",         color="#8B5CF6", icon="tag",           order=3),
-            models.TicketStatus(name="Esperando Parte",     color="#EF4444", icon="package",       order=4),
-            models.TicketStatus(name="Esperando Detalles",  color="#EAB308", icon="help-circle",   order=5),
-            models.TicketStatus(name="En Progreso",         color="#06B6D4", icon="activity",      order=6),
-            models.TicketStatus(name="Resuelto",            color="#10B981", icon="check-circle",  order=7),
-            models.TicketStatus(name="Por Coordinar",       color="#0EA5E9", icon="calendar-clock", order=8),
-            models.TicketStatus(name="Programado",          color="#F97316", icon="calendar-check", order=9),
-        ]
-        for st in statuses:
-            db.add(st)
-        db.flush()
-
-        # Categorías KB
-        kb_cats = [
-            models.KBCategory(name="Guías de Usuario",    icon="book-open",  order=1),
-            models.KBCategory(name="Solución de Problemas", icon="tool",     order=2),
-            models.KBCategory(name="Preguntas Frecuentes", icon="help-circle", order=3),
-        ]
-        for cat in kb_cats:
-            db.add(cat)
-        db.flush()
-
-        # Artículo KB demo
-        article = models.KBArticle(
-            title="¿Cómo crear un ticket de soporte?",
-            content="""## Crear un Ticket de Soporte
-
-Para crear un nuevo ticket de soporte, siga estos pasos:
-
-1. **Inicie sesión** en el sistema con sus credenciales.
-2. Haga clic en **"Nuevo Ticket"** en el menú de tickets.
-3. Complete el formulario:
-   - **Título**: Descripción breve del problema.
-   - **Descripción**: Detalle el problema con la mayor información posible.
-   - **Prioridad**: Seleccione según la urgencia (Baja, Media, Alta, Crítica).
-4. Adjunte archivos si es necesario (capturas, logs, etc.).
-5. Haga clic en **"Crear Ticket"**.
-
-Recibirá actualizaciones sobre el estado de su ticket en la línea de tiempo.""",
-            category_id=kb_cats[0].id,
-            created_by_id=admin.id,
-            tags="ticket,soporte,guía",
-            is_published=True,
-        )
-        db.add(article)
-
-        # Ticket demo
-        open_status = statuses[0]
-        ticket_demo = models.Ticket(
-            title="Problema de conexión al sistema",
-            description="El usuario reporta que no puede iniciar sesión desde su computadora de oficina.",
-            priority="high",
-            status_id=open_status.id,
-            client_id=client.id,
-            assigned_to_id=agent.id,
-            category="Acceso",
-        )
-        db.add(ticket_demo)
-        db.flush()
-
-        entry = models.TicketTimeline(
-            ticket_id=ticket_demo.id,
-            user_id=admin.id,
-            content="Ticket creado",
-            entry_type="system",
-        )
-        db.add(entry)
-
-        db.commit()
-        print("✓ Base de datos inicializada con datos de demostración")
+        # Categorías de base de conocimientos (estructural)
+        if not db.query(models.KBCategory).first():
+            for cat in [
+                models.KBCategory(name="Guías de Usuario",       icon="book-open",   order=1),
+                models.KBCategory(name="Solución de Problemas",  icon="tool",        order=2),
+                models.KBCategory(name="Preguntas Frecuentes",   icon="help-circle", order=3),
+            ]:
+                db.add(cat)
+            db.commit()
+        print("✓ Base de datos inicializada")
     except Exception as e:
         db.rollback()
         print(f"Error inicializando BD: {e}")
