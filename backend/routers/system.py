@@ -1,0 +1,191 @@
+import json
+import os
+from datetime import date, timedelta
+from typing import Callable, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from database import get_db
+from auth import get_current_user, require_superadmin
+import models
+
+router = APIRouter(prefix="/api/system", tags=["system"])
+
+ALL_MODULES = [
+    "tickets", "agenda", "proyectos", "dashboard_servicios",
+    "reportes", "knowledge_base",
+    "contactos", "oportunidades", "cotizaciones", "pedidos",
+    "facturas", "gastos", "inventario", "proveedores",
+    "garantias", "licencias", "dashboard_ventas",
+    "contratos", "impresoras", "suministros",
+    "cartas",
+]
+
+DEFAULT_MODULES = {k: True for k in ALL_MODULES}
+DEFAULT_TRIAL = {"enabled": False, "start_date": None, "days": 14}
+
+
+# ── Modules ───────────────────────────────────────────────────────────────────
+
+def _get_modules(db: Session) -> dict:
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "system_modules").first()
+    if not row or not row.value:
+        return dict(DEFAULT_MODULES)
+    try:
+        stored = json.loads(row.value)
+        merged = dict(DEFAULT_MODULES)
+        merged.update({k: v for k, v in stored.items() if k in DEFAULT_MODULES})
+        return merged
+    except Exception:
+        return dict(DEFAULT_MODULES)
+
+
+# ── Trial ─────────────────────────────────────────────────────────────────────
+
+def _get_trial(db: Session) -> dict:
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "trial").first()
+    if not row or not row.value:
+        return dict(DEFAULT_TRIAL)
+    try:
+        return {**DEFAULT_TRIAL, **json.loads(row.value)}
+    except Exception:
+        return dict(DEFAULT_TRIAL)
+
+
+def _trial_days_remaining(trial: dict) -> Optional[int]:
+    """Returns days remaining (can be negative if expired). None if no trial configured."""
+    if not trial.get("enabled") or not trial.get("start_date"):
+        return None
+    try:
+        start = date.fromisoformat(trial["start_date"])
+        end = start + timedelta(days=int(trial.get("days", 14)))
+        return (end - date.today()).days
+    except Exception:
+        return None
+
+
+# ── Dependency ────────────────────────────────────────────────────────────────
+
+def require_module(module_key: str) -> Callable:
+    """Blocks access if module is disabled or trial has expired. Superadmin always bypasses."""
+    def _check(
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> models.User:
+        if current_user.role == models.UserRole.superadmin:
+            return current_user
+        trial = _get_trial(db)
+        remaining = _trial_days_remaining(trial)
+        if remaining is not None and remaining < 0:
+            raise HTTPException(status_code=402, detail="El período de prueba ha expirado")
+        modules = _get_modules(db)
+        if not modules.get(module_key, True):
+            raise HTTPException(
+                status_code=403,
+                detail=f"El módulo '{module_key}' está deshabilitado en esta instalación",
+            )
+        return current_user
+    return _check
+
+
+# ── Startup seed ──────────────────────────────────────────────────────────────
+
+def migrate_despacho_to_pedidos(db: Session):
+    """One-time migration: rename 'despacho' key to 'pedidos' in system_modules."""
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "system_modules").first()
+    if not row or not row.value:
+        return
+    try:
+        data = json.loads(row.value)
+        if "despacho" not in data:
+            return
+        data["pedidos"] = data.pop("despacho")
+        row.value = json.dumps(data)
+        db.commit()
+    except Exception:
+        pass
+
+
+def seed_default_modules(db: Session):
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "system_modules").first()
+    if not row:
+        db.add(models.AppSetting(key="system_modules", value=json.dumps(DEFAULT_MODULES)))
+        db.commit()
+
+
+# ── Module endpoints ──────────────────────────────────────────────────────────
+
+@router.get("/modules")
+def get_modules(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return _get_modules(db)
+
+
+@router.put("/modules")
+def update_modules(
+    data: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_superadmin),
+):
+    clean = {k: bool(v) for k, v in data.items() if k in ALL_MODULES}
+    merged = dict(DEFAULT_MODULES)
+    merged.update(clean)
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "system_modules").first()
+    if row:
+        row.value = json.dumps(merged)
+    else:
+        db.add(models.AppSetting(key="system_modules", value=json.dumps(merged)))
+    db.commit()
+    return merged
+
+
+# ── Trial endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/trial/status")
+def get_trial_status(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Trial countdown visible to all authenticated users. Superadmin always gets inactive."""
+    if current_user.role == models.UserRole.superadmin:
+        return {"active": False, "expired": False, "days_remaining": None}
+    trial = _get_trial(db)
+    remaining = _trial_days_remaining(trial)
+    if remaining is None:
+        return {"active": False, "expired": False, "days_remaining": None}
+    return {
+        "active": True,
+        "expired": remaining < 0,
+        "days_remaining": max(0, remaining),
+    }
+
+
+@router.get("/trial")
+def get_trial_config(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_superadmin),
+):
+    return _get_trial(db)
+
+
+@router.put("/trial")
+def update_trial_config(
+    data: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_superadmin),
+):
+    trial = {
+        "enabled": bool(data.get("enabled", False)),
+        "start_date": data.get("start_date") or None,
+        "days": max(1, int(data.get("days", 14))),
+    }
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "trial").first()
+    if row:
+        row.value = json.dumps(trial)
+    else:
+        db.add(models.AppSetting(key="trial", value=json.dumps(trial)))
+    db.commit()
+    return trial

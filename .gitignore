@@ -1,0 +1,35 @@
+# Python
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+**/*.pyc
+backend/*.db
+backend/.env
+backend/uploads/
+backend/*.log
+backend/uvicorn*.txt
+backend/uvicorn*.log
+backend/backend*.log
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/vite.log
+
+# Logs
+logs/
+*.log
+
+# Scripts locales (solo para Windows local)
+autostart.vbs
+autostart.ps1
+iniciar.ps1
+detener.ps1
+instalar.ps1
+abrir-firewall.bat
+uvicorn_out.txt
+uvicorn_err.txt
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,261 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from datetime import datetime, timezone, timedelta, time as _time
+
+PANAMA_TZ = timezone(timedelta(hours=-5))
+import os, uuid, json
+from database import get_db
+from auth import require_staff
+import models, schemas
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+MAX_FILE_SIZE = 20 * 1024 * 1024
+
+ALLOWED_TYPES = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain", "text/csv",
+    "application/zip",
+}
+
+router = APIRouter(prefix="/api/despachos", tags=["despachos"])
+
+
+
+def _sync_order_status(order: models.Order, db: Session) -> None:
+    """Derive order.status from the aggregate state of all its active dispatches."""
+    dispatches = db.query(models.Dispatch).filter(
+        models.Dispatch.order_id == order.id,
+        models.Dispatch.deleted_at.is_(None),
+    ).all()
+
+    active = [d for d in dispatches if d.status != "Cancelado"]
+
+    if not active:
+        if order.status in ("En despacho", "Entregado al cliente"):
+            order.status = "En proceso"
+        return
+
+    active_statuses = {d.status for d in active}
+    if active_statuses == {"Entregado"}:
+        order.status = "Entregado al cliente"
+    elif "Entregado" in active_statuses:
+        order.status = "En despacho"
+    else:
+        order.status = "En despacho"
+
+
+@router.get("/next-number")
+def next_dispatch_number(db: Session = Depends(get_db), _=Depends(require_staff)):
+    rows = db.query(models.Dispatch.dispatch_number).filter(models.Dispatch.dispatch_number.like("PED-%"), models.Dispatch.deleted_at.is_(None)).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    n = (max(nums) + 1) if nums else 1
+    return {"number": f"PED-{n:04d}"}
+
+
+@router.get("", response_model=List[schemas.DispatchOut])
+def list_dispatches(
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    q = db.query(models.Dispatch).filter(models.Dispatch.deleted_at.is_(None))
+    if status:
+        q = q.filter(models.Dispatch.status == status)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            models.Dispatch.title.ilike(like) |
+            models.Dispatch.client_name.ilike(like) |
+            models.Dispatch.dispatch_number.ilike(like) |
+            models.Dispatch.items.ilike(like) |
+            models.Dispatch.notes.ilike(like)
+        )
+    return q.order_by(models.Dispatch.created_at.desc()).all()
+
+
+@router.post("", response_model=schemas.DispatchOut)
+def create_dispatch(
+    data: schemas.DispatchCreate,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = models.Dispatch(**data.model_dump(exclude_unset=True))
+    # Auto-schedule on create if delivery_date provided without explicit scheduled_at
+    if d.delivery_date and not d.scheduled_at:
+        d.scheduled_at = datetime.combine(d.delivery_date, _time(8, 0), tzinfo=PANAMA_TZ)
+    if d.delivery_date and d.status == "Borrador":
+        d.status = "Pedido Programado"
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    if d.order_id:
+        order = db.query(models.Order).filter(models.Order.id == d.order_id).first()
+        if order:
+            _sync_order_status(order, db)
+            db.commit()
+    return d
+
+
+@router.get("/{dispatch_id}", response_model=schemas.DispatchOut)
+def get_dispatch(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(
+        models.Dispatch.id == dispatch_id,
+        models.Dispatch.deleted_at.is_(None),
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return d
+
+
+@router.put("/{dispatch_id}", response_model=schemas.DispatchOut)
+def update_dispatch(
+    dispatch_id: int,
+    data: schemas.DispatchUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(
+        models.Dispatch.id == dispatch_id,
+        models.Dispatch.deleted_at.is_(None),
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    old_status = d.status
+    updates = data.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(d, field, value)
+    _protected = {"Entregado", "Cancelado"}
+    if "delivery_date" in updates:
+        if updates["delivery_date"] is not None:
+            if d.status not in _protected:
+                d.status = "Pedido Programado"
+            if "scheduled_at" not in updates:
+                d.scheduled_at = datetime.combine(d.delivery_date, _time(8, 0), tzinfo=PANAMA_TZ)
+        else:
+            # Fecha borrada: revertir agendamiento
+            if d.status == "Pedido Programado":
+                d.status = "Emitido"
+            d.scheduled_at = None
+    db.commit()
+    db.refresh(d)
+    if d.order_id and d.status != old_status:
+        order = db.query(models.Order).filter(models.Order.id == d.order_id).first()
+        if order and order.status not in ("Inventariado",):
+            _sync_order_status(order, db)
+            db.commit()
+    return d
+
+
+@router.delete("/{dispatch_id}")
+def delete_dispatch(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(
+        models.Dispatch.id == dispatch_id,
+        models.Dispatch.deleted_at.is_(None),
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    order_id = d.order_id
+    d.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    if order_id:
+        order = db.query(models.Order).filter(models.Order.id == order_id).first()
+        if order and order.status not in ("Inventariado",):
+            _sync_order_status(order, db)
+            db.commit()
+    return {"ok": True}
+
+
+# ── Attachments ───────────────────────────────────────
+
+@router.post("/{dispatch_id}/attachments", response_model=schemas.DispatchAttachmentOut)
+async def upload_dispatch_attachment(
+    dispatch_id: int,
+    doc_type: str = "otro",
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Tipo de archivo no permitido")
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="El archivo excede 20MB")
+    dispatch_dir = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id))
+    os.makedirs(dispatch_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "file")[1]
+    stored_name = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(dispatch_dir, stored_name)
+    with open(file_path, "wb") as f:
+        f.write(content)
+    attachment = models.DispatchAttachment(
+        dispatch_id=dispatch_id,
+        doc_type=doc_type,
+        filename=stored_name,
+        original_name=file.filename or stored_name,
+        file_size=len(content),
+        content_type=file.content_type,
+        uploaded_by_id=current_user.id,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    return attachment
+
+
+@router.get("/{dispatch_id}/attachments/{att_id}/download")
+def download_dispatch_attachment(
+    dispatch_id: int,
+    att_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    att = db.query(models.DispatchAttachment).filter(
+        models.DispatchAttachment.id == att_id,
+        models.DispatchAttachment.dispatch_id == dispatch_id,
+    ).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Adjunto no encontrado")
+    file_path = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id), att.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
+    return FileResponse(file_path, filename=att.original_name, media_type=att.content_type)
+
+
+@router.delete("/{dispatch_id}/attachments/{att_id}")
+def delete_dispatch_attachment(
+    dispatch_id: int,
+    att_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    att = db.query(models.DispatchAttachment).filter(
+        models.DispatchAttachment.id == att_id,
+        models.DispatchAttachment.dispatch_id == dispatch_id,
+    ).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Adjunto no encontrado")
+    file_path = os.path.join(UPLOAD_DIR, "dispatches", str(dispatch_id), att.filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    db.delete(att)
+    db.commit()
+    return {"ok": True}

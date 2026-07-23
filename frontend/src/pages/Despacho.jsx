@@ -1,0 +1,1644 @@
+import { showConfirm } from '../utils/confirm'
+import { companyLogoSrc } from '../utils/branding'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
+import { openPdfWindow, sharePdfFromHtml, downloadPedidoPDF } from '../utils/pdfViewer'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useTouchSwipe } from '../utils/useTouchSwipe'
+import {
+  getDispatches, createDispatch, updateDispatch, deleteDispatch, getNextDispatchNumber,
+  getOrders, getQuotes, getContacts, getCompanies,
+  uploadDispatchAttachment, deleteDispatchAttachment, dispatchAttachmentDownloadUrl,
+  downloadWithAuth,
+  createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
+} from '../services/api'
+import {
+  Search, Plus, Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft,
+  PackageCheck, FileText, X, CheckCircle2, Clock, Send,
+  XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
+  Ticket as TicketIcon, Building2, Calendar, ExternalLink, CalendarDays, Share2,
+  Tag,
+} from 'lucide-react'
+import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
+import { toZonedTime, fromZonedTime } from 'date-fns-tz'
+import toast from 'react-hot-toast'
+import { useFormGuard } from '../context/UnsavedChangesContext'
+import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
+import { getCompanyCache } from '../context/CompanyContext'
+
+const STATUSES = ['Borrador', 'Emitido', 'Pedido Programado', 'Entregado', 'Cancelado']
+
+const STATUS_STYLE = {
+  'Borrador':            'bg-gray-100 text-gray-600',
+  'Emitido':             'bg-blue-100 text-blue-700',
+  'Pedido Programado': 'bg-cyan-100 text-cyan-700',
+  'Entregado':           'bg-green-100 text-green-700',
+  'Cancelado':           'bg-red-100 text-red-600',
+}
+
+const STATUS_ICON = {
+  'Borrador':            <Clock size={11} />,
+  'Emitido':             <Send size={11} />,
+  'Pedido Programado': <CalendarDays size={11} />,
+  'Entregado':           <CheckCircle2 size={11} />,
+  'Cancelado':           <XCircle size={11} />,
+}
+
+function fmtMoney(n) { return Number(n || 0).toFixed(2) }
+
+function StatusBadge({ status }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[status] || 'bg-gray-100 text-gray-600'}`}>
+      {STATUS_ICON[status]} {status}
+    </span>
+  )
+}
+
+// ── Print ─────────────────────────────────────────────
+function buildDispatchHTML(d, items, origin) {
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
+  const fmtDate = (iso) => fmtD(iso)
+  const co = getCompanyCache()
+  const coName    = esc(co.company_name    || 'Service Desk')
+  const coAddress = esc(co.company_address || 'Panamá, Punta Pacífica, PH Pacific Wind')
+  const coRuc     = esc(co.company_ruc     || '4-754-575 DV 85')
+
+  const rows = items.filter((it) => it.description?.trim()).map((it, i) => {
+    const line = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price) || 0)
+    return `<tr style="background:${i % 2 === 0 ? '#f8f9fb' : '#fff'}">
+      <td style="padding:6px 10px;border:1px solid #d1d5db">${i + 1}</td>
+      <td style="padding:6px 10px;border:1px solid #d1d5db">${esc(it.description)}</td>
+      <td style="padding:6px 10px;border:1px solid #d1d5db;text-align:center">${esc(String(it.qty))}</td>
+      <td style="padding:6px 10px;border:1px solid #d1d5db;text-align:right">$${fmtMoney(it.unit_price)}</td>
+      <td style="padding:6px 10px;border:1px solid #d1d5db;text-align:right;font-weight:600">$${fmtMoney(line)}</td>
+    </tr>`
+  }).join('')
+
+  return `<div style="font-family:Arial,sans-serif;font-size:11pt;color:#111;max-width:780px;margin:0 auto;padding:24px">
+    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px;gap:14px">
+      <img src="${companyLogoSrc(origin)}" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px">
+      <div style="flex:1">
+        <div style="font-size:18pt;font-weight:bold;color:#1e3a5f">${coName}</div>
+        <div style="font-size:9pt;color:#555;margin-top:2px">${coAddress}</div>
+        <div style="font-size:9pt;color:#555">RUC: ${coRuc}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">PEDIDO DE MERCANCÍA</div>
+        <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">N° ${esc(d.dispatch_number || String(d.id))}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+      ${d.client_name ? `<div style="padding:5px 8px;background:#f8f9fb;border:1px solid #e5e7eb;border-radius:5px"><div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">Cliente</div><div style="font-size:8.5pt;font-weight:600;color:#111">${esc(d.client_name)}</div></div>` : ''}
+      ${d.client_ruc ? `<div style="padding:5px 8px;background:#f8f9fb;border:1px solid #e5e7eb;border-radius:5px"><div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">RUC</div><div style="font-size:8.5pt;font-weight:600;color:#111">${esc(d.client_ruc)}</div></div>` : ''}
+      ${d.client_address ? `<div style="padding:5px 8px;background:#f8f9fb;border:1px solid #e5e7eb;border-radius:5px"><div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">Dirección</div><div style="font-size:8.5pt;font-weight:600;color:#111">${esc(d.client_address)}</div></div>` : ''}
+      <div style="padding:5px 8px;background:#f8f9fb;border:1px solid #e5e7eb;border-radius:5px"><div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">Fecha</div><div style="font-size:8.5pt;font-weight:600;color:#111">${esc(fmtDate(d.date || ''))}</div></div>
+      <div style="padding:5px 8px;background:#f8f9fb;border:1px solid #e5e7eb;border-radius:5px"><div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">Estado</div><div style="font-size:8.5pt;font-weight:600;color:#111">${esc(d.status)}</div></div>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;font-size:9.5pt;margin-bottom:16px">
+      <thead>
+        <tr style="background:#1e3a5f;color:#fff">
+          <th style="padding:7px 10px;text-align:left;font-size:8.5pt;border:1px solid #2d4d7a">#</th>
+          <th style="padding:7px 10px;text-align:left;font-size:8.5pt;border:1px solid #2d4d7a">Descripción</th>
+          <th style="padding:7px 10px;text-align:center;font-size:8.5pt;border:1px solid #2d4d7a">Cant.</th>
+          <th style="padding:7px 10px;text-align:right;font-size:8.5pt;border:1px solid #2d4d7a;white-space:nowrap">Precio unit.</th>
+          <th style="padding:7px 10px;text-align:right;font-size:8.5pt;border:1px solid #2d4d7a">Subtotal</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <div style="display:flex;justify-content:flex-end">
+      <div style="min-width:220px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;padding:6px 12px;background:#f8f9fb;font-size:9.5pt">
+          <span style="color:#555">Subtotal</span><span style="font-weight:600">$${fmtMoney(subtotal)}</span>
+        </div>
+        ${d.itbms_enabled ? `<div style="display:flex;justify-content:space-between;padding:6px 12px;background:#fffbeb;font-size:9.5pt">
+          <span style="color:#b45309">ITBMS 7%</span><span style="font-weight:600;color:#b45309">$${fmtMoney(itbmsAmt)}</span>
+        </div>` : ''}
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1e3a5f;font-size:10.5pt">
+          <span style="color:#fff;font-weight:bold">TOTAL</span><span style="color:#fff;font-weight:bold">$${fmtMoney(total)}</span>
+        </div>
+      </div>
+    </div>
+
+    ${d.notes ? `<div style="margin-top:16px;padding:10px 14px;background:#f8f9fb;border:1px solid #ddd;border-radius:6px">
+      <div style="font-size:9.5pt;font-weight:bold;color:#444;margin-bottom:4px">OBSERVACIONES:</div>
+      <div style="font-size:9pt;white-space:pre-wrap">${esc(d.notes)}</div>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:32px;page-break-inside:avoid">
+      <div style="text-align:center"><div style="border-bottom:1.5px solid #333;margin-bottom:6px;height:40px"></div><div style="font-size:9pt;font-weight:bold;color:#333">Firma del Responsable</div><div style="font-size:8.5pt;color:#666">${coName}</div></div>
+      <div style="text-align:center"><div style="border-bottom:1.5px solid #333;margin-bottom:6px;height:40px"></div><div style="font-size:9pt;font-weight:bold;color:#333">Firma del Receptor</div>${d.client_name ? `<div style="font-size:8.5pt;color:#666">${esc(d.client_name)}</div>` : ''}</div>
+    </div>
+
+    <div style="margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:7.5pt;color:#888;text-align:center">
+      ${coName} • ${coAddress} • RUC: ${coRuc} • N° ${esc(d.dispatch_number || String(d.id))}
+    </div>
+  </div>`
+}
+
+function openDispatchWindow(d, bodyHTML, autoprint) {
+  const ok = openPdfWindow(`Pedido ${d.dispatch_number || d.id}`, bodyHTML, { autoprint })
+  if (!ok) toast.error('El navegador bloqueó la ventana emergente')
+}
+
+// ── Dispatch Attachment Section ────────────────────────
+function DispatchAttachmentSection({ dispatchId, docType, label, icon, attachments, onUploaded, onDeleted }) {
+  const inputRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
+  const mine = attachments.filter((a) => a.doc_type === docType)
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setUploading(true)
+    try {
+      await uploadDispatchAttachment(dispatchId, file, docType)
+      onUploaded()
+      toast.success('Archivo adjuntado')
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error al subir archivo')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDelete = async (att) => {
+    if (!await showConfirm(`¿Eliminar "${att.original_name}"?`)) return
+    try {
+      await deleteDispatchAttachment(dispatchId, att.id)
+      onDeleted()
+    } catch {
+      toast.error('Error eliminando archivo')
+    }
+  }
+
+  const fileIcon = (ct = '') => {
+    if (ct.startsWith('image/')) return '🖼️'
+    if (ct === 'application/pdf') return '📄'
+    if (ct.includes('word')) return '📝'
+    if (ct.includes('excel') || ct.includes('spreadsheet')) return '📊'
+    return '📎'
+  }
+  const fmtSize = (b) => {
+    if (!b) return ''
+    if (b < 1024) return `${b} B`
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`
+    return `${(b / 1024 / 1024).toFixed(1)} MB`
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        {label && (
+          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+            {icon} {label}
+          </h4>
+        )}
+        <button
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 ml-auto"
+        >
+          <Upload size={12} /> {uploading ? 'Subiendo...' : 'Adjuntar'}
+        </button>
+      </div>
+      <input ref={inputRef} type="file" className="hidden" onChange={handleUpload} />
+      {mine.length === 0 ? (
+        <p className="text-xs text-gray-300 italic">Sin archivos adjuntos</p>
+      ) : (
+        <div className="space-y-1.5">
+          {mine.map((att) => (
+            <div key={att.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
+              <span className="text-base leading-none">{fileIcon(att.content_type)}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-800 truncate">{att.original_name}</p>
+                <p className="text-xs text-gray-400">{fmtSize(att.file_size)}</p>
+              </div>
+              <button onClick={() => downloadWithAuth(dispatchAttachmentDownloadUrl(dispatchId, att.id), att.original_name)}
+                className="p-1 text-gray-400 hover:text-blue-600" title="Descargar">
+                <Download size={13} />
+              </button>
+              <button onClick={() => handleDelete(att)} className="p-1 text-gray-300 hover:text-red-500">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────
+const EMPTY_FORM = {
+  title: '', dispatch_number: '', order_id: '', quote_id: '',
+  client_name: '', client_ruc: '', client_address: '',
+  date: new Date().toISOString().slice(0, 10),
+  delivery_date: '', delivery_time: { hour: '8', minute: '00', ampm: 'AM' }, delivery_duration: 60,
+  status: 'Borrador', notes: '',
+  items: [{ ...EMPTY_ITEM }],
+  itbms_enabled: false,
+}
+
+const DURATION_OPTIONS = [
+  { label: '30min', value: 30 },
+  { label: '1h',    value: 60 },
+  { label: '1h30',  value: 90 },
+  { label: '2h',    value: 120 },
+  { label: '2h30',  value: 150 },
+  { label: '3h',    value: 180 },
+  { label: '4h',    value: 240 },
+]
+
+function addMinutesToTime(time, minutes) {
+  let h = parseInt(time.hour)
+  if (time.ampm === 'PM' && h !== 12) h += 12
+  if (time.ampm === 'AM' && h === 12) h = 0
+  const total = h * 60 + parseInt(time.minute) + minutes
+  const nh = Math.floor(total / 60) % 24
+  const nm = total % 60
+  return { hour: String(nh === 0 ? 12 : nh > 12 ? nh - 12 : nh), minute: String(nm).padStart(2, '0'), ampm: nh >= 12 ? 'PM' : 'AM' }
+}
+
+function timeDiffMinutes(start, end) {
+  const toMin = (t) => { let h = parseInt(t.hour); if (t.ampm === 'PM' && h !== 12) h += 12; if (t.ampm === 'AM' && h === 12) h = 0; return h * 60 + parseInt(t.minute) }
+  return toMin(end) - toMin(start)
+}
+
+function parseScheduledAtToAmpm(scheduledAt) {
+  if (!scheduledAt) return { hour: '8', minute: '00', ampm: 'AM' }
+  const dt = new Date(scheduledAt)
+  const h24 = parseInt(dt.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Panama' }))
+  const mm  = dt.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Panama' }).slice(3, 5)
+  return { hour: String(h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24), minute: mm, ampm: h24 >= 12 ? 'PM' : 'AM' }
+}
+
+function deliveryTimeTo24h(t) {
+  let h = parseInt(t.hour)
+  if (t.ampm === 'PM' && h !== 12) h += 12
+  if (t.ampm === 'AM' && h === 12) h = 0
+  return `${String(h).padStart(2, '0')}:${t.minute}`
+}
+
+export default function Despacho() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { ref: urlRef } = useParams()
+  const [dispatches, setDispatches] = useState([])
+  const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [selected, setSelected] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const [orders, setOrders] = useState([])
+  const [quotes, setQuotes] = useState([])
+  const [quotesLoaded, setQuotesLoaded] = useState(false)
+  const [pendingSelectId, setPendingSelectId] = useState(null)
+  const [pendingFromOrder, setPendingFromOrder] = useState(null)
+
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 320)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const load = useCallback(() => {
+    getDispatches({ search: debouncedSearch || undefined, status: filterStatus || undefined })
+      .then((r) => setDispatches(r.data))
+      .catch(() => toast.error('Error cargando pedidos'))
+  }, [debouncedSearch, filterStatus])
+
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    getOrders().then((r) => setOrders(r.data)).catch(() => {})
+    getQuotes().then((r) => { setQuotes(r.data); setQuotesLoaded(true) }).catch(() => setQuotesLoaded(true))
+  }, [])
+
+  // Handle navigation from Orders page ("Ver despacho")
+  useEffect(() => {
+    const id = location.state?.selectDispatchId
+    if (!id) return
+    window.history.replaceState({}, '')
+    setPendingSelectId(id)
+  }, [location.state])
+
+  useEffect(() => {
+    if (!pendingSelectId || dispatches.length === 0) return
+    const found = dispatches.find((d) => d.id === pendingSelectId)
+    if (found) {
+      setSelected(found)
+      setShowForm(false)
+      setMobileDetailOpen(true)
+      setPendingSelectId(null)
+    }
+  }, [dispatches, pendingSelectId])
+
+  // Handle navigation from Orders page ("Convertir a despacho") — step 1: capture
+  useEffect(() => {
+    const fromOrder = location.state?.fromOrder
+    if (!fromOrder) return
+    window.history.replaceState({}, '')
+    setPendingFromOrder(fromOrder)
+  }, [location.state])
+
+  // Step 2: apply once quotes are loaded so we inherit quote sale prices
+  useEffect(() => {
+    if (!pendingFromOrder || !quotesLoaded) return
+    getNextDispatchNumber().then((r) => r.data.number).catch(() => 'PED-0001').then((num) => {
+    const linkedQuote = quotes.find((q) => q.order_id === pendingFromOrder.id)
+    const rawItems = linkedQuote?.items || pendingFromOrder.purchase_items
+    const items = parseItems(rawItems)
+    setSelected(null)
+    setForm({
+      ...EMPTY_FORM,
+      dispatch_number: num,
+      date: new Date().toISOString().slice(0, 10),
+      title: pendingFromOrder.title || '',
+      order_id: pendingFromOrder.id,
+      items: items.some((it) => it.description?.trim()) ? items : [{ ...EMPTY_ITEM }],
+      itbms_enabled: (linkedQuote ?? pendingFromOrder).itbms_enabled ?? false,
+    })
+    setShowForm(true)
+    setMobileDetailOpen(true)
+    setPendingFromOrder(null)
+    }) // end getNextDispatchNumber.then
+  }, [pendingFromOrder, quotesLoaded, quotes])
+
+  // Auto-select from URL param (e.g. /despacho/DSP-0001)
+  useEffect(() => {
+    if (!urlRef) { if (selected) { setSelected(null); setMobileDetailOpen(false) } return }
+    if (dispatches.length === 0) return
+    if (selected?.dispatch_number === urlRef || String(selected?.id) === urlRef) return
+    const found = dispatches.find((d) => d.dispatch_number === urlRef || String(d.id) === urlRef)
+    if (found) { setSelected(found); setShowForm(false); setMobileDetailOpen(true) }
+  }, [urlRef, dispatches])
+
+  const refreshSelected = useCallback((id) => {
+    getDispatches().then((r) => {
+      const fresh = r.data.find((d) => d.id === id)
+      if (fresh) setSelected(fresh)
+      setDispatches(r.data)
+    }).catch(() => {})
+  }, [])
+
+  const handleSelect = (d) => { setSelected(d); setShowForm(false); setMobileDetailOpen(true); navigate(`/pedidos/${d.dispatch_number || d.id}`) }
+
+  const handleNew = async () => {
+    setSelected(null)
+    const num = await getNextDispatchNumber().then((r) => r.data.number).catch(() => 'PED-0001')
+    setForm({ ...EMPTY_FORM, dispatch_number: num, date: new Date().toISOString().slice(0, 10) })
+    setShowForm(true)
+    setMobileDetailOpen(true)
+  }
+
+  const handleEdit = () => {
+    setForm({
+      title: selected.title || '',
+      dispatch_number: selected.dispatch_number || '',
+      order_id: selected.order_id ?? '',
+      quote_id: selected.quote_id ?? '',
+      client_name: selected.client_name || '',
+      client_ruc: selected.client_ruc || '',
+      client_address: selected.client_address || '',
+      date: selected.date || new Date().toISOString().slice(0, 10),
+      delivery_date: selected.delivery_date || '',
+      delivery_time: parseScheduledAtToAmpm(selected.scheduled_at),
+      delivery_duration: selected.duration_minutes || 60,
+      status: selected.status || 'Borrador',
+      notes: selected.notes || '',
+      items: parseItems(selected.items),
+      itbms_enabled: selected.itbms_enabled ?? false,
+    })
+    setShowForm(true)
+  }
+
+  const handleStatusChange = async (newStatus) => {
+    try {
+      const res = await updateDispatch(selected.id, { status: newStatus })
+      setSelected(res.data)
+      load()
+    } catch {
+      toast.error('Error actualizando estado')
+    }
+  }
+
+  const handleDeliveryDateChange = async (newDate, newTime, durationMinutes = 60) => {
+    const prevStatus = selected.status
+    try {
+      const payload = { delivery_date: newDate || null }
+      if (newDate && newTime) {
+        payload.scheduled_at = `${newDate}T${deliveryTimeTo24h(newTime)}:00-05:00`
+        payload.duration_minutes = durationMinutes
+      }
+      const res = await updateDispatch(selected.id, payload)
+      setSelected(res.data)
+      load()
+      if (newDate && res.data.scheduled_at) {
+        const fmt = new Date(res.data.scheduled_at).toLocaleString('es', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Panama' })
+        if (prevStatus !== 'Pedido Programado') {
+          toast.success(`Pedido agendado para el ${fmt}`, { duration: 4000 })
+        } else {
+          toast.success(`Reagendado para el ${fmt}`, { duration: 4000 })
+        }
+      }
+    } catch {
+      toast.error('Error guardando fecha de entrega')
+    }
+  }
+
+  const handleSave = async (e) => {
+    e.preventDefault()
+    if (!form.title.trim()) return toast.error('El título es requerido')
+    const validItems = form.items.filter((it) => it.description?.trim())
+    const { subtotal, itbmsAmt, total } = calcTotals(validItems, form.itbms_enabled)
+    const payload = {
+      title: form.title,
+      dispatch_number: form.dispatch_number || null,
+      order_id: form.order_id ? Number(form.order_id) : null,
+      quote_id: form.quote_id ? Number(form.quote_id) : null,
+      client_name: form.client_name || null,
+      client_ruc: form.client_ruc || null,
+      client_address: form.client_address || null,
+      date: form.date || null,
+      delivery_date: form.delivery_date || null,
+      scheduled_at: form.delivery_date
+        ? `${form.delivery_date}T${deliveryTimeTo24h(form.delivery_time)}:00-05:00`
+        : undefined,
+      duration_minutes: form.delivery_date ? (form.delivery_duration || 60) : undefined,
+      status: form.status,
+      notes: form.notes || null,
+      items: validItems.length ? JSON.stringify(validItems) : null,
+      itbms_enabled: form.itbms_enabled,
+      subtotal: `$${fmtMoney(subtotal)}`,
+      itbms_amount: form.itbms_enabled ? `$${fmtMoney(itbmsAmt)}` : null,
+      total: `$${fmtMoney(total)}`,
+    }
+    setSaving(true)
+    try {
+      if (selected && showForm) {
+        const prevStatus = selected.status
+        const res = await updateDispatch(selected.id, payload)
+        setSelected(res.data)
+        if (payload.delivery_date && res.data.status === 'Pedido Programado' && prevStatus !== 'Pedido Programado') {
+          const fmt = new Date(res.data.scheduled_at).toLocaleString('es', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Panama' })
+          toast.success(`Pedido agendado para el ${fmt}`, { duration: 4000 })
+        } else {
+          toast.success('Pedido actualizado')
+        }
+      } else {
+        const res = await createDispatch(payload)
+        setSelected(res.data)
+        toast.success('Pedido guardado en la lista')
+      }
+      setShowForm(false)
+      load()
+    } catch (err) {
+      const detail = err?.response?.data?.detail
+      let msg
+      if (Array.isArray(detail) && detail.length) {
+        msg = detail.map((d) => `${(d.loc || []).slice(1).join('.')}: ${d.msg}`).join('; ')
+      } else {
+        msg = (typeof detail === 'string' && detail) || 'Error guardando pedido'
+      }
+      console.error('Error guardando despacho:', err?.response?.data)
+      toast.error(msg, { duration: 6000 })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (d) => {
+    if (!await showConfirm(`¿Eliminar el pedido "${d.title}"?`)) return
+    try {
+      await deleteDispatch(d.id)
+      toast.success('Pedido eliminado')
+      if (selected?.id === d.id) { setSelected(null); setMobileDetailOpen(false); navigate('/pedidos', { replace: true }) }
+      load()
+    } catch {
+      toast.error('Error eliminando pedido')
+    }
+  }
+
+  const handleBack = () => { setMobileDetailOpen(false); setShowForm(false); navigate(-1) }
+  const detailSwipe = useTouchSwipe({ onSwipeRight: handleBack })
+
+  const handlePrint = (d, autoprint = true) => {
+    const items = parseItems(d.items)
+    const origin = window.location.origin
+    openDispatchWindow(d, buildDispatchHTML(d, items, origin), autoprint)
+  }
+
+  const handleDownload = async (d) => {
+    const items = parseItems(d.items)
+    const co = getCompanyCache()
+    const filename = `Pedido-${d.dispatch_number || d.id}.pdf`
+    await downloadPedidoPDF(d, items, co, companyLogoSrc(window.location.origin), filename)
+  }
+
+  const handleShare = async (d) => {
+    const items = parseItems(d.items)
+    const origin = window.location.origin
+    const filename = `Pedido-${d.dispatch_number || d.id}.pdf`
+    await sharePdfFromHtml(`Pedido ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
+  }
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* Left panel */}
+      <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-bold text-gray-900">Pedidos</h1>
+            <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
+              <Plus size={15} /> Nuevo
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <FileCheck size={12} className="text-blue-400" />
+            <p className="text-xs text-blue-500 font-medium">{dispatches.length} guardado{dispatches.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 space-y-2 border-b border-gray-100">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input className="input pl-8 w-full text-sm" placeholder="Buscar pedidos..." value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
+          </div>
+          <select className="input w-full text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{fontSize:'16px'}}>
+            <option value="">Todos los estados</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {dispatches.length > 0 && (
+          <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-1.5">
+            <FileCheck size={11} className="text-green-400" />
+            <span className="text-xs text-gray-400 font-medium">Registros guardados</span>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 divide-y divide-gray-50">
+          {dispatches.length === 0
+            ? (
+              <div className="text-center py-16 px-4 space-y-3">
+                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
+                  <FileCheck size={20} className="text-blue-200" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-400">Sin pedidos guardados</p>
+                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer pedido</p>
+                </div>
+              </div>
+            )
+            : dispatches.map((d) => (
+              <button key={d.id} onClick={() => handleSelect(d)}
+                className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${selected?.id === d.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+              >
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${STATUS_STYLE[d.status] || 'bg-gray-100'}`}>
+                  {STATUS_ICON[d.status] || <PackageCheck size={14} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-sm truncate ${selected?.id === d.id ? 'text-blue-700' : 'text-gray-900'}`}>{d.title}</p>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <StatusBadge status={d.status} />
+                    {d.total && <span className="text-xs text-gray-500 font-medium">{d.total}</span>}
+                    {d.dispatch_number && <span className="text-xs font-mono text-gray-400">{d.dispatch_number}</span>}
+                  </div>
+                </div>
+                <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
+              </button>
+            ))
+          }
+        </div>
+      </div>
+
+      {/* Right panel */}
+      <div className={`${mobileDetailOpen ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-gray-50 overflow-y-auto overscroll-contain min-h-0`} {...detailSwipe}>
+        {showForm ? (
+          <DispatchForm
+            form={form} setForm={setForm}
+            orders={orders}
+            quotes={quotes}
+            dispatches={dispatches}
+            onSave={handleSave}
+            onCancel={() => { setShowForm(false); if (!selected) setMobileDetailOpen(false) }}
+            saving={saving} isEdit={!!selected} onBack={handleBack}
+          />
+        ) : selected ? (
+          <DispatchDetail
+            dispatch={selected}
+            onEdit={handleEdit}
+            onDelete={() => handleDelete(selected)}
+            onBack={handleBack}
+            onPrint={(autoprint) => handlePrint(selected, autoprint)}
+            onDownload={() => handleDownload(selected)}
+            onShare={() => handleShare(selected)}
+            onAttachmentChange={() => refreshSelected(selected.id)}
+            onViewOrder={(orderId) => navigate('/orders', { state: { selectOrderId: orderId } })}
+            onStatusChange={handleStatusChange}
+            onDeliveryDateChange={handleDeliveryDateChange}
+            onCalendarChange={() => refreshSelected(selected.id)}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+            <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center">
+              <FileCheck size={24} className="text-blue-200" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-400">Selecciona un pedido guardado</p>
+              <p className="text-xs text-gray-300 mt-1">o usa "Nuevo" para crear uno</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Profit card ────────────────────────────────────────
+function ProfitCard({ dispatch: d, dispatchItems }) {
+  if (!d.order?.purchase_items) return null
+  const costItems = parseItems(d.order.purchase_items)
+  const { subtotal: costSubtotal } = calcTotals(costItems, false)
+  if (costSubtotal <= 0) return null
+  const { subtotal: saleSubtotal } = calcTotals(dispatchItems, false)
+  if (saleSubtotal <= 0) return null
+  const profit = saleSubtotal - costSubtotal
+  const margin = (profit / costSubtotal) * 100
+  const positive = profit >= 0
+
+  return (
+    <div className={`card border-l-4 ${positive ? 'border-l-emerald-400' : 'border-l-red-400'}`}>
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Rentabilidad — solo informativo</p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <div>
+          <p className="text-xs text-gray-400 mb-0.5">Costo pedido</p>
+          <p className="font-semibold text-gray-700">${fmtMoney(costSubtotal)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-400 mb-0.5">Venta (s/ITBMS)</p>
+          <p className="font-semibold text-gray-700">${fmtMoney(saleSubtotal)}</p>
+        </div>
+        <div>
+          <p className={`text-xs mb-0.5 ${positive ? 'text-emerald-500' : 'text-red-400'}`}>Ganancia</p>
+          <p className={`font-bold text-base ${positive ? 'text-emerald-700' : 'text-red-600'}`}>
+            {positive ? '+' : ''}${fmtMoney(profit)}
+          </p>
+        </div>
+        <div>
+          <p className={`text-xs mb-0.5 ${positive ? 'text-emerald-500' : 'text-red-400'}`}>Margen</p>
+          <p className={`font-bold text-base ${positive ? 'text-emerald-700' : 'text-red-600'}`}>
+            {positive ? '+' : ''}{margin.toFixed(1)}%
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── StatusSelector ─────────────────────────────────────
+function StatusSelector({ status, onChange, loading }) {
+  const [open, setOpen] = useState(false)
+  const ref = React.useRef()
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        disabled={loading}
+        className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium transition-opacity ${STATUS_STYLE[status] || 'bg-gray-100 text-gray-600'} ${loading ? 'opacity-50' : 'hover:opacity-75'}`}
+      >
+        {STATUS_ICON[status]} {status} <ChevronDown size={11} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-white rounded-xl border border-gray-200 shadow-lg z-30 py-1 min-w-[200px]">
+          {STATUSES.map(s => (
+            <button
+              key={s}
+              onMouseDown={(e) => { e.preventDefault(); if (s !== status) { onChange(s) } setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors ${s === status ? 'opacity-40 cursor-default' : ''}`}
+            >
+              <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[s] || 'bg-gray-100 text-gray-600'}`}>
+                {STATUS_ICON[s]} {s}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Detail ─────────────────────────────────────────────
+function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDownload, onShare, onAttachmentChange, onViewOrder, onStatusChange, onDeliveryDateChange, onCalendarChange }) {
+  const navigate = useNavigate()
+  const items = parseItems(d.items)
+  const hasItems = items.some((it) => it.description?.trim())
+  const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
+  const [changingStatus, setChangingStatus] = useState(false)
+  const [showSchedulePanel, setShowSchedulePanel] = useState(false)
+  const [localDeliveryDate, setLocalDeliveryDate] = useState(d.delivery_date || '')
+  const [localDeliveryTime, setLocalDeliveryTime] = useState(parseScheduledAtToAmpm(d.scheduled_at))
+  const [localDuration, setLocalDuration] = useState(d.duration_minutes || 60)
+  const [localEndMode, setLocalEndMode] = useState('duration')
+  const [localEndTime, setLocalEndTime] = useState(addMinutesToTime(parseScheduledAtToAmpm(d.scheduled_at), d.duration_minutes || 60))
+  const [showCalendarModal, setShowCalendarModal] = useState(false)
+  const [creatingEvent, setCreatingEvent] = useState(false)
+  const [calForm, setCalForm] = useState({
+    date: '', hour: '8', minute: '00', ampm: 'AM',
+    duration_minutes: 60, location: '', notes: '',
+    endMode: 'duration', endHour: '9', endMinute: '00', endAmpm: 'AM',
+  })
+
+  React.useEffect(() => {
+    if (d.scheduled_at) {
+      const utcDate = toUTC(d.scheduled_at)
+      const local = toZonedTime(utcDate, 'America/Panama')
+      const h24 = local.getHours()
+      const h12 = h24 % 12 || 12
+      setCalForm((f) => ({
+        ...f,
+        date: `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`,
+        hour: String(h12),
+        minute: String(local.getMinutes()).padStart(2, '0'),
+        ampm: h24 >= 12 ? 'PM' : 'AM',
+        duration_minutes: d.duration_minutes || 60,
+      }))
+    }
+  }, [d.id])
+
+  const getCalScheduledAtISO = (form = calForm) => {
+    if (!form.date) return ''
+    let h = parseInt(form.hour)
+    if (form.ampm === 'PM' && h !== 12) h += 12
+    if (form.ampm === 'AM' && h === 12) h = 0
+    return fromZonedTime(`${form.date}T${String(h).padStart(2, '0')}:${form.minute}:00`, 'America/Panama').toISOString()
+  }
+
+  const getCalEffectiveDuration = (form = calForm) => {
+    if (form.endMode === 'duration') return form.duration_minutes
+    const startISO = getCalScheduledAtISO(form)
+    if (!startISO || !form.date) return form.duration_minutes
+    let eh = parseInt(form.endHour)
+    if (form.endAmpm === 'PM' && eh !== 12) eh += 12
+    if (form.endAmpm === 'AM' && eh === 12) eh = 0
+    const endISO = fromZonedTime(`${form.date}T${String(eh).padStart(2, '0')}:${form.endMinute}:00`, 'America/Panama').toISOString()
+    const diff = Math.round((new Date(endISO) - new Date(startISO)) / 60000)
+    return diff > 0 ? diff : form.duration_minutes
+  }
+
+  const handleCalendarEvent = async () => {
+    if (creatingEvent) return
+    setCreatingEvent(true)
+    try {
+      await createDispatchCalendarEvent({
+        dispatch_id: d.id,
+        scheduled_at: getCalScheduledAtISO(),
+        duration_minutes: getCalEffectiveDuration(),
+        location: calForm.location,
+        notes: calForm.notes,
+      })
+      toast.success('Evento creado en Google Calendar')
+      setShowCalendarModal(false)
+      onCalendarChange?.()
+    } catch (err) {
+      const detail = typeof err.response?.data?.detail === 'string' ? err.response.data.detail : ''
+      if (detail.includes('Google Calendar no está configurado')) {
+        toast.error('Configura primero Google Calendar en el .env')
+      } else if (err.response?.status === 401 || detail.includes('token') || detail.includes('auth') || detail.includes('credential') || detail.includes('autenticación')) {
+        toast.error('Sesión de Google expirada. Reconecta tu cuenta en Perfil.')
+      } else if (err.response?.status === 400) {
+        try {
+          const authRes = await getCalendarAuthUrl()
+          window.open(authRes.data.auth_url, '_blank')
+          toast('Autoriza Google Calendar en la ventana que se abrió', { icon: '🔑' })
+        } catch {
+          toast.error('Debes conectar Google Calendar primero')
+        }
+      } else {
+        toast.error(detail || `Error ${err.response?.status || ''} al crear evento`)
+      }
+    } finally {
+      setCreatingEvent(false)
+    }
+  }
+
+  const handleDeleteCalendarEvent = async () => {
+    if (!await showConfirm('¿Eliminar el evento de Google Calendar para este pedido?')) return
+    try {
+      await deleteDispatchCalendarEvent(d.id)
+      toast.success('Evento eliminado')
+      onCalendarChange?.()
+    } catch {
+      toast.error('Error al eliminar evento')
+    }
+  }
+
+  // Sync localDeliveryDate when dispatch changes
+  React.useEffect(() => {
+    const t = parseScheduledAtToAmpm(d.scheduled_at)
+    const dur = d.duration_minutes || 60
+    setLocalDeliveryDate(d.delivery_date || '')
+    setLocalDeliveryTime(t)
+    setLocalDuration(dur)
+    setLocalEndTime(addMinutesToTime(t, dur))
+    setShowSchedulePanel(false)
+  }, [d.id, d.delivery_date, d.scheduled_at])
+
+  const handleStatusSelect = async (val) => {
+    setChangingStatus(true)
+    await onStatusChange(val)
+    setChangingStatus(false)
+  }
+
+  const handleScheduleConfirm = () => {
+    const dur = localEndMode === 'endtime' ? Math.max(15, timeDiffMinutes(localDeliveryTime, localEndTime)) : localDuration
+    onDeliveryDateChange(localDeliveryDate, localDeliveryTime, dur)
+  }
+
+  const handleStartTimeChange = (newTime) => {
+    setLocalDeliveryTime(newTime)
+    setLocalEndTime(addMinutesToTime(newTime, localDuration))
+  }
+
+  const handleDurationChange = (dur) => {
+    setLocalDuration(dur)
+    setLocalEndTime(addMinutesToTime(localDeliveryTime, dur))
+  }
+
+  const handleEndTimeChange = (newEnd) => {
+    setLocalEndTime(newEnd)
+    const diff = timeDiffMinutes(localDeliveryTime, newEnd)
+    if (diff > 0) setLocalDuration(diff)
+  }
+
+  return (
+    <>
+    <div className="p-4 sm:p-6 max-w-2xl space-y-4">
+      <button onClick={onBack} className="md:hidden flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800">
+        <ArrowLeft size={16} /> Volver
+      </button>
+
+      {/* Header — mismo estilo que Pedidos */}
+      <div className="space-y-2">
+        <div>
+          {d.dispatch_number && (
+            <span className="text-xs font-mono text-gray-400 bg-gray-100 px-2 py-0.5 rounded inline-block mb-1">{d.dispatch_number}</span>
+          )}
+          <h2 className="text-base font-semibold text-gray-900 leading-snug">{d.title}</h2>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            {d.order && (
+              <button onClick={() => onViewOrder(d.order.id)} className="text-xs text-blue-500 hover:text-blue-700 hover:underline flex items-center gap-1">
+                <PackageCheck size={11} /> {d.order.title}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <StatusSelector status={d.status} onChange={handleStatusSelect} loading={changingStatus} />
+          <div className="flex gap-2 flex-wrap ml-auto">
+            <button onClick={() => onPrint(true)} title="Imprimir" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 active:bg-black transition-colors">
+              <Printer size={13} /> <span className="hidden sm:inline">Imprimir</span>
+            </button>
+            <button onClick={onDownload} title="Descargar PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors">
+              <Download size={13} /> <span className="hidden sm:inline">PDF</span>
+            </button>
+            <button onClick={onShare} title="Compartir PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors">
+              <Share2 size={13} /> <span className="hidden sm:inline">Compartir</span>
+            </button>
+            <button onClick={() => setShowCalendarModal(true)} title="Agendar" className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg transition-colors ${d.calendar_event_id ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
+              <CalendarDays size={13} /> <span className="hidden sm:inline">{d.calendar_event_id ? 'Reagendar' : 'Agendar'}</span>
+            </button>
+            <button onClick={onEdit} className="btn-secondary flex items-center gap-1.5 text-sm">
+              <Pencil size={13} /> <span className="hidden sm:inline">Editar</span>
+            </button>
+            <button onClick={onDelete} className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg border border-red-200 transition-colors">
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Ticket relacionado (desde el pedido vinculado) */}
+      {d.order?.ticket && (
+        <div className="card">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+            <TicketIcon size={13} /> Ticket relacionado
+          </h3>
+          <a
+            href={`/tickets/${d.order.ticket.id}`}
+            className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors"
+          >
+            <span className="text-xs font-mono text-blue-400 flex-shrink-0">#{d.order.ticket.id}</span>
+            <span className="font-medium text-sm text-blue-800 flex-1 min-w-0 truncate">{d.order.ticket.title}</span>
+          </a>
+        </div>
+      )}
+
+{/* inventory_applied hidden — pedidos de cliente no descuentan inventario */}
+
+      {/* Client info + dates */}
+      {(d.client_name || d.client_ruc || d.client_address || d.date || true) && (
+        <div className="card grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {d.client_name && <div><p className="text-xs text-gray-400">Cliente</p><p className="text-sm font-semibold text-gray-900">{d.client_name}</p></div>}
+          {d.client_ruc && <div><p className="text-xs text-gray-400">RUC</p><p className="text-sm font-medium text-gray-800">{d.client_ruc}</p></div>}
+          {d.client_address && <div className="sm:col-span-2"><p className="text-xs text-gray-400">Dirección</p><p className="text-sm text-gray-700">{d.client_address}</p></div>}
+          {d.date && <div><p className="text-xs text-gray-400">Fecha pedido</p><p className="text-sm font-medium text-gray-800">{fmtD(d.date + 'T12:00:00')}</p></div>}
+          <div className="space-y-2">
+            <p className="text-xs text-gray-400">Fecha de entrega</p>
+
+            {/* Evento ya agendado — resumen */}
+            {d.scheduled_at && !showSchedulePanel && (
+              <div className="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3">
+                <div className="text-xs text-sky-800 leading-relaxed">
+                  <p className="font-semibold">{new Date(d.scheduled_at).toLocaleDateString('es', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'America/Panama' })}</p>
+                  <p className="text-sky-600">
+                    {new Date(d.scheduled_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Panama' })}
+                    {' — '}
+                    {new Date(new Date(d.scheduled_at).getTime() + (d.duration_minutes || 60) * 60000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Panama' })}
+                    {' · '}{DURATION_OPTIONS.find(o => o.value === (d.duration_minutes || 60))?.label || `${d.duration_minutes}min`}
+                  </p>
+                </div>
+                <button onClick={() => setShowSchedulePanel(true)}
+                  className="text-xs font-semibold text-sky-700 hover:text-sky-900 bg-white border border-sky-300 rounded-lg px-2.5 py-1.5 whitespace-nowrap hover:bg-sky-50 transition-colors flex-shrink-0">
+                  Reagendar
+                </button>
+              </div>
+            )}
+
+            {/* Sin evento — botón agendar */}
+            {!d.scheduled_at && !showSchedulePanel && (
+              <div className="flex gap-2">
+                <input type="date" value={localDeliveryDate}
+                  onChange={(e) => setLocalDeliveryDate(e.target.value)}
+                  className="input flex-1 text-sm" style={{fontSize:'16px'}} />
+                <button onClick={() => { if (localDeliveryDate) setShowSchedulePanel(true) }}
+                  disabled={!localDeliveryDate}
+                  className="px-3 py-2 rounded-xl text-sm font-semibold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
+                  Agendar
+                </button>
+              </div>
+            )}
+
+            {/* Panel de configuración de agenda */}
+            {showSchedulePanel && (
+              <div className="border border-sky-200 rounded-xl p-3 space-y-3 bg-sky-50/50">
+                {/* Fecha */}
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">Fecha</p>
+                  <input type="date" value={localDeliveryDate}
+                    onChange={(e) => setLocalDeliveryDate(e.target.value)}
+                    className="input w-full text-sm" style={{fontSize:'16px'}} />
+                </div>
+                {/* Hora inicio */}
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1">Hora de inicio</p>
+                  <div className="flex gap-1.5">
+                    <select className="input flex-1 px-1 text-sm" value={localDeliveryTime.hour}
+                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, hour: e.target.value })} style={{fontSize:'16px'}}>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
+                    </select>
+                    <select className="input flex-1 px-1 text-sm" value={localDeliveryTime.minute}
+                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, minute: e.target.value })} style={{fontSize:'16px'}}>
+                      {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <select className="input w-16 px-1 text-sm" value={localDeliveryTime.ampm}
+                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, ampm: e.target.value })} style={{fontSize:'16px'}}>
+                      <option value="AM">AM</option><option value="PM">PM</option>
+                    </select>
+                  </div>
+                </div>
+                {/* Modo duración / hora fin */}
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
+                      <button onClick={() => setLocalEndMode('duration')}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${localEndMode === 'duration' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                        Duración
+                      </button>
+                      <button onClick={() => setLocalEndMode('endtime')}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${localEndMode === 'endtime' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                        Hora fin
+                      </button>
+                    </div>
+                  </div>
+                  {localEndMode === 'duration' ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {DURATION_OPTIONS.map(o => (
+                        <button key={o.value} onClick={() => handleDurationChange(o.value)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${localDuration === o.value ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-gray-600 border-gray-200 hover:border-sky-300'}`}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex gap-1.5">
+                      <select className="input flex-1 px-1 text-sm" value={localEndTime.hour}
+                        onChange={(e) => handleEndTimeChange({ ...localEndTime, hour: e.target.value })} style={{fontSize:'16px'}}>
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
+                      </select>
+                      <select className="input flex-1 px-1 text-sm" value={localEndTime.minute}
+                        onChange={(e) => handleEndTimeChange({ ...localEndTime, minute: e.target.value })} style={{fontSize:'16px'}}>
+                        {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                      <select className="input w-16 px-1 text-sm" value={localEndTime.ampm}
+                        onChange={(e) => handleEndTimeChange({ ...localEndTime, ampm: e.target.value })} style={{fontSize:'16px'}}>
+                        <option value="AM">AM</option><option value="PM">PM</option>
+                      </select>
+                    </div>
+                  )}
+                  {/* Resumen hora fin */}
+                  <p className="text-xs text-gray-400 mt-1.5">
+                    Fin: {localEndTime.hour}:{localEndTime.minute} {localEndTime.ampm}
+                    {' · '}{DURATION_OPTIONS.find(o => o.value === localDuration)?.label || `${localDuration}min`}
+                  </p>
+                </div>
+                {/* Botones */}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={handleScheduleConfirm} disabled={!localDeliveryDate}
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40 transition-colors">
+                    {d.scheduled_at ? 'Reagendar' : 'Confirmar agenda'}
+                  </button>
+                  <button onClick={() => setShowSchedulePanel(false)}
+                    className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Items table */}
+      <div className="card space-y-3">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+          <Receipt size={13} /> Artículos
+        </h3>
+        {!hasItems ? (
+          <p className="text-sm text-gray-400 italic">Sin artículos registrados.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm items-table-mobile">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Descripción</th>
+                    <th className="text-center py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide w-16">Cant.</th>
+                    <th className="text-right py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Precio</th>
+                    <th className="text-right py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {items.filter((it) => it.description?.trim()).map((it, i) => {
+                    const line = (parseFloat(it.qty) || 0) * (parseFloat(it.unit_price) || 0)
+                    return (
+                      <tr key={i}>
+                        <td className="py-2 text-gray-800" data-label="Desc.">{it.description}</td>
+                        <td className="py-2 text-center text-gray-600" data-label="Cant.">{it.qty}</td>
+                        <td className="py-2 text-right text-gray-600" data-label="Precio">${fmtMoney(it.unit_price)}</td>
+                        <td className="py-2 text-right font-medium text-gray-800" data-label="Subtotal">${fmtMoney(line)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-gray-200 pt-2 space-y-1 text-sm">
+              <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+              {d.itbms_enabled && (
+                <div className="flex justify-between text-amber-600"><span>ITBMS 7%</span><span>${fmtMoney(itbmsAmt)}</span></div>
+              )}
+              <div className="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-1">
+                <span>Total</span><span className="text-blue-700">${fmtMoney(total)}</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <ProfitCard dispatch={d} dispatchItems={items} />
+
+      {d.notes && (
+        <div className="card">
+          <p className="text-xs text-gray-400 mb-1">Observaciones</p>
+          <p className="text-sm text-gray-700 whitespace-pre-wrap">{d.notes}</p>
+        </div>
+      )}
+
+      {/* Cotización del cliente (adjunto externo) */}
+      <div className="card">
+        <DispatchAttachmentSection
+          dispatchId={d.id}
+          docType="cotizacion"
+          label="Cotización del cliente"
+          icon={<FileText size={13} />}
+          attachments={d.attachments || []}
+          onUploaded={onAttachmentChange}
+          onDeleted={onAttachmentChange}
+        />
+      </div>
+
+      {/* Factura al cliente (adjunto externo) */}
+      <div className="card">
+        <DispatchAttachmentSection
+          dispatchId={d.id}
+          docType="factura"
+          label="Factura emitida al cliente"
+          icon={<FileCheck size={13} />}
+          attachments={d.attachments || []}
+          onUploaded={onAttachmentChange}
+          onDeleted={onAttachmentChange}
+        />
+      </div>
+
+      {/* Scheduled */}
+      {d.scheduled_at && (
+        <div className="card space-y-2">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+            <CalendarDays size={13} className="text-purple-500" /> Agendado
+          </h3>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <p className="text-sm font-medium text-gray-800">{fmtD(toUTC(d.scheduled_at).toISOString())} · {fmtTime(d.scheduled_at)}</p>
+              <p className="text-xs text-gray-500">{d.duration_minutes || 60} min</p>
+            </div>
+            <div className="flex gap-2">
+              {d.calendar_event_link && (
+                <a href={d.calendar_event_link} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1.5 rounded-lg hover:bg-blue-50 transition-colors border border-blue-200">
+                  <ExternalLink size={11} /> Ver en Calendar
+                </a>
+              )}
+              <button onClick={handleDeleteCalendarEvent}
+                className="text-xs text-red-500 hover:text-red-700 px-2 py-1.5 rounded-lg hover:bg-red-50 transition-colors border border-red-200">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+
+    {/* Calendar Modal */}
+    {showCalendarModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between p-5 border-b flex-shrink-0">
+            <h3 className="font-semibold text-gray-900">Agendar en Google Calendar</h3>
+            <button onClick={() => setShowCalendarModal(false)}><X size={18} className="text-gray-400" /></button>
+          </div>
+          <div className="overflow-y-auto flex-1 p-5 space-y-4">
+            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+              <p className="text-xs font-semibold text-purple-700 mb-1">Evento en Google Calendar:</p>
+              <p className="text-xs text-purple-600 font-mono break-all">
+                Pedido #{d.id} - {d.title}{d.client_name ? ` - ${d.client_name}` : ''}
+              </p>
+            </div>
+
+            <div>
+              <label className="label">Fecha *</label>
+              <input type="date" className="input" value={calForm.date}
+                onChange={(e) => setCalForm((f) => ({ ...f, date: e.target.value }))} style={{fontSize:'16px'}} />
+            </div>
+
+            <div>
+              <label className="label">Hora *</label>
+              <div className="flex gap-2">
+                <select className="input flex-1" value={calForm.hour}
+                  onChange={(e) => setCalForm((f) => ({ ...f, hour: e.target.value }))}>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                    <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                  ))}
+                </select>
+                <select className="input flex-1" value={calForm.minute}
+                  onChange={(e) => setCalForm((f) => ({ ...f, minute: e.target.value }))}>
+                  {['00','05','10','15','20','25','30','35','40','45','50','55'].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <select className="input w-24" value={calForm.ampm}
+                  onChange={(e) => setCalForm((f) => ({ ...f, ampm: e.target.value }))}>
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="label mb-0">Duración</label>
+                <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button type="button" onClick={() => setCalForm((f) => ({ ...f, endMode: 'duration' }))}
+                    className={`px-3 py-1 text-xs font-medium transition-colors ${calForm.endMode === 'duration' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                    Duración
+                  </button>
+                  <button type="button" onClick={() => setCalForm((f) => ({ ...f, endMode: 'endtime' }))}
+                    className={`px-3 py-1 text-xs font-medium transition-colors border-l border-gray-200 ${calForm.endMode === 'endtime' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                    Hora de fin
+                  </button>
+                </div>
+              </div>
+              {calForm.endMode === 'duration' ? (
+                <div className="flex gap-2 flex-wrap">
+                  {[30, 60, 90, 120, 180, 240].map((m) => (
+                    <button key={m} type="button" onClick={() => setCalForm((f) => ({ ...f, duration_minutes: m }))}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${parseInt(calForm.duration_minutes) === m ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}>
+                      {m < 60 ? `${m} min` : `${m / 60}h${m % 60 ? ` ${m % 60}m` : ''}`}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <select className="input flex-1" value={calForm.endHour}
+                      onChange={(e) => setCalForm((f) => ({ ...f, endHour: e.target.value }))}>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                        <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                    <select className="input flex-1" value={calForm.endMinute}
+                      onChange={(e) => setCalForm((f) => ({ ...f, endMinute: e.target.value }))}>
+                      {['00','05','10','15','20','25','30','35','40','45','50','55'].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    <select className="input w-24" value={calForm.endAmpm}
+                      onChange={(e) => setCalForm((f) => ({ ...f, endAmpm: e.target.value }))}>
+                      <option value="AM">AM</option>
+                      <option value="PM">PM</option>
+                    </select>
+                  </div>
+                  {calForm.date && (() => {
+                    const mins = getCalEffectiveDuration()
+                    return mins > 0
+                      ? <p className="text-xs text-gray-400 mt-1.5">Duración: {mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}`}</p>
+                      : <p className="text-xs text-red-400 mt-1.5">La hora de fin debe ser posterior</p>
+                  })()}
+                </>
+              )}
+            </div>
+
+            <div>
+              <label className="label">Ubicación</label>
+              <input className="input" placeholder="Ej: Dirección del cliente"
+                value={calForm.location}
+                onChange={(e) => setCalForm((f) => ({ ...f, location: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Notas</label>
+              <textarea className="input h-16 resize-none" value={calForm.notes}
+                onChange={(e) => setCalForm((f) => ({ ...f, notes: e.target.value }))} />
+            </div>
+            <p className="text-xs text-gray-400">Requiere Google Calendar conectado.</p>
+          </div>
+          <div className="flex justify-end gap-3 p-5 border-t flex-shrink-0">
+            <button onClick={() => setShowCalendarModal(false)} className="btn-secondary">Cancelar</button>
+            <button onClick={handleCalendarEvent} disabled={!calForm.date || creatingEvent}
+              className="btn-primary flex items-center gap-2 disabled:opacity-60">
+              <Calendar size={14} />
+              {creatingEvent ? 'Creando...' : (d.calendar_event_id ? 'Reagendar' : 'Crear evento')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
+  )
+}
+
+// ── Form ───────────────────────────────────────────────
+function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onSave, onCancel, saving, isEdit, onBack }) {
+  const [isDirty, setIsDirty] = useState(false)
+  const [clientSuggestions, setClientSuggestions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+  const suggestionsRef = useRef(null)
+  const debounceRef = useRef(null)
+  useFormGuard(isDirty)
+  const set = (field) => (e) => { setIsDirty(true); setForm((f) => ({ ...f, [field]: e.target.value })) }
+
+  const handleClientNameChange = (e) => {
+    const val = e.target.value
+    setIsDirty(true)
+    setForm((f) => ({ ...f, client_name: val }))
+
+    clearTimeout(debounceRef.current)
+    if (!val.trim()) { setShowSuggestions(false); return }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoadingSuggestions(true)
+      try {
+        const q = val.trim().toLowerCase()
+        const [contactsRes, companiesRes] = await Promise.allSettled([
+          getContacts(val.trim()),
+          getCompanies(val.trim()),
+        ])
+        const contactsData = contactsRes.status === 'fulfilled' ? contactsRes.value.data : []
+        const dbCompanies = companiesRes.status === 'fulfilled' ? companiesRes.value.data : []
+
+        // Enrich map from past dispatches
+        const rucMap = {}
+        dispatches.forEach((d) => {
+          if (d.client_name && d.client_ruc) {
+            rucMap[d.client_name.toLowerCase().trim()] = { ruc: d.client_ruc, address: d.client_address || '' }
+          }
+        })
+
+        // Company map: DB companies take precedence (canonical RUC/address)
+        const companyMap = new Map()
+        dbCompanies.forEach((co) => {
+          companyMap.set(co.name.toLowerCase(), { type: 'company', name: co.name, ruc: co.ruc || '', address: co.address || '' })
+        })
+        // Fill in companies derived from contacts (only if not already in DB)
+        contactsData.forEach((c) => {
+          if (!c.company || !c.company.toLowerCase().includes(q)) return
+          const key = c.company.toLowerCase()
+          if (!companyMap.has(key)) {
+            companyMap.set(key, { type: 'company', name: c.company, ruc: '', address: '' })
+          }
+          const co = companyMap.get(key)
+          if (!co.ruc && c.ruc) co.ruc = c.ruc
+          if (!co.address && c.address) co.address = c.address
+        })
+
+        // Individual contacts
+        const fromAPI = contactsData.map((c) => ({
+          type: 'contact',
+          name: c.name,
+          company: c.company || '',
+          address: c.address || '',
+          ruc: c.ruc || '',
+        }))
+        const enriched = fromAPI.map((c) => {
+          const past = rucMap[c.name.toLowerCase().trim()]
+          return past ? { ...c, ruc: c.ruc || past.ruc, address: c.address || past.address } : c
+        })
+
+        const all = [...Array.from(companyMap.values()), ...enriched]
+        setClientSuggestions(all)
+        setShowSuggestions(all.length > 0)
+      } catch {
+        setShowSuggestions(false)
+      } finally {
+        setLoadingSuggestions(false)
+      }
+    }, 250)
+  }
+
+  const selectClient = (client) => {
+    setIsDirty(true)
+    setForm((f) => ({
+      ...f,
+      client_name: client.name,
+      client_ruc: client.ruc || f.client_ruc,
+      client_address: client.address || f.client_address,
+    }))
+    setClientSuggestions([])
+    setShowSuggestions(false)
+  }
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const setItem = (i, field, val) => { setIsDirty(true); setForm((f) => ({ ...f, items: f.items.map((it, idx) => idx === i ? { ...it, [field]: val } : it) })) }
+  const addItem = () => { setIsDirty(true); setForm((f) => ({ ...f, items: [...f.items, { ...EMPTY_ITEM }] })) }
+  const removeItem = (i) => { setIsDirty(true); setForm((f) => ({ ...f, items: f.items.filter((_, idx) => idx !== i) })) }
+
+  const { subtotal, itbmsAmt, total } = calcTotals(form.items, form.itbms_enabled)
+
+  // Profit calculation vs linked order
+  const linkedOrder = form.order_id ? orders.find((o) => o.id === Number(form.order_id)) : null
+  const costItems = linkedOrder ? parseItems(linkedOrder.purchase_items) : []
+  const { subtotal: costSubtotal } = calcTotals(costItems, false)
+  const profit = subtotal - costSubtotal
+  const margin = costSubtotal > 0 ? (profit / costSubtotal) * 100 : null
+
+  return (
+    <div className="p-4 sm:p-6 max-w-2xl">
+      <button onClick={onBack} className="md:hidden flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4">
+        <ArrowLeft size={16} /> Volver
+      </button>
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-lg font-bold text-gray-900">{isEdit ? 'Editar pedido' : 'Nuevo pedido'}</h2>
+      </div>
+
+      <form id="dispatch-form" onSubmit={onSave} className="space-y-4 sticky-footer-form">
+        {/* Header info */}
+        <div className="card space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Título *</label>
+              <input className="input w-full" value={form.title} onChange={set('title')} placeholder="Ej: Entrega de equipos a cliente" required style={{fontSize:'16px'}} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">N° de pedido</label>
+              <input className="input w-full font-mono" value={form.dispatch_number} onChange={set('dispatch_number')} placeholder="PED-0001" style={{fontSize:'16px'}} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha pedido</label>
+              <input className="input w-full" type="date" value={form.date} onChange={set('date')} style={{fontSize:'16px'}} />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-600">Fecha y hora de entrega</label>
+              <input className="input w-full" type="date" value={form.delivery_date} onChange={set('delivery_date')} style={{fontSize:'16px'}} />
+              <div className="flex gap-1.5">
+                <select className="input flex-1 px-1" value={form.delivery_time.hour}
+                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, hour: e.target.value } }))} style={{fontSize:'16px'}}>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
+                </select>
+                <select className="input flex-1 px-1" value={form.delivery_time.minute}
+                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, minute: e.target.value } }))} style={{fontSize:'16px'}}>
+                  {['00','05','10','15','20','25','30','35','40','45','50','55'].map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select className="input w-16 px-1" value={form.delivery_time.ampm}
+                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, ampm: e.target.value } }))} style={{fontSize:'16px'}}>
+                  <option value="AM">AM</option><option value="PM">PM</option>
+                </select>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {DURATION_OPTIONS.map(o => (
+                  <button type="button" key={o.value} onClick={() => setForm((f) => ({ ...f, delivery_duration: o.value }))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${form.delivery_duration === o.value ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-gray-600 border-gray-200 hover:border-sky-300'}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {form.delivery_date && (
+                <p className="text-xs text-gray-400">
+                  Fin: {(() => { const e = addMinutesToTime(form.delivery_time, form.delivery_duration); return `${e.hour}:${e.minute} ${e.ampm}` })()}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
+              <select className="input w-full" value={form.status} onChange={set('status')} style={{fontSize:'16px'}}>
+                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            {form.order_id && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">Pedido vinculado:</span>
+                <span className="text-xs font-medium text-blue-600">{(() => { const o = orders.find((o) => o.id === Number(form.order_id)); return o ? (o.order_number || `#${o.id}`) : `#${form.order_id}` })()} </span>
+                <button type="button" onClick={() => { setIsDirty(true); setForm((f) => ({ ...f, order_id: '' })) }} className="text-gray-400 hover:text-red-500 ml-auto">
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Client info */}
+        <div className="card space-y-3">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Datos del cliente</h3>
+          <div ref={suggestionsRef} className="relative">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Nombre del cliente</label>
+            <input
+              className="input w-full"
+              value={form.client_name}
+              onChange={handleClientNameChange}
+              onFocus={() => {
+                if (form.client_name.trim().length >= 1 && clientSuggestions.length > 0) setShowSuggestions(true)
+              }}
+              placeholder="Nombre completo"
+              autoComplete="off"
+              style={{fontSize:'16px'}}
+            />
+            {(showSuggestions || loadingSuggestions) && (
+              <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                {loadingSuggestions ? (
+                  <p className="text-xs text-gray-400 px-4 py-3">Buscando...</p>
+                ) : clientSuggestions.map((c, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); selectClient(c) }}
+                    className={`w-full text-left px-4 py-2.5 hover:bg-blue-50 active:bg-blue-100 transition-colors border-b border-gray-50 last:border-0 ${c.type === 'company' ? 'bg-indigo-50/40' : ''}`}
+                  >
+                    {c.type === 'company' ? (
+                      <div className="flex items-center gap-2">
+                        <Building2 size={13} className="text-indigo-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-indigo-700">{c.name}</p>
+                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            {c.ruc && <span className="text-xs text-indigo-400 font-mono">RUC: {c.ruc}</span>}
+                            {c.address && <span className="text-xs text-gray-400 truncate">{c.address}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-gray-900">{c.name}</p>
+                          {c.company && <span className="text-xs text-gray-400 truncate">· {c.company}</span>}
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          {c.ruc && <span className="text-xs text-blue-400 font-mono">RUC: {c.ruc}</span>}
+                          {c.address && <span className="text-xs text-gray-400 truncate">{c.address}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">RUC</label>
+              <input className="input w-full" value={form.client_ruc} onChange={set('client_ruc')} placeholder="Ej: 8-123-456 DV 12" style={{fontSize:'16px'}} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Dirección</label>
+              <input className="input w-full" value={form.client_address} onChange={set('client_address')} placeholder="Dirección de entrega" style={{fontSize:'16px'}} />
+            </div>
+          </div>
+        </div>
+
+        {/* Items */}
+        <div className="card">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+            <Receipt size={13} /> Artículos
+          </h3>
+          <ItemEditor
+            items={form.items}
+            onChange={setItem}
+            onRemove={removeItem}
+            onAdd={addItem}
+            itbms={form.itbms_enabled}
+            onItbmsChange={v => { setIsDirty(true); setForm(f => ({ ...f, itbms_enabled: v })) }}
+          />
+
+          {/* Profit summary vs linked order */}
+          {linkedOrder && costSubtotal > 0 && (
+            <div className="mt-2 pt-3 border-t border-dashed border-gray-200">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Rentabilidad estimada</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-gray-50 rounded-lg px-3 py-2">
+                  <p className="text-gray-400 mb-0.5">Costo (pedido)</p>
+                  <p className="font-semibold text-gray-700">${fmtMoney(costSubtotal)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg px-3 py-2">
+                  <p className="text-gray-400 mb-0.5">Venta (s/ITBMS)</p>
+                  <p className="font-semibold text-gray-700">${fmtMoney(subtotal)}</p>
+                </div>
+                <div className={`rounded-lg px-3 py-2 ${profit >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                  <p className={`mb-0.5 ${profit >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>Ganancia</p>
+                  <p className={`font-bold ${profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {profit >= 0 ? '+' : ''}${fmtMoney(profit)}
+                  </p>
+                </div>
+                <div className={`rounded-lg px-3 py-2 ${profit >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                  <p className={`mb-0.5 ${profit >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>Margen</p>
+                  <p className={`font-bold ${profit >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {margin !== null ? `${profit >= 0 ? '+' : ''}${margin.toFixed(1)}%` : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        <div className="card">
+          <label className="block text-xs font-medium text-gray-600 mb-1">Observaciones</label>
+          <textarea className="input w-full h-16 resize-none" value={form.notes} onChange={set('notes')} placeholder="Notas adicionales del pedido..." style={{fontSize:'16px'}} />
+        </div>
+
+      </form>
+
+      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 sm:px-6 py-3 flex items-center gap-3 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-10 -mx-4 sm:-mx-6">
+        <span className={`text-xs flex items-center gap-1.5 ${isDirty ? 'text-amber-600' : 'text-gray-300'}`}>
+          <span className={`w-1.5 h-1.5 rounded-full inline-block ${isDirty ? 'bg-amber-500 animate-pulse' : 'bg-gray-300'}`} />
+          {isDirty ? 'Sin guardar' : 'Sin cambios'}
+        </span>
+        <div className="flex gap-2 ml-auto">
+          <button type="button" onClick={onCancel} className="btn-secondary text-sm py-1.5 px-3">Cancelar</button>
+          <button type="submit" form="dispatch-form" disabled={saving} className="btn-primary text-sm py-1.5 px-3 flex items-center gap-1.5">
+            <Save size={13} />
+            {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear pedido'}
+          </button>
+        </div>
+      </div>
+
+    </div>
+  )
+}

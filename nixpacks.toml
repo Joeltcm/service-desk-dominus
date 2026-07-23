@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "python312", "python312Packages.pip"]
+
+[phases.install]
+cmds = ["npm ci --prefix frontend", "python3 -m pip install -r backend/requirements.txt"]
+
+[phases.build]
+cmds = ["VITE_BASE_PATH=/service-desk/ npm run build --prefix frontend"]
+
+[start]
+cmd = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"

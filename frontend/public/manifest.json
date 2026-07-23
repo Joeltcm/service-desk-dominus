@@ -1,0 +1,16 @@
+{
+  "name": "Service Desk",
+  "short_name": "Service Desk",
+  "description": "Plataforma de Gestión Empresarial",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#1a3353",
+  "lang": "es",
+  "icons": [
+    { "src": "/api/settings/pwa-icon", "sizes": "192x192 512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/api/settings/pwa-icon", "sizes": "192x192 512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
