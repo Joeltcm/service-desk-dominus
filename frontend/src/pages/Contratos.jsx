@@ -5,12 +5,13 @@ import ClientAutocomplete from '../components/ClientAutocomplete'
 import {
   getContracts, createContract, updateContract, deleteContract,
   getNextContractNumber, getContacts, getCompanies,
-  createContact, createCompany,
+  createContact, createCompany, getPrinters,
 } from '../services/api'
 import {
   Plus, Search, X, Save, Pencil, Trash2, ArrowLeft,
   FileText, Calendar, Hash, UserPlus, Building2,
   Clock, AlertTriangle, CheckCircle2, Shield, Zap, Wrench,
+  Printer as PrinterIcon, ChevronRight,
 } from 'lucide-react'
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
@@ -141,6 +142,49 @@ function InfoRow({ label, value }) {
   )
 }
 
+function ContractPrinters({ contractId }) {
+  const navigate = useNavigate()
+  const [printers, setPrinters] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getPrinters({ contract_id: contractId })
+      .then(r => { if (alive) setPrinters(r.data) })
+      .catch(() => { if (alive) setPrinters([]) })
+    return () => { alive = false }
+  }, [contractId])
+
+  if (printers === null) return null
+  return (
+    <div className="card space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+          <PrinterIcon size={13} /> Impresoras del contrato
+        </p>
+        <span className="text-xs font-medium text-sky-500">{printers.length}</span>
+      </div>
+      {printers.length === 0 ? (
+        <p className="text-xs text-gray-400">Sin impresoras asignadas a este contrato.</p>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {printers.map(p => (
+            <button key={p.id} onClick={() => navigate('/impresoras/' + p.id)}
+              className="w-full flex items-center gap-2 py-2 text-left hover:bg-gray-50 -mx-1 px-1 rounded transition-colors">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-800 font-medium truncate">
+                  {p.model || 'Impresora'} <span className="font-mono text-xs text-gray-400">{p.serial_number}</span>
+                </p>
+                {p.location && <p className="text-xs text-gray-500 truncate">{p.location}</p>}
+              </div>
+              {p.status === 'Baja' && <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 flex-shrink-0">Baja</span>}
+              <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ContractDetail({ contract, onEdit, onDelete }) {
   const TypeIcon = CONTRACT_TYPE_ICON[contract.contract_type] || Shield
   return (
@@ -215,6 +259,8 @@ function ContractDetail({ contract, onEdit, onDelete }) {
           <p className="text-sm text-amber-800 whitespace-pre-wrap">{contract.notes}</p>
         </div>
       )}
+
+      <ContractPrinters contractId={contract.id} />
 
       <p className="text-xs text-gray-300 text-right">Creado: {fmtD(contract.created_at)}</p>
     </div>

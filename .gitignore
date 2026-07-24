@@ -33,3 +33,6 @@ uvicorn_err.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# graphify knowledge graph artifacts
+graphify-out/

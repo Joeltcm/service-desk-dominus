@@ -332,6 +332,13 @@ export const getPrinter = (id) => api.get(`/printers/${id}`)
 export const createPrinter = (data) => api.post('/printers', data)
 export const updatePrinter = (id, data) => api.put(`/printers/${id}`, data)
 export const deletePrinter = (id) => api.delete(`/printers/${id}`)
+export const importPrinters = (file, dryRun = true) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/printers/import?dry_run=${dryRun}`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
 export const getMeterReadings = (printerId) => api.get(`/printers/${printerId}/meter-readings`)
 export const createMeterReading = (printerId, data) => api.post(`/printers/${printerId}/meter-readings`, data)
 

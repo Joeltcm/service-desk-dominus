@@ -3,12 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
   getPrinters, createPrinter, updatePrinter, deletePrinter,
-  getMeterReadings, createMeterReading, getContracts,
+  getMeterReadings, createMeterReading, getContracts, importPrinters,
 } from '../services/api'
 import {
   Plus, Search, X, Save, Pencil, Trash2, ArrowLeft,
   Printer as PrinterIcon, ShieldCheck, ShieldAlert, Gauge, Hash,
-  Clock, FileText,
+  Clock, FileText, Upload, CheckCircle2, AlertTriangle, Loader2,
 } from 'lucide-react'
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
@@ -409,6 +409,160 @@ function PrinterForm({ initial, contracts, onSave, onCancel, saving }) {
   )
 }
 
+const ACTION_STYLE = {
+  create: { label: 'Nueva', cls: 'bg-emerald-100 text-emerald-700' },
+  update: { label: 'Actualiza', cls: 'bg-sky-100 text-sky-700' },
+  skip:   { label: 'Omitida', cls: 'bg-gray-100 text-gray-500' },
+}
+
+function ImportModal({ onClose, onDone }) {
+  const [file, setFile] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)   // resultado del dry-run (preview)
+  const [committing, setCommitting] = useState(false)
+  const swipe = useTouchSwipe({ onSwipeDown: onClose })
+
+  const runPreview = async (f) => {
+    setFile(f); setResult(null); setLoading(true)
+    try {
+      const r = await importPrinters(f, true)
+      setResult(r.data)
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'No se pudo leer el archivo')
+      setFile(null)
+    } finally { setLoading(false) }
+  }
+
+  const commit = async () => {
+    if (!file) return
+    setCommitting(true)
+    try {
+      const r = await importPrinters(file, false)
+      const c = r.data.counts
+      toast.success(`Importadas: ${c.create} nuevas, ${c.update} actualizadas`)
+      onDone()
+      onClose()
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error al importar')
+    } finally { setCommitting(false) }
+  }
+
+  const c = result?.counts
+  const willWrite = c ? c.create + c.update : 0
+  const skipped = c ? c.skip_no_contract + c.skip_no_serial + c.duplicate_in_file : 0
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+      <div {...swipe} onClick={e => e.stopPropagation()}
+        className="bg-white w-full md:max-w-2xl md:rounded-2xl rounded-t-2xl shadow-xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+          <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+            <Upload size={18} className="text-sky-500" /> Importar flota
+          </h2>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X size={18} /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto">
+          {!result && (
+            <label className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl py-10 px-4 cursor-pointer transition-colors ${loading ? 'border-sky-300 bg-sky-50' : 'border-gray-200 hover:border-sky-300 hover:bg-sky-50/50'}`}>
+              {loading ? <Loader2 size={26} className="text-sky-500 animate-spin" /> : <Upload size={26} className="text-gray-400" />}
+              <span className="text-sm font-medium text-gray-700">{loading ? 'Leyendo archivo…' : 'Selecciona el archivo CSV'}</span>
+              <span className="text-xs text-gray-400">Se empareja por N. de Contrato; garantía = inicio + 1 año</span>
+              <input type="file" accept=".csv,text/csv" className="hidden" disabled={loading}
+                onChange={e => { const f = e.target.files?.[0]; if (f) runPreview(f) }} />
+            </label>
+          )}
+
+          {result && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
+                  <p className="text-2xl font-bold text-emerald-700 tabular-nums">{c.create}</p>
+                  <p className="text-xs text-emerald-600 font-medium">Nuevas</p>
+                </div>
+                <div className="rounded-lg bg-sky-50 border border-sky-100 p-3">
+                  <p className="text-2xl font-bold text-sky-700 tabular-nums">{c.update}</p>
+                  <p className="text-xs text-sky-600 font-medium">Actualizar</p>
+                </div>
+                <div className="rounded-lg bg-amber-50 border border-amber-100 p-3">
+                  <p className="text-2xl font-bold text-amber-700 tabular-nums">{skipped}</p>
+                  <p className="text-xs text-amber-600 font-medium">Omitidas</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 border border-gray-100 p-3">
+                  <p className="text-2xl font-bold text-gray-700 tabular-nums">{c.retired}</p>
+                  <p className="text-xs text-gray-500 font-medium">De baja</p>
+                </div>
+              </div>
+
+              {(c.skip_no_contract > 0 || c.skip_no_serial > 0 || c.duplicate_in_file > 0) && (
+                <div className="text-xs bg-amber-50/60 border border-amber-100 rounded-lg p-3 text-amber-700 flex items-start gap-2">
+                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    {c.skip_no_contract > 0 && <>{c.skip_no_contract} sin contrato en el sistema. </>}
+                    {c.skip_no_serial > 0 && <>{c.skip_no_serial} sin número de serie. </>}
+                    {c.duplicate_in_file > 0 && <>{c.duplicate_in_file} series repetidas en el archivo. </>}
+                    Estas no se importarán.
+                  </span>
+                </div>
+              )}
+
+              <div className="border border-gray-100 rounded-lg overflow-hidden">
+                <div className="max-h-64 overflow-y-auto overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                      <tr>
+                        <th className="text-left font-semibold px-3 py-2">Serie</th>
+                        <th className="text-left font-semibold px-3 py-2">Modelo</th>
+                        <th className="text-left font-semibold px-3 py-2">Contrato</th>
+                        <th className="text-left font-semibold px-3 py-2 whitespace-nowrap">Garantía fin</th>
+                        <th className="text-left font-semibold px-3 py-2">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {result.preview.slice(0, 300).map((row, i) => {
+                        const a = ACTION_STYLE[row.action] || ACTION_STYLE.skip
+                        return (
+                          <tr key={i} className={row.action === 'skip' ? 'opacity-60' : ''}>
+                            <td className="px-3 py-1.5 font-mono text-gray-700">{row.serial || '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-600">{row.model || '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-600">{row.contract_number || '—'}</td>
+                            <td className="px-3 py-1.5 text-gray-600 tabular-nums">{row.warranty_end || '—'}</td>
+                            <td className="px-3 py-1.5">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium ${a.cls}`} title={row.reason || ''}>
+                                {a.label}{row.status === 'Baja' && row.action !== 'skip' ? ' · Baja' : ''}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {result.preview.length > 300 && (
+                  <p className="text-[11px] text-gray-400 px-3 py-1.5 bg-gray-50">Mostrando 300 de {result.preview.length} filas.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {result && (
+          <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-gray-100 flex-shrink-0">
+            <button onClick={() => { setResult(null); setFile(null) }} className="px-4 py-2.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+              Otro archivo
+            </button>
+            <button onClick={commit} disabled={committing || willWrite === 0}
+              className="btn-primary flex items-center gap-2 text-sm px-4 py-2.5 disabled:opacity-50">
+              {committing ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+              {committing ? 'Importando…' : `Confirmar (${willWrite})`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Impresoras() {
   const navigate = useNavigate()
   const { ref: urlRef } = useParams()
@@ -424,6 +578,7 @@ export default function Impresoras() {
   const [search, setSearch] = useState('')
   const [filterOwnership, setFilterOwnership] = useState('')
   const [filterContractType, setFilterContractType] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
 
   const load = useCallback(() => {
     getPrinters().then(r => setPrinters(r.data)).catch(() => toast.error('Error cargando impresoras'))
@@ -513,11 +668,18 @@ export default function Impresoras() {
               <h1 className="text-lg font-bold text-gray-900">Flota</h1>
               <p className="text-xs text-sky-500 font-medium mt-0.5">{filtered.length} impresora{filtered.length !== 1 ? 's' : ''}</p>
             </div>
-            <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
-              <Plus size={15} /> Nueva
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setImportOpen(true)} title="Importar flota desde CSV"
+                className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                <Upload size={15} /> <span className="hidden sm:inline">Importar</span>
+              </button>
+              <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
+                <Plus size={15} /> Nueva
+              </button>
+            </div>
           </div>
         </div>
+        {importOpen && <ImportModal onClose={() => setImportOpen(false)} onDone={load} />}
 
         <div className="px-4 py-3 space-y-2 border-b border-gray-100">
           <div className="relative">
@@ -531,9 +693,9 @@ export default function Impresoras() {
               <option value="Soporte">Soporte</option>
             </select>
             <select className="input text-sm" value={filterOwnership} onChange={e => setFilterOwnership(e.target.value)} style={{ fontSize: '16px' }}>
-              <option value="">Propiedad</option>
+              <option value="">Todas las propiedades</option>
               <option value="alquiler">Alquiler</option>
-              <option value="cliente">Del cliente</option>
+              <option value="cliente">Propiedad del cliente</option>
             </select>
           </div>
         </div>
