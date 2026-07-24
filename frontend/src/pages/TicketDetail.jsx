@@ -568,16 +568,6 @@ export default function TicketDetail() {
     }
   }
 
-  const handleConnectionTypeChange = async (value) => {
-    try {
-      await updateTicket(id, { connection_type: value })
-      fetchAll()
-      toast.success('Tipo de cargador actualizado')
-    } catch {
-      toast.error('Error actualizando tipo de cargador')
-    }
-  }
-
   const handleTagsUpdate = async (newTags) => {
     const tagStr = newTags.filter(Boolean).join(',')
     try {
@@ -1861,32 +1851,6 @@ export default function TicketDetail() {
                 </select>
               ) : (
                 <PriorityBadge priority={ticket.priority} />
-              )}
-            </div>
-
-            {/* Tipo de cargador — editable, obligatorio */}
-            <div>
-              <p className="text-xs text-gray-400 mb-1">
-                Tipo de cargador
-                {isAgentOrAdmin && !ticket.connection_type && (
-                  <span className="ml-1 text-red-500 font-semibold">* Requerido</span>
-                )}
-              </p>
-              {isAgentOrAdmin ? (
-                <select
-                  className={`input text-sm py-1.5 ${!ticket.connection_type ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                  value={ticket.connection_type || ''}
-                  onChange={(e) => handleConnectionTypeChange(e.target.value)}
-                >
-                  {!ticket.connection_type && (
-                    <option value="" disabled>— Seleccionar —</option>
-                  )}
-                  <option value="Con cargador original">Con cargador original</option>
-                  <option value="Con cargador genérico">Con cargador genérico</option>
-                  <option value="Sin cargador">Sin cargador</option>
-                </select>
-              ) : (
-                <p className="text-sm font-medium text-gray-900">{ticket.connection_type || '—'}</p>
               )}
             </div>
 

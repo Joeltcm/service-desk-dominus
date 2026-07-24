@@ -44,7 +44,6 @@ export default function TicketForm() {
     location: '',
     cc_email: '',
     scheduled_at: '',
-    connection_type: '',
   })
   const [statuses, setStatuses]     = useState([])
   const [agents, setAgents]         = useState([])
@@ -619,23 +618,6 @@ export default function TicketForm() {
                 </p>
               ) : null}
             </div>
-          </div>
-
-          <div>
-            <label className="label">Tipo de cargador *</label>
-            <select
-              name="connection_type"
-              className="input"
-              style={{fontSize:'16px'}}
-              value={form.connection_type}
-              onChange={handleChange}
-              required
-            >
-              <option value="">Seleccionar...</option>
-              <option value="Con cargador original">Con cargador original</option>
-              <option value="Con cargador genérico">Con cargador genérico</option>
-              <option value="Sin cargador">Sin cargador</option>
-            </select>
           </div>
 
           <div>

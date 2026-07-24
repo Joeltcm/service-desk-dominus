@@ -166,7 +166,6 @@ def list_tickets(
     category: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     tag: Optional[str] = Query(None),
-    connection_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -233,8 +232,6 @@ def list_tickets(
         q = q.filter(or_(*search_filters))
     if tag:
         q = q.filter(models.Ticket.tags.ilike(f"%{tag}%"))
-    if connection_type:
-        q = q.filter(models.Ticket.connection_type == connection_type)
 
     offset = (page - 1) * limit
     return q.order_by(models.Ticket.created_at.desc()).offset(offset).limit(limit).all()

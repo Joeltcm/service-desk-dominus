@@ -142,7 +142,6 @@ class TicketCreate(BaseModel):
     cc_email: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     tags: Optional[str] = Field(None, max_length=500)
-    connection_type: Optional[str] = None
     project_id: Optional[int] = None
 
 
@@ -160,7 +159,6 @@ class TicketUpdate(BaseModel):
     scheduled_at: Optional[datetime] = None
     resolution_notes: Optional[str] = Field(None, max_length=20_000)
     tags: Optional[str] = Field(None, max_length=500)
-    connection_type: Optional[str] = None
     project_id: Optional[int] = None
 
 
@@ -238,7 +236,6 @@ class TicketOut(BaseModel):
     sla_paused_at: Optional[datetime] = None
     sla_elapsed_minutes: Optional[int] = None
     tags: Optional[str] = None
-    connection_type: Optional[str] = None
     csat_rating: Optional[int] = None
     csat_comment: Optional[str] = None
     csat_submitted_at: Optional[datetime] = None
@@ -270,7 +267,6 @@ class TicketListItem(BaseModel):
     sla_paused_at: Optional[datetime] = None
     sla_elapsed_minutes: Optional[int] = None
     tags: Optional[str] = None
-    connection_type: Optional[str] = None
     project_id: Optional[int] = None
     project_weight: Optional[float] = None
     project: Optional["ProjectMini"] = None

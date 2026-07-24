@@ -37,7 +37,6 @@ export default function Tickets() {
   const filterAgent      = searchParams.get('agent')            || ''
   const filterTag        = searchParams.get('tag')              || ''
   const filterSla        = searchParams.get('sla')              || ''
-  const filterConnection = searchParams.get('connection_type')  || ''
 
   const setFilter = (key, value) => {
     setSearchParams((prev) => {
@@ -68,7 +67,6 @@ export default function Tickets() {
     const clientId   = searchParams.get('client_id')       || ''
     const agent      = searchParams.get('agent')           || ''
     const tag        = searchParams.get('tag')             || ''
-    const connection = searchParams.get('connection_type') || ''
     const apiStatusId = status === '__open__' ? undefined : (status || undefined)
     Promise.all([
       getTickets({
@@ -79,7 +77,6 @@ export default function Tickets() {
         client_id: clientId || undefined,
         assigned_to_id: agent || undefined,
         tag: tag || undefined,
-        connection_type: connection || undefined,
         page: pg,
         limit: PER_PAGE,
       }),
@@ -365,12 +362,6 @@ export default function Tickets() {
             {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
-        <select className="input w-full sm:w-auto text-sm col-span-2 sm:col-auto" value={filterConnection} onChange={(e) => setFilter('connection_type', e.target.value)}>
-          <option value="">Todos los cargadores</option>
-          <option value="Sin cargador">Sin cargador</option>
-          <option value="Con cargador genérico">Con cargador genérico</option>
-          <option value="Con cargador original">Con cargador original</option>
-        </select>
         <div className="relative col-span-2 sm:col-auto">
           <Tag size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
@@ -497,9 +488,6 @@ export default function Tickets() {
                       <div className="flex flex-wrap items-center gap-2 mt-2">
                         <StatusBadge status={t.status_rel} />
                         <PriorityBadge priority={t.priority} />
-                        {t.connection_type && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${t.connection_type === 'Sin cargador' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{t.connection_type}</span>
-                        )}
                         <SlaBadge ticket={t} />
                         {t.scheduled_at && (
                           <span className="flex items-center gap-1 text-xs text-blue-600">
@@ -536,7 +524,6 @@ export default function Tickets() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">#</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">TÍTULO</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CATEGORÍA</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CARGADOR</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">EMPRESA</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CONTACTO</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">AGENTE</th>
@@ -575,11 +562,6 @@ export default function Tickets() {
                       </td>
                       <td className="px-4 py-3">
                         {t.category ? <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 max-w-[120px] truncate">{t.category}</span> : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.connection_type
-                          ? <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${t.connection_type === 'Sin cargador' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{t.connection_type}</span>
-                          : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-sm max-w-[140px] truncate">{t.client?.company || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.client?.name}</td>
