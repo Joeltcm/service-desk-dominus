@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from database import get_db
 import models, schemas
-from auth import get_current_user, require_admin, get_password_hash
+from auth import get_current_user, require_admin, require_staff, get_password_hash
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -141,8 +141,17 @@ def list_clients(
 def create_user(
     data: schemas.UserCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
+    current_user: models.User = Depends(require_staff),
 ):
+    # Todo el staff puede crear CLIENTES (ej. al abrir un ticket, cotización o
+    # factura). Crear cuentas de staff (agent, admin, etc.) sigue siendo solo admin.
+    if current_user.role not in (models.UserRole.superadmin, models.UserRole.admin) \
+            and data.role != models.UserRole.client:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo puedes crear clientes; para crear usuarios de staff se requiere administrador",
+        )
+
     import uuid as _uuid
     email = data.email or f"sin-correo-{_uuid.uuid4().hex[:12]}@sin-correo.local"
 
