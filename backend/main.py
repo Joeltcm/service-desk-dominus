@@ -1002,9 +1002,9 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
-        # ── tickets.connection_type ──
+        # ── tickets.connection_type: campo retirado (Tipo de cargador) ──
         try:
-            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS connection_type VARCHAR(50)"))
+            conn.execute(text("ALTER TABLE tickets DROP COLUMN IF EXISTS connection_type"))
             conn.commit()
         except Exception:
             pass

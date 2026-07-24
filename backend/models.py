@@ -111,7 +111,6 @@ class Ticket(Base):
     sla_elapsed_minutes = Column(Integer, default=0)
     sla_last_resume = Column(DateTime, nullable=True)
     tags = Column(String(500), nullable=True)
-    connection_type = Column(String(50), nullable=True)  # Sin cargador | Con cargador genérico | Con cargador original
     contact_id = Column(Integer, ForeignKey("contacts.id"), nullable=True)
     csat_rating = Column(Integer, nullable=True)
     csat_comment = Column(Text, nullable=True)
