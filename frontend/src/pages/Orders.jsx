@@ -1,5 +1,3 @@
-import { showConfirm } from '../utils/confirm'
-import { companyLogoSrc } from '../utils/branding'
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { openPdfWindow, sharePdfFromHtml } from '../utils/pdfViewer'
 import { useFlipDropdown } from '../utils/useFlipDropdown'
@@ -7,7 +5,7 @@ import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useNavigate, useLocation, useSearchParams, useParams } from 'react-router-dom'
 import {
   getOrders, createOrder, updateOrder, deleteOrder, getNextOrderNumber,
-  getSuppliers, createSupplier, getTickets, getQuotes, getInvoices,
+  getSuppliers, createSupplier, getTickets, getQuotes,
   uploadOrderAttachment, deleteOrderAttachment, orderAttachmentDownloadUrl, downloadWithAuth,
   createOrderCalendarEvent, deleteOrderCalendarEvent, getCalendarAuthUrl,
   applyOrderInventory, updateExpense,
@@ -192,8 +190,8 @@ function buildOrderHTML(order, items, origin) {
   }).join('')
 
   return `<div style="font-family:Arial,sans-serif;font-size:11pt;color:#111;max-width:780px;margin:0 auto;padding:24px">
-    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px;gap:14px">
-      <img src="${companyLogoSrc(origin)}" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px">
+    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px">
+      <img src="${origin}/logo.png" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px;margin-right:14px">
       <div style="flex:1">
         <div style="font-size:18pt;font-weight:bold;color:#1e3a5f">${coName}</div>
         <div style="font-size:9pt;color:#555;margin-top:2px">${coAddress}</div>
@@ -362,7 +360,7 @@ function AttachmentSection({ orderId, docType, label, icon, attachments, onUploa
   }
 
   const handleDelete = async (att) => {
-    if (!await showConfirm(`¿Eliminar "${att.original_name}"?`)) return
+    if (!confirm(`¿Eliminar "${att.original_name}"?`)) return
     try {
       await deleteOrderAttachment(orderId, att.id)
       onDeleted()
@@ -534,7 +532,7 @@ function QuoteSearch({ quotes, value, onChange }) {
 }
 
 const EMPTY_FORM = {
-  title: '', order_number: '', status: 'Pendiente', ticket_id: null, quote_id: null, invoice_id: null, notes: '',
+  title: '', order_number: '', status: 'Pendiente', ticket_id: null, quote_id: null, notes: '',
   supplier1_id: '', supplier2_id: '', supplier3_id: '', expected_date: '',
   items: [{ ...EMPTY_ITEM }],
   itbms_enabled: false,
@@ -557,7 +555,6 @@ export default function Orders() {
   const [suppliers, setSuppliers] = useState([])
   const [tickets, setTickets] = useState([])
   const [quotes, setQuotes] = useState([])
-  const [invoices, setInvoices] = useState([])
   const [pendingSelectId, setPendingSelectId] = useState(null)
 
   useEffect(() => {
@@ -577,7 +574,6 @@ export default function Orders() {
     getSuppliers().then((r) => setSuppliers(r.data)).catch(() => {})
     getTickets().then((r) => setTickets(r.data)).catch(() => {})
     getQuotes().then((r) => setQuotes(r.data)).catch(() => {})
-    getInvoices().then((r) => setInvoices(r.data)).catch(() => {})
   }, [])
 
   // Handle navigation from Despacho page ("Ver pedido")
@@ -641,7 +637,6 @@ export default function Orders() {
       status: selected.status || 'Pendiente',
       ticket_id: selected.ticket_id ?? null,
       quote_id: selected.quote_id ?? null,
-      invoice_id: selected.invoice_id ?? null,
       notes: selected.notes || '',
       supplier1_id: selected.supplier1_id ?? '',
       supplier2_id: selected.supplier2_id ?? '',
@@ -666,7 +661,6 @@ export default function Orders() {
       status: form.status,
       ticket_id: form.ticket_id ? Number(form.ticket_id) : null,
       quote_id: form.quote_id ? Number(form.quote_id) : null,
-      invoice_id: form.invoice_id ? Number(form.invoice_id) : null,
       supplier1_id: form.supplier1_id ? Number(form.supplier1_id) : null,
       supplier2_id: form.supplier2_id ? Number(form.supplier2_id) : null,
       supplier3_id: form.supplier3_id ? Number(form.supplier3_id) : null,
@@ -698,7 +692,7 @@ export default function Orders() {
   }
 
   const handleDelete = async (o) => {
-    if (!await showConfirm(`¿Eliminar el pedido "${o.title}"?`)) return
+    if (!confirm(`¿Eliminar el pedido "${o.title}"?`)) return
     try {
       await deleteOrder(o.id)
       toast.success('Pedido eliminado')
@@ -860,7 +854,7 @@ export default function Orders() {
         {showForm ? (
           <OrderForm
             form={form} setForm={setForm}
-            suppliers={suppliers} tickets={tickets} quotes={quotes} invoices={invoices}
+            suppliers={suppliers} tickets={tickets} quotes={quotes}
             onSave={handleSave}
             onCancel={() => { setShowForm(false); if (!selected) setMobileDetailOpen(false) }}
             saving={saving} isEdit={!!selected} onBack={handleBack}
@@ -981,7 +975,7 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
   }
 
   const handleApplyInventory = async () => {
-    if (!await showConfirm('¿Aplicar los artículos de este pedido al inventario? El pedido pasará a estado "Inventariado".')) return
+    if (!window.confirm('¿Aplicar los artículos de este pedido al inventario? El pedido pasará a estado "Inventariado".')) return
     setApplyingInv(true)
     try {
       await applyOrderInventory(order.id)
@@ -1117,7 +1111,7 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
   }
 
   const handleDeleteCalendarEvent = async () => {
-    if (!await showConfirm('¿Eliminar el evento de Google Calendar para este pedido?')) return
+    if (!window.confirm('¿Eliminar el evento de Google Calendar para este pedido?')) return
     try {
       await deleteOrderCalendarEvent(order.id)
       toast.success('Evento eliminado')
@@ -1222,26 +1216,6 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
             {order.quote.total && <span className="text-sm font-bold text-violet-700 flex-shrink-0">${order.quote.total}</span>}
             <span className="text-xs px-2 py-0.5 rounded-full bg-violet-200 text-violet-700 font-medium flex-shrink-0">{order.quote.status}</span>
           </div>
-        </div>
-      )}
-
-      {/* Factura vinculada */}
-      {order.invoice && (
-        <div className="card">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <Receipt size={13} /> Factura vinculada
-          </h3>
-          <a href={`/facturas`} className="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors">
-            {order.invoice.invoice_number && (
-              <span className="text-xs font-mono text-emerald-500 flex-shrink-0">#{order.invoice.invoice_number}</span>
-            )}
-            <div className="flex-1 min-w-0">
-              {order.invoice.client_name && <p className="text-sm font-medium text-emerald-900 truncate">{order.invoice.client_name}</p>}
-              {order.invoice.date && <p className="text-xs text-emerald-600 mt-0.5">{order.invoice.date}</p>}
-            </div>
-            {order.invoice.total && <span className="text-sm font-bold text-emerald-700 flex-shrink-0">{order.invoice.total}</span>}
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-700 font-medium flex-shrink-0">{order.invoice.status}</span>
-          </a>
         </div>
       )}
 
@@ -1750,7 +1724,7 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
 }
 
 // ── Form ────────────────────────────────────────────────
-function OrderForm({ form, setForm, suppliers, tickets, quotes, invoices, onSave, onCancel, saving, isEdit, onBack, onSupplierCreated }) {
+function OrderForm({ form, setForm, suppliers, tickets, quotes, onSave, onCancel, saving, isEdit, onBack, onSupplierCreated }) {
   const [isDirty, setIsDirty] = useState(false)
   useFormGuard(isDirty)
   const set = (field) => (e) => { setIsDirty(true); setForm((f) => ({ ...f, [field]: e.target.value })) }
@@ -1889,26 +1863,6 @@ function OrderForm({ form, setForm, suppliers, tickets, quotes, invoices, onSave
             <ClipboardList size={13} /> Cotización relacionada (opcional)
           </h3>
           <QuoteSearch quotes={quotes} value={form.quote_id} onChange={(id) => { setIsDirty(true); setForm((f) => ({ ...f, quote_id: id })) }} />
-        </div>
-
-        {/* Factura vinculada */}
-        <div className="card space-y-2">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
-            <Receipt size={13} /> Factura vinculada (opcional)
-          </h3>
-          <p className="text-[11px] text-gray-400">Vincula este pedido a una factura para que su costo aparezca en el panel de rentabilidad de dicha factura.</p>
-          <select
-            className="input w-full text-sm"
-            value={form.invoice_id ?? ''}
-            onChange={e => { setIsDirty(true); setForm(f => ({ ...f, invoice_id: e.target.value ? Number(e.target.value) : null })) }}
-          >
-            <option value="">— Sin vincular —</option>
-            {invoices.map(inv => (
-              <option key={inv.id} value={inv.id}>
-                {inv.invoice_number ? `#${inv.invoice_number}` : `#${inv.id}`}{inv.client_name ? ` · ${inv.client_name}` : ''}{inv.total ? ` · ${inv.total}` : ''}
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* Ticket */}

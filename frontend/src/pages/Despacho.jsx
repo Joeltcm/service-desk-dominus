@@ -1,7 +1,5 @@
-import { showConfirm } from '../utils/confirm'
-import { companyLogoSrc } from '../utils/branding'
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { openPdfWindow, sharePdfFromHtml, downloadPedidoPDF } from '../utils/pdfViewer'
+import { openPdfWindow, sharePdfFromHtml } from '../utils/pdfViewer'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
@@ -10,12 +8,13 @@ import {
   uploadDispatchAttachment, deleteDispatchAttachment, dispatchAttachmentDownloadUrl,
   downloadWithAuth,
   createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
+  createInvoiceFromDispatch,
 } from '../services/api'
 import {
   Search, Plus, Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft,
   PackageCheck, FileText, X, CheckCircle2, Clock, Send,
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
-  Ticket as TicketIcon, Building2, Calendar, ExternalLink, CalendarDays, Share2,
+  Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
   Tag,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
@@ -25,12 +24,12 @@ import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
 import { getCompanyCache } from '../context/CompanyContext'
 
-const STATUSES = ['Borrador', 'Emitido', 'Pedido Programado', 'Entregado', 'Cancelado']
+const STATUSES = ['Borrador', 'Emitido', 'Despacho Programado', 'Entregado', 'Cancelado']
 
 const STATUS_STYLE = {
   'Borrador':            'bg-gray-100 text-gray-600',
   'Emitido':             'bg-blue-100 text-blue-700',
-  'Pedido Programado': 'bg-cyan-100 text-cyan-700',
+  'Despacho Programado': 'bg-cyan-100 text-cyan-700',
   'Entregado':           'bg-green-100 text-green-700',
   'Cancelado':           'bg-red-100 text-red-600',
 }
@@ -38,7 +37,7 @@ const STATUS_STYLE = {
 const STATUS_ICON = {
   'Borrador':            <Clock size={11} />,
   'Emitido':             <Send size={11} />,
-  'Pedido Programado': <CalendarDays size={11} />,
+  'Despacho Programado': <CalendarDays size={11} />,
   'Entregado':           <CheckCircle2 size={11} />,
   'Cancelado':           <XCircle size={11} />,
 }
@@ -75,15 +74,15 @@ function buildDispatchHTML(d, items, origin) {
   }).join('')
 
   return `<div style="font-family:Arial,sans-serif;font-size:11pt;color:#111;max-width:780px;margin:0 auto;padding:24px">
-    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px;gap:14px">
-      <img src="${companyLogoSrc(origin)}" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px">
+    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px">
+      <img src="${origin}/logo.png" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px;margin-right:14px">
       <div style="flex:1">
         <div style="font-size:18pt;font-weight:bold;color:#1e3a5f">${coName}</div>
         <div style="font-size:9pt;color:#555;margin-top:2px">${coAddress}</div>
         <div style="font-size:9pt;color:#555">RUC: ${coRuc}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">PEDIDO DE MERCANCÍA</div>
+        <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">DESPACHO DE MERCANCÍA</div>
         <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">N° ${esc(d.dispatch_number || String(d.id))}</div>
       </div>
     </div>
@@ -140,7 +139,7 @@ function buildDispatchHTML(d, items, origin) {
 }
 
 function openDispatchWindow(d, bodyHTML, autoprint) {
-  const ok = openPdfWindow(`Pedido ${d.dispatch_number || d.id}`, bodyHTML, { autoprint })
+  const ok = openPdfWindow(`Despacho ${d.dispatch_number || d.id}`, bodyHTML, { autoprint })
   if (!ok) toast.error('El navegador bloqueó la ventana emergente')
 }
 
@@ -167,7 +166,7 @@ function DispatchAttachmentSection({ dispatchId, docType, label, icon, attachmen
   }
 
   const handleDelete = async (att) => {
-    if (!await showConfirm(`¿Eliminar "${att.original_name}"?`)) return
+    if (!confirm(`¿Eliminar "${att.original_name}"?`)) return
     try {
       await deleteDispatchAttachment(dispatchId, att.id)
       onDeleted()
@@ -238,50 +237,10 @@ const EMPTY_FORM = {
   title: '', dispatch_number: '', order_id: '', quote_id: '',
   client_name: '', client_ruc: '', client_address: '',
   date: new Date().toISOString().slice(0, 10),
-  delivery_date: '', delivery_time: { hour: '8', minute: '00', ampm: 'AM' }, delivery_duration: 60,
+  delivery_date: '',
   status: 'Borrador', notes: '',
   items: [{ ...EMPTY_ITEM }],
   itbms_enabled: false,
-}
-
-const DURATION_OPTIONS = [
-  { label: '30min', value: 30 },
-  { label: '1h',    value: 60 },
-  { label: '1h30',  value: 90 },
-  { label: '2h',    value: 120 },
-  { label: '2h30',  value: 150 },
-  { label: '3h',    value: 180 },
-  { label: '4h',    value: 240 },
-]
-
-function addMinutesToTime(time, minutes) {
-  let h = parseInt(time.hour)
-  if (time.ampm === 'PM' && h !== 12) h += 12
-  if (time.ampm === 'AM' && h === 12) h = 0
-  const total = h * 60 + parseInt(time.minute) + minutes
-  const nh = Math.floor(total / 60) % 24
-  const nm = total % 60
-  return { hour: String(nh === 0 ? 12 : nh > 12 ? nh - 12 : nh), minute: String(nm).padStart(2, '0'), ampm: nh >= 12 ? 'PM' : 'AM' }
-}
-
-function timeDiffMinutes(start, end) {
-  const toMin = (t) => { let h = parseInt(t.hour); if (t.ampm === 'PM' && h !== 12) h += 12; if (t.ampm === 'AM' && h === 12) h = 0; return h * 60 + parseInt(t.minute) }
-  return toMin(end) - toMin(start)
-}
-
-function parseScheduledAtToAmpm(scheduledAt) {
-  if (!scheduledAt) return { hour: '8', minute: '00', ampm: 'AM' }
-  const dt = new Date(scheduledAt)
-  const h24 = parseInt(dt.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Panama' }))
-  const mm  = dt.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Panama' }).slice(3, 5)
-  return { hour: String(h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24), minute: mm, ampm: h24 >= 12 ? 'PM' : 'AM' }
-}
-
-function deliveryTimeTo24h(t) {
-  let h = parseInt(t.hour)
-  if (t.ampm === 'PM' && h !== 12) h += 12
-  if (t.ampm === 'AM' && h === 12) h = 0
-  return `${String(h).padStart(2, '0')}:${t.minute}`
 }
 
 export default function Despacho() {
@@ -311,7 +270,7 @@ export default function Despacho() {
   const load = useCallback(() => {
     getDispatches({ search: debouncedSearch || undefined, status: filterStatus || undefined })
       .then((r) => setDispatches(r.data))
-      .catch(() => toast.error('Error cargando pedidos'))
+      .catch(() => toast.error('Error cargando despachos'))
   }, [debouncedSearch, filterStatus])
 
   useEffect(() => { load() }, [load])
@@ -350,7 +309,7 @@ export default function Despacho() {
   // Step 2: apply once quotes are loaded so we inherit quote sale prices
   useEffect(() => {
     if (!pendingFromOrder || !quotesLoaded) return
-    getNextDispatchNumber().then((r) => r.data.number).catch(() => 'PED-0001').then((num) => {
+    getNextDispatchNumber().then((r) => r.data.number).catch(() => 'DSP-0001').then((num) => {
     const linkedQuote = quotes.find((q) => q.order_id === pendingFromOrder.id)
     const rawItems = linkedQuote?.items || pendingFromOrder.purchase_items
     const items = parseItems(rawItems)
@@ -387,11 +346,11 @@ export default function Despacho() {
     }).catch(() => {})
   }, [])
 
-  const handleSelect = (d) => { setSelected(d); setShowForm(false); setMobileDetailOpen(true); navigate(`/pedidos/${d.dispatch_number || d.id}`) }
+  const handleSelect = (d) => { setSelected(d); setShowForm(false); setMobileDetailOpen(true); navigate(`/despacho/${d.dispatch_number || d.id}`) }
 
   const handleNew = async () => {
     setSelected(null)
-    const num = await getNextDispatchNumber().then((r) => r.data.number).catch(() => 'PED-0001')
+    const num = await getNextDispatchNumber().then((r) => r.data.number).catch(() => 'DSP-0001')
     setForm({ ...EMPTY_FORM, dispatch_number: num, date: new Date().toISOString().slice(0, 10) })
     setShowForm(true)
     setMobileDetailOpen(true)
@@ -408,8 +367,6 @@ export default function Despacho() {
       client_address: selected.client_address || '',
       date: selected.date || new Date().toISOString().slice(0, 10),
       delivery_date: selected.delivery_date || '',
-      delivery_time: parseScheduledAtToAmpm(selected.scheduled_at),
-      delivery_duration: selected.duration_minutes || 60,
       status: selected.status || 'Borrador',
       notes: selected.notes || '',
       items: parseItems(selected.items),
@@ -428,25 +385,10 @@ export default function Despacho() {
     }
   }
 
-  const handleDeliveryDateChange = async (newDate, newTime, durationMinutes = 60) => {
-    const prevStatus = selected.status
+  const handleDeliveryDateChange = async (newDate) => {
     try {
-      const payload = { delivery_date: newDate || null }
-      if (newDate && newTime) {
-        payload.scheduled_at = `${newDate}T${deliveryTimeTo24h(newTime)}:00-05:00`
-        payload.duration_minutes = durationMinutes
-      }
-      const res = await updateDispatch(selected.id, payload)
+      const res = await updateDispatch(selected.id, { delivery_date: newDate || null })
       setSelected(res.data)
-      load()
-      if (newDate && res.data.scheduled_at) {
-        const fmt = new Date(res.data.scheduled_at).toLocaleString('es', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Panama' })
-        if (prevStatus !== 'Pedido Programado') {
-          toast.success(`Pedido agendado para el ${fmt}`, { duration: 4000 })
-        } else {
-          toast.success(`Reagendado para el ${fmt}`, { duration: 4000 })
-        }
-      }
     } catch {
       toast.error('Error guardando fecha de entrega')
     }
@@ -455,6 +397,7 @@ export default function Despacho() {
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.title.trim()) return toast.error('El título es requerido')
+    if (form.status !== 'Borrador' && form.status !== 'Cancelado' && !form.quote_id) return toast.error('Se requiere una cotización vinculada para cambiar el estado del despacho')
     const validItems = form.items.filter((it) => it.description?.trim())
     const { subtotal, itbmsAmt, total } = calcTotals(validItems, form.itbms_enabled)
     const payload = {
@@ -467,10 +410,6 @@ export default function Despacho() {
       client_address: form.client_address || null,
       date: form.date || null,
       delivery_date: form.delivery_date || null,
-      scheduled_at: form.delivery_date
-        ? `${form.delivery_date}T${deliveryTimeTo24h(form.delivery_time)}:00-05:00`
-        : undefined,
-      duration_minutes: form.delivery_date ? (form.delivery_duration || 60) : undefined,
       status: form.status,
       notes: form.notes || null,
       items: validItems.length ? JSON.stringify(validItems) : null,
@@ -482,19 +421,13 @@ export default function Despacho() {
     setSaving(true)
     try {
       if (selected && showForm) {
-        const prevStatus = selected.status
         const res = await updateDispatch(selected.id, payload)
         setSelected(res.data)
-        if (payload.delivery_date && res.data.status === 'Pedido Programado' && prevStatus !== 'Pedido Programado') {
-          const fmt = new Date(res.data.scheduled_at).toLocaleString('es', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'America/Panama' })
-          toast.success(`Pedido agendado para el ${fmt}`, { duration: 4000 })
-        } else {
-          toast.success('Pedido actualizado')
-        }
+        toast.success('Despacho actualizado')
       } else {
         const res = await createDispatch(payload)
         setSelected(res.data)
-        toast.success('Pedido guardado en la lista')
+        toast.success('Despacho guardado en la lista')
       }
       setShowForm(false)
       load()
@@ -504,7 +437,7 @@ export default function Despacho() {
       if (Array.isArray(detail) && detail.length) {
         msg = detail.map((d) => `${(d.loc || []).slice(1).join('.')}: ${d.msg}`).join('; ')
       } else {
-        msg = (typeof detail === 'string' && detail) || 'Error guardando pedido'
+        msg = (typeof detail === 'string' && detail) || 'Error guardando despacho'
       }
       console.error('Error guardando despacho:', err?.response?.data)
       toast.error(msg, { duration: 6000 })
@@ -514,14 +447,14 @@ export default function Despacho() {
   }
 
   const handleDelete = async (d) => {
-    if (!await showConfirm(`¿Eliminar el pedido "${d.title}"?`)) return
+    if (!confirm(`¿Eliminar el despacho "${d.title}"?`)) return
     try {
       await deleteDispatch(d.id)
-      toast.success('Pedido eliminado')
+      toast.success('Despacho eliminado')
       if (selected?.id === d.id) { setSelected(null); setMobileDetailOpen(false); navigate('/pedidos', { replace: true }) }
       load()
     } catch {
-      toast.error('Error eliminando pedido')
+      toast.error('Error eliminando despacho')
     }
   }
 
@@ -534,18 +467,11 @@ export default function Despacho() {
     openDispatchWindow(d, buildDispatchHTML(d, items, origin), autoprint)
   }
 
-  const handleDownload = async (d) => {
-    const items = parseItems(d.items)
-    const co = getCompanyCache()
-    const filename = `Pedido-${d.dispatch_number || d.id}.pdf`
-    await downloadPedidoPDF(d, items, co, companyLogoSrc(window.location.origin), filename)
-  }
-
   const handleShare = async (d) => {
     const items = parseItems(d.items)
     const origin = window.location.origin
-    const filename = `Pedido-${d.dispatch_number || d.id}.pdf`
-    await sharePdfFromHtml(`Pedido ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
+    const filename = `Despacho-${d.dispatch_number || d.id}.pdf`
+    await sharePdfFromHtml(`Despacho ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
   }
 
   return (
@@ -554,7 +480,7 @@ export default function Despacho() {
       <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold text-gray-900">Pedidos</h1>
+            <h1 className="text-lg font-bold text-gray-900">Despachos</h1>
             <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
               <Plus size={15} /> Nuevo
             </button>
@@ -568,7 +494,7 @@ export default function Despacho() {
         <div className="px-4 py-3 space-y-2 border-b border-gray-100">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input pl-8 w-full text-sm" placeholder="Buscar pedidos..." value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
+            <input className="input pl-8 w-full text-sm" placeholder="Buscar despachos..." value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
           </div>
           <select className="input w-full text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{fontSize:'16px'}}>
             <option value="">Todos los estados</option>
@@ -591,8 +517,8 @@ export default function Despacho() {
                   <FileCheck size={20} className="text-blue-200" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-400">Sin pedidos guardados</p>
-                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer pedido</p>
+                  <p className="text-sm font-medium text-gray-400">Sin despachos guardados</p>
+                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer despacho</p>
                 </div>
               </div>
             )
@@ -637,7 +563,6 @@ export default function Despacho() {
             onDelete={() => handleDelete(selected)}
             onBack={handleBack}
             onPrint={(autoprint) => handlePrint(selected, autoprint)}
-            onDownload={() => handleDownload(selected)}
             onShare={() => handleShare(selected)}
             onAttachmentChange={() => refreshSelected(selected.id)}
             onViewOrder={(orderId) => navigate('/orders', { state: { selectOrderId: orderId } })}
@@ -651,7 +576,7 @@ export default function Despacho() {
               <FileCheck size={24} className="text-blue-200" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-400">Selecciona un pedido guardado</p>
+              <p className="text-sm font-medium text-gray-400">Selecciona un despacho guardado</p>
               <p className="text-xs text-gray-300 mt-1">o usa "Nuevo" para crear uno</p>
             </div>
           </div>
@@ -740,18 +665,15 @@ function StatusSelector({ status, onChange, loading }) {
 }
 
 // ── Detail ─────────────────────────────────────────────
-function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDownload, onShare, onAttachmentChange, onViewOrder, onStatusChange, onDeliveryDateChange, onCalendarChange }) {
+function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onDeliveryDateChange, onCalendarChange }) {
   const navigate = useNavigate()
   const items = parseItems(d.items)
   const hasItems = items.some((it) => it.description?.trim())
   const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
   const [changingStatus, setChangingStatus] = useState(false)
-  const [showSchedulePanel, setShowSchedulePanel] = useState(false)
   const [localDeliveryDate, setLocalDeliveryDate] = useState(d.delivery_date || '')
-  const [localDeliveryTime, setLocalDeliveryTime] = useState(parseScheduledAtToAmpm(d.scheduled_at))
-  const [localDuration, setLocalDuration] = useState(d.duration_minutes || 60)
-  const [localEndMode, setLocalEndMode] = useState('duration')
-  const [localEndTime, setLocalEndTime] = useState(addMinutesToTime(parseScheduledAtToAmpm(d.scheduled_at), d.duration_minutes || 60))
+  const [creatingInvoice, setCreatingInvoice] = useState(false)
+
   const [showCalendarModal, setShowCalendarModal] = useState(false)
   const [creatingEvent, setCreatingEvent] = useState(false)
   const [calForm, setCalForm] = useState({
@@ -834,7 +756,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
   }
 
   const handleDeleteCalendarEvent = async () => {
-    if (!await showConfirm('¿Eliminar el evento de Google Calendar para este pedido?')) return
+    if (!window.confirm('¿Eliminar el evento de Google Calendar para este despacho?')) return
     try {
       await deleteDispatchCalendarEvent(d.id)
       toast.success('Evento eliminado')
@@ -845,41 +767,35 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
   }
 
   // Sync localDeliveryDate when dispatch changes
-  React.useEffect(() => {
-    const t = parseScheduledAtToAmpm(d.scheduled_at)
-    const dur = d.duration_minutes || 60
-    setLocalDeliveryDate(d.delivery_date || '')
-    setLocalDeliveryTime(t)
-    setLocalDuration(dur)
-    setLocalEndTime(addMinutesToTime(t, dur))
-    setShowSchedulePanel(false)
-  }, [d.id, d.delivery_date, d.scheduled_at])
+  React.useEffect(() => { setLocalDeliveryDate(d.delivery_date || '') }, [d.id, d.delivery_date])
+
+  const handleCreateInvoice = async () => {
+    if (creatingInvoice) return
+    setCreatingInvoice(true)
+    try {
+      const r = await createInvoiceFromDispatch(d.id)
+      toast.success(`Factura ${r.data.invoice_number} creada`)
+      navigate('/facturas', { state: { selectInvoiceId: r.data.id } })
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error creando factura')
+    } finally {
+      setCreatingInvoice(false)
+    }
+  }
 
   const handleStatusSelect = async (val) => {
+    if (val !== 'Borrador' && val !== 'Cancelado' && !d.quote_id) {
+      return toast.error('Se requiere una cotización vinculada para cambiar el estado del despacho')
+    }
     setChangingStatus(true)
     await onStatusChange(val)
     setChangingStatus(false)
   }
 
-  const handleScheduleConfirm = () => {
-    const dur = localEndMode === 'endtime' ? Math.max(15, timeDiffMinutes(localDeliveryTime, localEndTime)) : localDuration
-    onDeliveryDateChange(localDeliveryDate, localDeliveryTime, dur)
-  }
-
-  const handleStartTimeChange = (newTime) => {
-    setLocalDeliveryTime(newTime)
-    setLocalEndTime(addMinutesToTime(newTime, localDuration))
-  }
-
-  const handleDurationChange = (dur) => {
-    setLocalDuration(dur)
-    setLocalEndTime(addMinutesToTime(localDeliveryTime, dur))
-  }
-
-  const handleEndTimeChange = (newEnd) => {
-    setLocalEndTime(newEnd)
-    const diff = timeDiffMinutes(localDeliveryTime, newEnd)
-    if (diff > 0) setLocalDuration(diff)
+  const handleDeliveryBlur = () => {
+    if (localDeliveryDate !== (d.delivery_date || '')) {
+      onDeliveryDateChange(localDeliveryDate)
+    }
   }
 
   return (
@@ -902,6 +818,11 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
                 <PackageCheck size={11} /> {d.order.title}
               </button>
             )}
+            {d.quote && (
+              <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded flex items-center gap-1">
+                <FileText size={11} /> {d.quote.quote_number || `COT-${d.quote_id}`}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -910,7 +831,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
             <button onClick={() => onPrint(true)} title="Imprimir" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 active:bg-black transition-colors">
               <Printer size={13} /> <span className="hidden sm:inline">Imprimir</span>
             </button>
-            <button onClick={onDownload} title="Descargar PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors">
+            <button onClick={() => onPrint(false)} title="Guardar PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors">
               <Download size={13} /> <span className="hidden sm:inline">PDF</span>
             </button>
             <button onClick={onShare} title="Compartir PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors">
@@ -945,7 +866,47 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
         </div>
       )}
 
-{/* inventory_applied hidden — pedidos de cliente no descuentan inventario */}
+      {/* Factura vinculada del sistema */}
+      <div className="card">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+          <Receipt size={13} className="text-blue-500" /> Factura del sistema
+        </h3>
+        {d.invoice ? (
+          <div className="flex items-center justify-between gap-2">
+            <button
+              onClick={() => navigate('/facturas', { state: { selectInvoiceId: d.invoice.id } })}
+              className="flex items-center gap-2 text-sm text-blue-600 hover:underline font-medium min-w-0"
+            >
+              <Tag size={13} className="flex-shrink-0" />
+              <span className="truncate">
+                {d.invoice.invoice_number || `FAC-${d.invoice.id}`}
+                {d.invoice.client_name ? ` · ${d.invoice.client_name}` : ''}
+              </span>
+              <ExternalLink size={11} className="flex-shrink-0" />
+            </button>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+              d.invoice.status === 'Pagada' ? 'bg-green-100 text-green-700' :
+              d.invoice.status === 'Emitida' ? 'bg-blue-100 text-blue-700' :
+              d.invoice.status === 'Anulada' ? 'bg-red-100 text-red-600' :
+              'bg-gray-100 text-gray-600'
+            }`}>{d.invoice.status}</span>
+          </div>
+        ) : (
+          <button
+            onClick={handleCreateInvoice}
+            disabled={creatingInvoice}
+            className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200 transition-colors disabled:opacity-50"
+          >
+            <FilePlus2 size={13} />
+            {creatingInvoice ? 'Creando...' : 'Crear factura'}
+          </button>
+        )}
+        {d.inventory_applied && (
+          <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
+            <CheckCircle2 size={11} /> Inventario descontado
+          </p>
+        )}
+      </div>
 
       {/* Client info + dates */}
       {(d.client_name || d.client_ruc || d.client_address || d.date || true) && (
@@ -953,129 +914,18 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
           {d.client_name && <div><p className="text-xs text-gray-400">Cliente</p><p className="text-sm font-semibold text-gray-900">{d.client_name}</p></div>}
           {d.client_ruc && <div><p className="text-xs text-gray-400">RUC</p><p className="text-sm font-medium text-gray-800">{d.client_ruc}</p></div>}
           {d.client_address && <div className="sm:col-span-2"><p className="text-xs text-gray-400">Dirección</p><p className="text-sm text-gray-700">{d.client_address}</p></div>}
-          {d.date && <div><p className="text-xs text-gray-400">Fecha pedido</p><p className="text-sm font-medium text-gray-800">{fmtD(d.date + 'T12:00:00')}</p></div>}
-          <div className="space-y-2">
-            <p className="text-xs text-gray-400">Fecha de entrega</p>
-
-            {/* Evento ya agendado — resumen */}
-            {d.scheduled_at && !showSchedulePanel && (
-              <div className="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3">
-                <div className="text-xs text-sky-800 leading-relaxed">
-                  <p className="font-semibold">{new Date(d.scheduled_at).toLocaleDateString('es', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'America/Panama' })}</p>
-                  <p className="text-sky-600">
-                    {new Date(d.scheduled_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Panama' })}
-                    {' — '}
-                    {new Date(new Date(d.scheduled_at).getTime() + (d.duration_minutes || 60) * 60000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Panama' })}
-                    {' · '}{DURATION_OPTIONS.find(o => o.value === (d.duration_minutes || 60))?.label || `${d.duration_minutes}min`}
-                  </p>
-                </div>
-                <button onClick={() => setShowSchedulePanel(true)}
-                  className="text-xs font-semibold text-sky-700 hover:text-sky-900 bg-white border border-sky-300 rounded-lg px-2.5 py-1.5 whitespace-nowrap hover:bg-sky-50 transition-colors flex-shrink-0">
-                  Reagendar
-                </button>
-              </div>
-            )}
-
-            {/* Sin evento — botón agendar */}
-            {!d.scheduled_at && !showSchedulePanel && (
-              <div className="flex gap-2">
-                <input type="date" value={localDeliveryDate}
-                  onChange={(e) => setLocalDeliveryDate(e.target.value)}
-                  className="input flex-1 text-sm" style={{fontSize:'16px'}} />
-                <button onClick={() => { if (localDeliveryDate) setShowSchedulePanel(true) }}
-                  disabled={!localDeliveryDate}
-                  className="px-3 py-2 rounded-xl text-sm font-semibold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
-                  Agendar
-                </button>
-              </div>
-            )}
-
-            {/* Panel de configuración de agenda */}
-            {showSchedulePanel && (
-              <div className="border border-sky-200 rounded-xl p-3 space-y-3 bg-sky-50/50">
-                {/* Fecha */}
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1">Fecha</p>
-                  <input type="date" value={localDeliveryDate}
-                    onChange={(e) => setLocalDeliveryDate(e.target.value)}
-                    className="input w-full text-sm" style={{fontSize:'16px'}} />
-                </div>
-                {/* Hora inicio */}
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1">Hora de inicio</p>
-                  <div className="flex gap-1.5">
-                    <select className="input flex-1 px-1 text-sm" value={localDeliveryTime.hour}
-                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, hour: e.target.value })} style={{fontSize:'16px'}}>
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
-                    </select>
-                    <select className="input flex-1 px-1 text-sm" value={localDeliveryTime.minute}
-                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, minute: e.target.value })} style={{fontSize:'16px'}}>
-                      {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                    <select className="input w-16 px-1 text-sm" value={localDeliveryTime.ampm}
-                      onChange={(e) => handleStartTimeChange({ ...localDeliveryTime, ampm: e.target.value })} style={{fontSize:'16px'}}>
-                      <option value="AM">AM</option><option value="PM">PM</option>
-                    </select>
-                  </div>
-                </div>
-                {/* Modo duración / hora fin */}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
-                      <button onClick={() => setLocalEndMode('duration')}
-                        className={`px-2.5 py-1 rounded-md transition-colors ${localEndMode === 'duration' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                        Duración
-                      </button>
-                      <button onClick={() => setLocalEndMode('endtime')}
-                        className={`px-2.5 py-1 rounded-md transition-colors ${localEndMode === 'endtime' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                        Hora fin
-                      </button>
-                    </div>
-                  </div>
-                  {localEndMode === 'duration' ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {DURATION_OPTIONS.map(o => (
-                        <button key={o.value} onClick={() => handleDurationChange(o.value)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${localDuration === o.value ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-gray-600 border-gray-200 hover:border-sky-300'}`}>
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <select className="input flex-1 px-1 text-sm" value={localEndTime.hour}
-                        onChange={(e) => handleEndTimeChange({ ...localEndTime, hour: e.target.value })} style={{fontSize:'16px'}}>
-                        {Array.from({ length: 12 }, (_, i) => i + 1).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
-                      </select>
-                      <select className="input flex-1 px-1 text-sm" value={localEndTime.minute}
-                        onChange={(e) => handleEndTimeChange({ ...localEndTime, minute: e.target.value })} style={{fontSize:'16px'}}>
-                        {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select className="input w-16 px-1 text-sm" value={localEndTime.ampm}
-                        onChange={(e) => handleEndTimeChange({ ...localEndTime, ampm: e.target.value })} style={{fontSize:'16px'}}>
-                        <option value="AM">AM</option><option value="PM">PM</option>
-                      </select>
-                    </div>
-                  )}
-                  {/* Resumen hora fin */}
-                  <p className="text-xs text-gray-400 mt-1.5">
-                    Fin: {localEndTime.hour}:{localEndTime.minute} {localEndTime.ampm}
-                    {' · '}{DURATION_OPTIONS.find(o => o.value === localDuration)?.label || `${localDuration}min`}
-                  </p>
-                </div>
-                {/* Botones */}
-                <div className="flex gap-2 pt-1">
-                  <button onClick={handleScheduleConfirm} disabled={!localDeliveryDate}
-                    className="flex-1 py-2 rounded-xl text-sm font-semibold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-40 transition-colors">
-                    {d.scheduled_at ? 'Reagendar' : 'Confirmar agenda'}
-                  </button>
-                  <button onClick={() => setShowSchedulePanel(false)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            )}
+          {d.date && <div><p className="text-xs text-gray-400">Fecha despacho</p><p className="text-sm font-medium text-gray-800">{fmtD(d.date + 'T12:00:00')}</p></div>}
+          <div>
+            <p className="text-xs text-gray-400 mb-1">Fecha de entrega</p>
+            <input
+              type="date"
+              value={localDeliveryDate}
+              onChange={(e) => setLocalDeliveryDate(e.target.value)}
+              onBlur={handleDeliveryBlur}
+              className="input w-full text-sm"
+              placeholder="Sin fecha"
+              style={{fontSize:'16px'}}
+            />
           </div>
         </div>
       )}
@@ -1136,24 +986,11 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
         </div>
       )}
 
-      {/* Cotización del cliente (adjunto externo) */}
+      {/* Factura al cliente */}
       <div className="card">
         <DispatchAttachmentSection
           dispatchId={d.id}
-          docType="cotizacion"
-          label="Cotización del cliente"
-          icon={<FileText size={13} />}
-          attachments={d.attachments || []}
-          onUploaded={onAttachmentChange}
-          onDeleted={onAttachmentChange}
-        />
-      </div>
-
-      {/* Factura al cliente (adjunto externo) */}
-      <div className="card">
-        <DispatchAttachmentSection
-          dispatchId={d.id}
-          docType="factura"
+          docType="cliente"
           label="Factura emitida al cliente"
           icon={<FileCheck size={13} />}
           attachments={d.attachments || []}
@@ -1202,14 +1039,14 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onDown
             <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
               <p className="text-xs font-semibold text-purple-700 mb-1">Evento en Google Calendar:</p>
               <p className="text-xs text-purple-600 font-mono break-all">
-                Pedido #{d.id} - {d.title}{d.client_name ? ` - ${d.client_name}` : ''}
+                Despacho #{d.id} - {d.title}{d.client_name ? ` - ${d.client_name}` : ''}
               </p>
             </div>
 
             <div>
               <label className="label">Fecha *</label>
               <input type="date" className="input" value={calForm.date}
-                onChange={(e) => setCalForm((f) => ({ ...f, date: e.target.value }))} style={{fontSize:'16px'}} />
+                onChange={(e) => setCalForm((f) => ({ ...f, date: e.target.value }))} />
             </div>
 
             <div>
@@ -1432,13 +1269,47 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
   const profit = subtotal - costSubtotal
   const margin = costSubtotal > 0 ? (profit / costSubtotal) * 100 : null
 
+  // Select from quote
+  const [showQuoteSelect, setShowQuoteSelect] = useState(false)
+  const [quoteSearch, setQuoteSearch] = useState('')
+
+  const filteredQuotes = quotes.filter((q) =>
+    (q.title || '').toLowerCase().includes(quoteSearch.toLowerCase()) ||
+    (q.quote_number || '').toLowerCase().includes(quoteSearch.toLowerCase()) ||
+    (q.client_name || '').toLowerCase().includes(quoteSearch.toLowerCase())
+  )
+
+  const convertFromQuote = (quote) => {
+    const items = parseItems(quote.items)
+    setIsDirty(true)
+    setForm((f) => ({
+      ...f,
+      title: f.title || quote.title,
+      quote_id: quote.id,
+      client_name: f.client_name || quote.client_name || '',
+      client_ruc: f.client_ruc || quote.client_ruc || '',
+      client_address: f.client_address || quote.client_address || '',
+      items: items.some((it) => it.description?.trim()) ? items : f.items,
+      itbms_enabled: quote.itbms_enabled ?? f.itbms_enabled,
+    }))
+    setShowQuoteSelect(false)
+    toast.success('Datos importados de la cotización')
+  }
+
   return (
     <div className="p-4 sm:p-6 max-w-2xl">
       <button onClick={onBack} className="md:hidden flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4">
         <ArrowLeft size={16} /> Volver
       </button>
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-gray-900">{isEdit ? 'Editar pedido' : 'Nuevo pedido'}</h2>
+        <h2 className="text-lg font-bold text-gray-900">{isEdit ? 'Editar despacho' : 'Nuevo despacho'}</h2>
+        <button
+          type="button"
+          onClick={() => setShowQuoteSelect(true)}
+          className="flex items-center gap-1.5 text-xs text-emerald-600 hover:text-emerald-800 font-medium px-3 py-2 rounded-lg border border-emerald-200 hover:bg-emerald-50 active:bg-emerald-100 transition-colors"
+        >
+          <FileText size={13} /> Seleccionar cotización
+        </button>
       </div>
 
       <form id="dispatch-form" onSubmit={onSave} className="space-y-4 sticky-footer-form">
@@ -1450,43 +1321,16 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
               <input className="input w-full" value={form.title} onChange={set('title')} placeholder="Ej: Entrega de equipos a cliente" required style={{fontSize:'16px'}} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">N° de pedido</label>
-              <input className="input w-full font-mono" value={form.dispatch_number} onChange={set('dispatch_number')} placeholder="PED-0001" style={{fontSize:'16px'}} />
+              <label className="block text-xs font-medium text-gray-600 mb-1">N° de despacho</label>
+              <input className="input w-full font-mono" value={form.dispatch_number} onChange={set('dispatch_number')} placeholder="DSP-0001" style={{fontSize:'16px'}} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha pedido</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha despacho</label>
               <input className="input w-full" type="date" value={form.date} onChange={set('date')} style={{fontSize:'16px'}} />
             </div>
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">Fecha y hora de entrega</label>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha de entrega</label>
               <input className="input w-full" type="date" value={form.delivery_date} onChange={set('delivery_date')} style={{fontSize:'16px'}} />
-              <div className="flex gap-1.5">
-                <select className="input flex-1 px-1" value={form.delivery_time.hour}
-                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, hour: e.target.value } }))} style={{fontSize:'16px'}}>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
-                </select>
-                <select className="input flex-1 px-1" value={form.delivery_time.minute}
-                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, minute: e.target.value } }))} style={{fontSize:'16px'}}>
-                  {['00','05','10','15','20','25','30','35','40','45','50','55'].map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <select className="input w-16 px-1" value={form.delivery_time.ampm}
-                  onChange={(e) => setForm((f) => ({ ...f, delivery_time: { ...f.delivery_time, ampm: e.target.value } }))} style={{fontSize:'16px'}}>
-                  <option value="AM">AM</option><option value="PM">PM</option>
-                </select>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {DURATION_OPTIONS.map(o => (
-                  <button type="button" key={o.value} onClick={() => setForm((f) => ({ ...f, delivery_duration: o.value }))}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${form.delivery_duration === o.value ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-gray-600 border-gray-200 hover:border-sky-300'}`}>
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-              {form.delivery_date && (
-                <p className="text-xs text-gray-400">
-                  Fin: {(() => { const e = addMinutesToTime(form.delivery_time, form.delivery_duration); return `${e.hour}:${e.minute} ${e.ampm}` })()}
-                </p>
-              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
@@ -1499,6 +1343,15 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
                 <span className="text-xs text-gray-400">Pedido vinculado:</span>
                 <span className="text-xs font-medium text-blue-600">{(() => { const o = orders.find((o) => o.id === Number(form.order_id)); return o ? (o.order_number || `#${o.id}`) : `#${form.order_id}` })()} </span>
                 <button type="button" onClick={() => { setIsDirty(true); setForm((f) => ({ ...f, order_id: '' })) }} className="text-gray-400 hover:text-red-500 ml-auto">
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+            {form.quote_id && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400">Cotización vinculada:</span>
+                <span className="text-xs font-medium text-emerald-600">{(() => { const q = quotes.find((q) => q.id === Number(form.quote_id)); return q ? (q.quote_number || `COT-${q.id}`) : `COT-${form.quote_id}` })()} </span>
+                <button type="button" onClick={() => { setIsDirty(true); setForm((f) => ({ ...f, quote_id: '' })) }} className="text-gray-400 hover:text-red-500 ml-auto">
                   <X size={13} />
                 </button>
               </div>
@@ -1620,7 +1473,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
         {/* Notes */}
         <div className="card">
           <label className="block text-xs font-medium text-gray-600 mb-1">Observaciones</label>
-          <textarea className="input w-full h-16 resize-none" value={form.notes} onChange={set('notes')} placeholder="Notas adicionales del pedido..." style={{fontSize:'16px'}} />
+          <textarea className="input w-full h-16 resize-none" value={form.notes} onChange={set('notes')} placeholder="Notas adicionales del despacho..." style={{fontSize:'16px'}} />
         </div>
 
       </form>
@@ -1634,11 +1487,57 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
           <button type="button" onClick={onCancel} className="btn-secondary text-sm py-1.5 px-3">Cancelar</button>
           <button type="submit" form="dispatch-form" disabled={saving} className="btn-primary text-sm py-1.5 px-3 flex items-center gap-1.5">
             <Save size={13} />
-            {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear pedido'}
+            {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear despacho'}
           </button>
         </div>
       </div>
 
+      {/* Select from quote modal */}
+      {showQuoteSelect && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center justify-between p-5 border-b">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <FileText size={16} /> Seleccionar cotización
+              </h3>
+              <button onClick={() => setShowQuoteSelect(false)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-4">
+              <div className="relative mb-3">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  className="input w-full pl-9"
+                  placeholder="Buscar cotización..."
+                  value={quoteSearch}
+                  onChange={(e) => setQuoteSearch(e.target.value)}
+                  autoFocus
+                  style={{fontSize:'16px'}}
+                />
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-1">
+                {filteredQuotes.length === 0
+                  ? <p className="text-sm text-gray-400 text-center py-6">Sin resultados</p>
+                  : filteredQuotes.map((q) => (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => convertFromQuote(q)}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:border-emerald-200 hover:bg-emerald-50 active:bg-emerald-100 text-left transition-colors"
+                    >
+                      <span className="text-xs font-mono text-gray-400 flex-shrink-0">{q.quote_number || `#${q.id}`}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{q.title}</p>
+                        {q.client_name && <p className="text-xs text-gray-400 truncate">{q.client_name}</p>}
+                      </div>
+                      {q.total && <span className="text-xs text-gray-500 flex-shrink-0">{q.total}</span>}
+                    </button>
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

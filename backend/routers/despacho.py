@@ -1,16 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta, time as _time
-
-PANAMA_TZ = timezone(timedelta(hours=-5))
-import os, uuid, json
+from datetime import datetime, timezone
+import os, uuid, json, re
 from database import get_db
 from auth import require_staff
-import models, schemas, storage
+import models, schemas
+import storage
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 MAX_FILE_SIZE = 20 * 1024 * 1024
 
 ALLOWED_TYPES = {
@@ -53,10 +51,10 @@ def _sync_order_status(order: models.Order, db: Session) -> None:
 
 @router.get("/next-number")
 def next_dispatch_number(db: Session = Depends(get_db), _=Depends(require_staff)):
-    rows = db.query(models.Dispatch.dispatch_number).filter(models.Dispatch.dispatch_number.like("PED-%"), models.Dispatch.deleted_at.is_(None)).all()
+    rows = db.query(models.Dispatch.dispatch_number).filter(models.Dispatch.dispatch_number.like("DSP-%"), models.Dispatch.deleted_at.is_(None)).all()
     nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
     n = (max(nums) + 1) if nums else 1
-    return {"number": f"PED-{n:04d}"}
+    return {"number": f"DSP-{n:04d}"}
 
 
 @router.get("", response_model=List[schemas.DispatchOut])
@@ -87,21 +85,16 @@ def create_dispatch(
     db: Session = Depends(get_db),
     _=Depends(require_staff),
 ):
-    d = models.Dispatch(**data.model_dump(exclude_unset=True))
-    # Auto-schedule on create if delivery_date provided without explicit scheduled_at
-    if d.delivery_date and not d.scheduled_at:
-        d.scheduled_at = datetime.combine(d.delivery_date, _time(8, 0), tzinfo=PANAMA_TZ)
-    if d.delivery_date and d.status == "Borrador":
-        d.status = "Pedido Programado"
-    db.add(d)
+    dispatch = models.Dispatch(**data.model_dump())
+    db.add(dispatch)
     db.commit()
-    db.refresh(d)
-    if d.order_id:
-        order = db.query(models.Order).filter(models.Order.id == d.order_id).first()
+    db.refresh(dispatch)
+    if dispatch.order_id:
+        order = db.query(models.Order).filter(models.Order.id == dispatch.order_id).first()
         if order:
             _sync_order_status(order, db)
             db.commit()
-    return d
+    return dispatch
 
 
 @router.get("/{dispatch_id}", response_model=schemas.DispatchOut)
@@ -115,7 +108,7 @@ def get_dispatch(
         models.Dispatch.deleted_at.is_(None),
     ).first()
     if not d:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
     return d
 
 
@@ -131,26 +124,14 @@ def update_dispatch(
         models.Dispatch.deleted_at.is_(None),
     ).first()
     if not d:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
     old_status = d.status
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(d, field, value)
-    _protected = {"Entregado", "Cancelado"}
-    if "delivery_date" in updates:
-        if updates["delivery_date"] is not None:
-            if d.status not in _protected:
-                d.status = "Pedido Programado"
-            if "scheduled_at" not in updates:
-                d.scheduled_at = datetime.combine(d.delivery_date, _time(8, 0), tzinfo=PANAMA_TZ)
-        else:
-            # Fecha borrada: revertir agendamiento
-            if d.status == "Pedido Programado":
-                d.status = "Emitido"
-            d.scheduled_at = None
     db.commit()
     db.refresh(d)
-    if d.order_id and d.status != old_status:
+    if d.order_id and "status" in updates:
         order = db.query(models.Order).filter(models.Order.id == d.order_id).first()
         if order and order.status not in ("Inventariado",):
             _sync_order_status(order, db)
@@ -169,7 +150,7 @@ def delete_dispatch(
         models.Dispatch.deleted_at.is_(None),
     ).first()
     if not d:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
     order_id = d.order_id
     d.deleted_at = datetime.now(timezone.utc)
     db.commit()
@@ -193,7 +174,7 @@ async def upload_dispatch_attachment(
 ):
     d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id).first()
     if not d:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de archivo no permitido")
     content = await file.read()
@@ -230,11 +211,15 @@ def download_dispatch_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    _key = f"dispatches/{dispatch_id}/{att.filename}"
-    if not storage.file_exists(_key):
+    storage_key = f"dispatches/{dispatch_id}/{att.filename}"
+    if not storage.file_exists(storage_key):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
-                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
+    safe_name = re.sub(r'["\r\n\\]', '_', att.original_name or "archivo")
+    return Response(
+        content=storage.read_file(storage_key),
+        media_type=att.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 @router.delete("/{dispatch_id}/attachments/{att_id}")

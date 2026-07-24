@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
@@ -8,7 +8,8 @@ import os, uuid, logging, json, re
 from database import get_db
 from auth import get_current_user, require_staff
 from audit_helper import log_action
-import models, schemas, storage
+import models, schemas
+import storage
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -78,7 +79,6 @@ def _apply_inventory_from_order(order: models.Order, db: Session, force: bool = 
         inv_item.quantity = f"{new_qty:.4f}".rstrip('0').rstrip('.') or "0"
     order.inventory_applied = True
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 ALLOWED_TYPES = {
@@ -338,11 +338,15 @@ def download_attachment(
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
-    _key = f"orders/{order_id}/{att.filename}"
-    if not storage.file_exists(_key):
+    storage_key = f"orders/{order_id}/{att.filename}"
+    if not storage.file_exists(storage_key):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    return Response(content=storage.read_file(_key), media_type=att.content_type or "application/octet-stream",
-                    headers={"Content-Disposition": f'attachment; filename="{att.original_name or att.filename}"'})
+    safe_name = re.sub(r'["\r\n\\]', '_', att.original_name or "archivo")
+    return Response(
+        content=storage.read_file(storage_key),
+        media_type=att.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 @router.delete("/{order_id}/attachments/{att_id}")
