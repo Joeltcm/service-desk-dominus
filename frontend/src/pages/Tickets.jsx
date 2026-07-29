@@ -533,6 +533,7 @@ export default function Tickets() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">#</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">TÍTULO</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CATEGORÍA</th>
+                  {itMode && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CARGADOR</th>}
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">EMPRESA</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">CONTACTO</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">AGENTE</th>
@@ -571,8 +572,12 @@ export default function Tickets() {
                       </td>
                       <td className="px-4 py-3">
                         {t.category ? <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 max-w-[120px] truncate">{t.category}</span> : <span className="text-gray-300 text-xs">—</span>}
-                        {itMode && t.charger && <span className="inline-flex items-center ml-1 px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700">{t.charger}</span>}
                       </td>
+                      {itMode && (
+                        <td className="px-4 py-3">
+                          {t.charger ? <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700">{t.charger}</span> : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-gray-500 text-sm max-w-[140px] truncate">{t.client?.company || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.client?.name}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.assigned_agent?.name || <span className="text-gray-300">Sin asignar</span>}</td>
