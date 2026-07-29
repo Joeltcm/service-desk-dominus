@@ -375,7 +375,7 @@ function PrinterForm({ initial, contracts, onSave, onCancel, saving }) {
             </select>
           </div>
           <div>
-            <label className="label">Contrato MPS</label>
+            <label className="label">{itMode ? 'Contrato' : 'Contrato MPS'}</label>
             <select className="input" value={form.contract_id || ''} onChange={e => set('contract_id', e.target.value)} style={{ fontSize: '16px' }}>
               <option value="">— Sin contrato —</option>
               {contracts.map(c => <option key={c.id} value={c.id}>{c.contract_number} — {c.client_name}</option>)}
@@ -632,8 +632,14 @@ export default function Impresoras() {
       contract?.contract_number, contract?.client_name, contract?.client_company,
     ].some(v => v?.toLowerCase().includes(q))
     const matchOwnership = !filterOwnership || p.ownership_type === filterOwnership
-    const contractType = contractsById[p.contract_id]?.contract_type || 'MPS'
-    const matchContractType = !filterContractType || contractType === filterContractType
+    let matchContractType
+    if (itMode) {
+      // En modo IT el primer filtro es por tipo de equipo
+      matchContractType = !filterContractType || (p.equipment_type || 'impresora') === filterContractType
+    } else {
+      const contractType = contractsById[p.contract_id]?.contract_type || 'MPS'
+      matchContractType = !filterContractType || contractType === filterContractType
+    }
     return match && matchOwnership && matchContractType
   })
 
@@ -715,8 +721,9 @@ export default function Impresoras() {
           <div className="grid grid-cols-2 gap-2">
             <select className="input text-sm" value={filterContractType} onChange={e => setFilterContractType(e.target.value)} style={{ fontSize: '16px' }}>
               <option value="">Todos los tipos</option>
-              <option value="MPS">MPS</option>
-              <option value="Soporte">Soporte</option>
+              {itMode
+                ? EQUIPMENT_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)
+                : (<><option value="MPS">MPS</option><option value="Soporte">Soporte</option></>)}
             </select>
             <select className="input text-sm" value={filterOwnership} onChange={e => setFilterOwnership(e.target.value)} style={{ fontSize: '16px' }}>
               <option value="">Todas las propiedades</option>
