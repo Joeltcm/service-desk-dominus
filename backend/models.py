@@ -850,6 +850,7 @@ class Printer(Base):
     __tablename__ = "printers"
 
     id = Column(Integer, primary_key=True, index=True)
+    equipment_type = Column(String(30), default="impresora")  # impresora | pc | portatil | red | servidor | otro
     brand = Column(String(100), nullable=True)
     model = Column(String(100), nullable=True)
     serial_number = Column(String(100), unique=True, index=True, nullable=True)

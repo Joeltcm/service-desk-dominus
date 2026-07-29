@@ -16,6 +16,7 @@ import {
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
 import { useUnsavedWarning } from '../hooks/useUnsavedWarning'
+import { useCompany } from '../context/CompanyContext'
 
 function getDaysInfo(endDate) {
   if (!endDate) return null
@@ -144,6 +145,8 @@ function InfoRow({ label, value }) {
 
 function ContractPrinters({ contractId }) {
   const navigate = useNavigate()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
   const [printers, setPrinters] = useState(null)
   useEffect(() => {
     let alive = true
@@ -158,12 +161,12 @@ function ContractPrinters({ contractId }) {
     <div className="card space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-          <PrinterIcon size={13} /> Impresoras del contrato
+          <PrinterIcon size={13} /> {itMode ? 'Equipos cubiertos' : 'Impresoras del contrato'}
         </p>
         <span className="text-xs font-medium text-sky-500">{printers.length}</span>
       </div>
       {printers.length === 0 ? (
-        <p className="text-xs text-gray-400">Sin impresoras asignadas a este contrato.</p>
+        <p className="text-xs text-gray-400">{itMode ? 'Sin equipos asignados a este contrato.' : 'Sin impresoras asignadas a este contrato.'}</p>
       ) : (
         <div className="divide-y divide-gray-50">
           {printers.map(p => (
@@ -171,7 +174,7 @@ function ContractPrinters({ contractId }) {
               className="w-full flex items-center gap-2 py-2 text-left hover:bg-gray-50 -mx-1 px-1 rounded transition-colors">
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-gray-800 font-medium truncate">
-                  {p.model || 'Impresora'} <span className="font-mono text-xs text-gray-400">{p.serial_number}</span>
+                  {p.model || (itMode ? 'Equipo' : 'Impresora')} <span className="font-mono text-xs text-gray-400">{p.serial_number}</span>
                 </p>
                 {p.location && <p className="text-xs text-gray-500 truncate">{p.location}</p>}
               </div>

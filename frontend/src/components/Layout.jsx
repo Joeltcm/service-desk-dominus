@@ -59,6 +59,9 @@ function NavItem({ item, collapsed, onNavigate, badge }) {
   const match = useMatch(item.to)
   const isActive = Boolean(match)
   const Icon = item.icon
+  const { vertical } = useCompany()
+  // Vertical IT: "Flota" (impresoras) se muestra como "Equipos"
+  const label = (vertical === 'it_support' && item.moduleKey === 'impresoras') ? 'Equipos' : item.label
 
   const handleClick = async (e) => {
     if (isDirty && location.pathname !== item.to) {
@@ -93,7 +96,7 @@ function NavItem({ item, collapsed, onNavigate, badge }) {
           </span>
         )}
       </span>
-      <span className={collapsed ? 'md:hidden' : ''}>{item.label}</span>
+      <span className={collapsed ? 'md:hidden' : ''}>{label}</span>
     </NavLink>
   )
 }

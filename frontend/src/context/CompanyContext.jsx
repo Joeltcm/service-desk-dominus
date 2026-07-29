@@ -14,6 +14,7 @@ const DEFAULTS = {
   has_logo:              false,
   has_favicon:           false,
   has_pwa_icon:          false,
+  vertical:              'mps',   // 'mps' | 'it_support'
 }
 
 function fromCache() {

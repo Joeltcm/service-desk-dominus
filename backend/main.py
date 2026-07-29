@@ -909,6 +909,11 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE printers ADD COLUMN IF NOT EXISTS equipment_type VARCHAR(30) DEFAULT 'impresora'"))
+            conn.commit()
+        except Exception:
+            pass
         # ── Suministros: lotes, entregas y líneas de despacho ──
         try:
             conn.execute(text("""

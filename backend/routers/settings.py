@@ -1802,6 +1802,9 @@ def get_company_settings(
     data["has_logo"]     = bool(_get_setting(db, "company_logo_b64"))
     data["has_favicon"]  = bool(_get_setting(db, "company_favicon_b64"))
     data["has_pwa_icon"] = bool(_get_setting(db, "company_pwa_icon_b64"))
+    # Vertical de producto por instancia: 'mps' (impresión, default) | 'it_support'
+    # (soporte IT general → el frontend generaliza "Impresoras/Flota" a "Equipos").
+    data["vertical"] = os.getenv("PRODUCT_VERTICAL", "mps")
     return data
 
 

@@ -13,11 +13,18 @@ import {
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
 import { useUnsavedWarning } from '../hooks/useUnsavedWarning'
+import { useCompany } from '../context/CompanyContext'
 
 const OWNERSHIP_LABEL = { alquiler: 'Alquiler (activo propio)', cliente: 'Propiedad del cliente' }
 const STATUSES = ['Activa', 'En reparacion', 'Baja']
 
+const EQUIPMENT_TYPES = [
+  ['impresora', 'Impresora'], ['pc', 'PC'], ['portatil', 'Portátil'],
+  ['red', 'Red'], ['servidor', 'Servidor'], ['otro', 'Otro'],
+]
+
 const EMPTY_FORM = {
+  equipment_type: 'impresora',
   brand: '',
   model: '',
   serial_number: '',
@@ -203,6 +210,11 @@ function PrinterDetail({ printer, contractsById, onEdit, onDelete }) {
             <p className="text-xs font-mono text-gray-400 flex items-center gap-1"><Hash size={9} />{printer.serial_number || `#${printer.id}`}</p>
             <h2 className="text-lg font-bold text-gray-900 mt-0.5 leading-tight">{printer.brand} {printer.model}</h2>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              {printer.equipment_type && printer.equipment_type !== 'impresora' && (
+                <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600">
+                  {(EQUIPMENT_TYPES.find(([v]) => v === printer.equipment_type) || [null, 'Equipo'])[1]}
+                </span>
+              )}
               <OwnershipBadge type={printer.ownership_type} />
               <WarrantyBadge startDate={printer.warranty_start_date} endDate={printer.warranty_end_date} />
             </div>
@@ -254,7 +266,7 @@ function PrinterDetail({ printer, contractsById, onEdit, onDelete }) {
         </div>
       ) : null}
 
-      <MeterReadings printerId={printer.id} />
+      {(printer.equipment_type || 'impresora') === 'impresora' && <MeterReadings printerId={printer.id} />}
 
       {printer.notes && (
         <div className="card bg-amber-50 border-amber-100">
@@ -280,6 +292,9 @@ function inferYears(startDate, endDate) {
 }
 
 function PrinterForm({ initial, contracts, onSave, onCancel, saving }) {
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
+  const noun = itMode ? 'equipo' : 'impresora'
   const [form, setForm] = useState(initial || EMPTY_FORM)
   const [warrantyYears, setWarrantyYears] = useState(
     () => inferYears(initial?.warranty_start_date, initial?.warranty_end_date)
@@ -311,11 +326,20 @@ function PrinterForm({ initial, contracts, onSave, onCancel, saving }) {
   return (
     <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto">
       <div className="flex items-center justify-between -mb-1">
-        <h2 className="font-bold text-gray-900">{initial?.id ? 'Editar impresora' : 'Nueva impresora'}</h2>
+        <h2 className="font-bold text-gray-900">{initial?.id ? `Editar ${noun}` : `Nuevo ${noun}`}</h2>
         <button type="button" onClick={onCancel}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
       </div>
 
       <div className="card grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {itMode && (
+          <div className="sm:col-span-2">
+            <label className="label">Tipo de equipo</label>
+            <select className="input" value={form.equipment_type || 'impresora'}
+              onChange={e => set('equipment_type', e.target.value)} style={{ fontSize: '16px' }}>
+              {EQUIPMENT_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        )}
         <div>
           <label className="label">Marca</label>
           <input className="input" value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="HP, Brother, Epson..." style={{ fontSize: '16px' }} />
@@ -566,6 +590,8 @@ function ImportModal({ onClose, onDone }) {
 export default function Impresoras() {
   const navigate = useNavigate()
   const { ref: urlRef } = useParams()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
   const [printers, setPrinters] = useState([])
   const [contracts, setContracts] = useState([])
   const [selected, setSelected] = useState(null)
@@ -665,7 +691,7 @@ export default function Impresoras() {
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-bold text-gray-900">Flota</h1>
+              <h1 className="text-lg font-bold text-gray-900">{itMode ? 'Equipos' : 'Flota'}</h1>
               <p className="text-xs text-sky-500 font-medium mt-0.5">{filtered.length} impresora{filtered.length !== 1 ? 's' : ''}</p>
             </div>
             <div className="flex items-center gap-2">
@@ -706,7 +732,7 @@ export default function Impresoras() {
               <div className="w-16 h-16 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
                 <PrinterIcon size={28} className="text-sky-300" />
               </div>
-              <p className="text-sm font-medium text-gray-400">Sin impresoras</p>
+              <p className="text-sm font-medium text-gray-400">{itMode ? 'Sin equipos' : 'Sin impresoras'}</p>
               <p className="text-xs text-gray-300 mt-1">Usa "Nueva" para registrar la primera</p>
             </div>
           ) : filtered.map(p => (

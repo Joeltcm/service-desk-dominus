@@ -1579,6 +1579,7 @@ class MeterReadingOut(BaseModel):
 
 
 class PrinterCreate(BaseModel):
+    equipment_type: Optional[str] = "impresora"
     brand: Optional[str] = None
     model: Optional[str] = None
     serial_number: Optional[str] = None
@@ -1601,6 +1602,7 @@ class PrinterUpdate(PrinterCreate):
 
 class PrinterOut(BaseModel):
     id: int
+    equipment_type: Optional[str] = "impresora"
     brand: Optional[str] = None
     model: Optional[str] = None
     serial_number: Optional[str] = None
