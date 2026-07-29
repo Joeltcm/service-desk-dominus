@@ -264,6 +264,7 @@ class TicketListItem(BaseModel):
     contact: Optional["ContactOut"] = None
     category: Optional[str]
     location: Optional[str]
+    charger: Optional[str] = None
     subject: Optional[str]
     scheduled_at: Optional[datetime]
     sla_deadline: Optional[datetime] = None
