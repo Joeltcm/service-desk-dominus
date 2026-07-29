@@ -278,11 +278,6 @@ export default function Tickets() {
                                 <Tag size={10} /> {t.category}
                               </span>
                             )}
-                            {itMode && t.charger && (
-                              <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium">
-                                {t.charger}
-                              </span>
-                            )}
                           </div>
                           {/* Title */}
                           <p className="font-semibold text-gray-900 leading-snug group-hover:text-[#1a3353] transition-colors">
@@ -489,7 +484,6 @@ export default function Tickets() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs text-gray-400 font-mono">#{t.id}</span>
                         {t.category && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{t.category}</span>}
-                        {itMode && t.charger && <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">{t.charger}</span>}
                       </div>
                       <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{t.title}</p>
                       {t.client?.company && <p className="text-xs text-gray-500 mt-0.5 truncate">{t.client.company}</p>}
