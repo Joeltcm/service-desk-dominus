@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -8,6 +9,17 @@ import models, schemas
 from auth import get_current_user, require_admin, require_staff, get_password_hash
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _hide_superadmin() -> bool:
+    """Cuando HIDE_SUPERADMIN=on, el superadmin es invisible/intocable para
+    perfiles admin o inferiores (se usa en instancias de cliente, ej. Dominus Tech).
+    Default off → instancias como DG no cambian."""
+    return os.getenv("HIDE_SUPERADMIN", "false").strip().lower() in ("1", "true", "yes")
+
+
+def _superadmin_hidden_from(current_user: models.User) -> bool:
+    return _hide_superadmin() and current_user.role != models.UserRole.superadmin
 
 
 class SignaturePayload(BaseModel):
@@ -112,7 +124,10 @@ def list_users(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    return db.query(models.User).order_by(models.User.created_at.desc()).all()
+    q = db.query(models.User)
+    if _superadmin_hidden_from(current_user):
+        q = q.filter(models.User.role != models.UserRole.superadmin)
+    return q.order_by(models.User.created_at.desc()).all()
 
 
 @router.get("/agents", response_model=List[schemas.UserOut])
@@ -151,6 +166,10 @@ def create_user(
             status_code=403,
             detail="Solo puedes crear clientes; para crear usuarios de staff se requiere administrador",
         )
+    # Solo un superadmin puede crear otro superadmin (evita cuentas invisibles
+    # cuando HIDE_SUPERADMIN está activo).
+    if data.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user):
+        raise HTTPException(status_code=403, detail="No autorizado")
 
     import uuid as _uuid
     email = data.email or f"sin-correo-{_uuid.uuid4().hex[:12]}@sin-correo.local"
@@ -205,7 +224,7 @@ def get_user(
     current_user: models.User = Depends(require_admin),
 ):
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
+    if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return user
 
@@ -218,7 +237,7 @@ def update_user(
     current_user: models.User = Depends(require_admin),
 ):
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
+    if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     if data.name is not None:
@@ -232,6 +251,8 @@ def update_user(
     if data.address is not None:
         user.address = data.address
     if data.role is not None:
+        if data.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user):
+            raise HTTPException(status_code=403, detail="No autorizado")
         user.role = data.role
     if data.is_active is not None:
         user.is_active = data.is_active
@@ -254,7 +275,7 @@ def delete_user(
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta")
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
+    if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     ticket_count = db.query(func.count(models.Ticket.id)).filter(
