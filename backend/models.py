@@ -865,10 +865,15 @@ class Printer(Base):
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     status = Column(String(30), default="Activa")  # Activa, En reparacion, Baja
+    # Baja del equipo (daño, reemplazo, robo, obsolescencia, fin de contrato…)
+    decommissioned_at = Column(Date, nullable=True)
+    decommission_reason = Column(String(50), nullable=True)
+    replaced_by_id = Column(Integer, ForeignKey("printers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     contract = relationship("Contract", back_populates="printers")
+    replaced_by = relationship("Printer", remote_side=[id], foreign_keys=[replaced_by_id])
     inventory_item = relationship("InventoryItem")
     meter_readings = relationship(
         "MeterReading",

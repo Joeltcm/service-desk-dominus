@@ -1617,9 +1617,19 @@ class PrinterOut(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    decommissioned_at: Optional[_Date] = None
+    decommission_reason: Optional[str] = None
+    replaced_by_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     meter_readings: List[MeterReadingOut] = []
+
+
+class DecommissionIn(BaseModel):
+    reason: str                                  # Daño | Reemplazo | Robo/pérdida | Obsolescencia | Fin de contrato | Otro
+    date: Optional[_Date] = None                 # default hoy si no viene
+    notes: Optional[str] = None
+    replacement_id: Optional[int] = None         # equipo que lo reemplaza (opcional)
 
     class Config:
         from_attributes = True

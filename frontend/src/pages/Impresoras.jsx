@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
-  getPrinters, createPrinter, updatePrinter, deletePrinter,
+  getPrinters, createPrinter, updatePrinter, deletePrinter, decommissionPrinter,
   getMeterReadings, createMeterReading, getContracts, importPrinters,
 } from '../services/api'
 import {
@@ -22,6 +22,8 @@ const EQUIPMENT_TYPES = [
   ['impresora', 'Impresora'], ['pc', 'PC'], ['portatil', 'Portátil'],
   ['red', 'Red'], ['servidor', 'Servidor'], ['otro', 'Otro'],
 ]
+
+const DECOMMISSION_REASONS = ['Daño', 'Reemplazo', 'Robo/pérdida', 'Obsolescencia', 'Fin de contrato', 'Otro']
 
 const EMPTY_FORM = {
   equipment_type: 'impresora',
@@ -197,10 +199,23 @@ function MeterReadings({ printerId }) {
   )
 }
 
-function PrinterDetail({ printer, contractsById, onEdit, onDelete }) {
+function PrinterDetail({ printer, contractsById, onEdit, onDelete, onDecommission }) {
   const contract = printer.contract_id ? contractsById[printer.contract_id] : null
+  const isBaja = printer.status === 'Baja'
   return (
     <div className="p-4 sm:p-6 space-y-4">
+      {isBaja && (
+        <div className="card bg-red-50 border-red-200 flex items-start gap-2">
+          <AlertTriangle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold text-red-700">Equipo dado de baja</p>
+            <p className="text-red-600 text-xs mt-0.5">
+              {printer.decommission_reason || 'Sin motivo'}{printer.decommissioned_at ? ` · ${fmtD(printer.decommissioned_at)}` : ''}
+              {printer.replaced_by_id ? ' · Reemplazado' : ''}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0 flex items-center gap-3">
           <div className="w-14 h-14 rounded-xl bg-sky-50 flex items-center justify-center flex-shrink-0">
@@ -224,6 +239,11 @@ function PrinterDetail({ printer, contractsById, onEdit, onDelete }) {
           <button onClick={onEdit} className="flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
             <Pencil size={13} /> <span className="hidden sm:inline">Editar</span>
           </button>
+          {!isBaja && (
+            <button onClick={onDecommission} className="flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors">
+              <AlertTriangle size={13} /> <span className="hidden sm:inline">Dar de baja</span>
+            </button>
+          )}
           <button onClick={onDelete} className="p-2 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
             <Trash2 size={14} />
           </button>
@@ -587,6 +607,68 @@ function ImportModal({ onClose, onDone }) {
   )
 }
 
+function DecommissionModal({ printer, printers, onConfirm, onClose }) {
+  const [reason, setReason] = useState('Daño')
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [notes, setNotes] = useState('')
+  const [replacementId, setReplacementId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const candidates = printers.filter(p => p.id !== printer.id && p.status !== 'Baja')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await onConfirm({
+        reason,
+        date: date || null,
+        notes: notes || null,
+        replacement_id: replacementId ? Number(replacementId) : null,
+      })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-900 flex items-center gap-2"><AlertTriangle size={16} className="text-amber-500" /> Dar de baja equipo</h3>
+          <button type="button" onClick={onClose}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+        </div>
+        <p className="text-xs text-gray-500">{printer.brand} {printer.model} · {printer.serial_number || `#${printer.id}`}</p>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="label">Motivo *</label>
+            <select className="input" value={reason} onChange={e => setReason(e.target.value)} style={{ fontSize: '16px' }}>
+              {DECOMMISSION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Fecha de baja</label>
+            <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)} style={{ fontSize: '16px' }} />
+          </div>
+          <div>
+            <label className="label">Notas</label>
+            <textarea className="input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Detalle del daño, N° de caso, etc." style={{ fontSize: '16px' }} />
+          </div>
+          <div>
+            <label className="label">Reemplazo (opcional)</label>
+            <select className="input" value={replacementId} onChange={e => setReplacementId(e.target.value)} style={{ fontSize: '16px' }}>
+              <option value="">— Ninguno —</option>
+              {candidates.map(p => <option key={p.id} value={p.id}>{p.serial_number || `#${p.id}`} · {p.brand} {p.model}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">Si eliges uno, se asigna al mismo contrato del equipo dado de baja.</p>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
+            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Guardando…' : 'Dar de baja'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export default function Impresoras() {
   const navigate = useNavigate()
   const { ref: urlRef } = useParams()
@@ -604,6 +686,8 @@ export default function Impresoras() {
   const [search, setSearch] = useState('')
   const [filterOwnership, setFilterOwnership] = useState('')
   const [filterContractType, setFilterContractType] = useState('')
+  const [showBaja, setShowBaja] = useState(false)
+  const [decommissioning, setDecommissioning] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
 
   const load = useCallback(() => {
@@ -640,7 +724,8 @@ export default function Impresoras() {
       const contractType = contractsById[p.contract_id]?.contract_type || 'MPS'
       matchContractType = !filterContractType || contractType === filterContractType
     }
-    return match && matchOwnership && matchContractType
+    const matchBaja = showBaja || p.status !== 'Baja'
+    return match && matchOwnership && matchContractType && matchBaja
   })
 
   const handleNew = () => {
@@ -670,6 +755,18 @@ export default function Impresoras() {
       toast.error(err?.response?.data?.detail || 'Error guardando impresora')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDecommission = async (data) => {
+    try {
+      const saved = await decommissionPrinter(decommissioning.id, data).then(r => r.data)
+      toast.success('Equipo dado de baja')
+      setDecommissioning(null)
+      setSelected(saved)
+      load()   // recargar (puede haber cambiado el reemplazo)
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error al dar de baja')
     }
   }
 
@@ -731,6 +828,10 @@ export default function Impresoras() {
               <option value="cliente">Propiedad del cliente</option>
             </select>
           </div>
+          <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
+            <input type="checkbox" checked={showBaja} onChange={e => setShowBaja(e.target.checked)} />
+            Mostrar equipos dados de baja
+          </label>
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
@@ -783,7 +884,7 @@ export default function Impresoras() {
             saving={saving}
           />
         ) : selected && selected.id ? (
-          <PrinterDetail printer={selected} contractsById={contractsById} onEdit={() => { setIsNew(false); setEditing(true) }} onDelete={handleDelete} />
+          <PrinterDetail printer={selected} contractsById={contractsById} onEdit={() => { setIsNew(false); setEditing(true) }} onDelete={handleDelete} onDecommission={() => setDecommissioning(selected)} />
         ) : (
           <div className="flex flex-col items-center justify-center flex-1 text-center px-4">
             <div className="w-20 h-20 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
@@ -794,6 +895,14 @@ export default function Impresoras() {
           </div>
         )}
       </div>
+      {decommissioning && (
+        <DecommissionModal
+          printer={decommissioning}
+          printers={printers}
+          onConfirm={handleDecommission}
+          onClose={() => setDecommissioning(null)}
+        />
+      )}
     </div>
   )
 }

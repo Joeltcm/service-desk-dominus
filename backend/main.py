@@ -914,6 +914,13 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE printers ADD COLUMN IF NOT EXISTS decommissioned_at DATE"))
+            conn.execute(text("ALTER TABLE printers ADD COLUMN IF NOT EXISTS decommission_reason VARCHAR(50)"))
+            conn.execute(text("ALTER TABLE printers ADD COLUMN IF NOT EXISTS replaced_by_id INTEGER REFERENCES printers(id)"))
+            conn.commit()
+        except Exception:
+            pass
         # ── Suministros: lotes, entregas y líneas de despacho ──
         try:
             conn.execute(text("""

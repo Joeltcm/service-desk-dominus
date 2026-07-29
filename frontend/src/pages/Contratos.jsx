@@ -151,7 +151,7 @@ function ContractPrinters({ contractId }) {
   useEffect(() => {
     let alive = true
     getPrinters({ contract_id: contractId })
-      .then(r => { if (alive) setPrinters(r.data) })
+      .then(r => { if (alive) setPrinters((r.data || []).filter(p => p.status !== 'Baja')) })
       .catch(() => { if (alive) setPrinters([]) })
     return () => { alive = false }
   }, [contractId])

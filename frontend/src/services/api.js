@@ -331,6 +331,7 @@ export const getPrinters = (params) => api.get('/printers', { params })
 export const getPrinter = (id) => api.get(`/printers/${id}`)
 export const createPrinter = (data) => api.post('/printers', data)
 export const updatePrinter = (id, data) => api.put(`/printers/${id}`, data)
+export const decommissionPrinter = (id, data) => api.post(`/printers/${id}/decommission`, data)
 export const deletePrinter = (id) => api.delete(`/printers/${id}`)
 export const importPrinters = (file, dryRun = true) => {
   const form = new FormData()

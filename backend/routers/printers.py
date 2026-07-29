@@ -106,6 +106,45 @@ def update_printer(
     return printer
 
 
+@router.post("/{printer_id}/decommission", response_model=schemas.PrinterOut)
+def decommission_printer(
+    printer_id: int,
+    data: schemas.DecommissionIn,
+    db: Session = Depends(get_db),
+    _=Depends(require_agent_or_admin),
+):
+    """Da de baja un equipo (daño, reemplazo, robo, obsolescencia, fin de contrato).
+    Conserva el vínculo al contrato como historial; las vistas activas filtran 'Baja'.
+    Opcionalmente enlaza un reemplazo y lo asigna al mismo contrato."""
+    from datetime import date as _date
+    printer = db.query(models.Printer).filter(models.Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    printer.status = "Baja"
+    printer.decommission_reason = data.reason
+    printer.decommissioned_at = data.date or _date.today()
+    if data.notes:
+        stamp = f"[Baja {printer.decommissioned_at} · {data.reason}] {data.notes}"
+        printer.notes = (printer.notes + "\n" + stamp) if printer.notes else stamp
+    if data.replacement_id:
+        repl = db.query(models.Printer).filter(models.Printer.id == data.replacement_id).first()
+        if not repl:
+            raise HTTPException(status_code=404, detail="Equipo de reemplazo no encontrado")
+        if repl.id == printer.id:
+            raise HTTPException(status_code=400, detail="Un equipo no puede reemplazarse a sí mismo")
+        printer.replaced_by_id = repl.id
+        if printer.contract_id and not repl.contract_id:
+            repl.contract_id = printer.contract_id
+    # El equipo de baja deja de ser activo de alquiler en inventario.
+    if printer.inventory_item_id:
+        item = db.query(models.InventoryItem).filter(models.InventoryItem.id == printer.inventory_item_id).first()
+        if item:
+            item.is_active = False
+    db.commit()
+    db.refresh(printer)
+    return printer
+
+
 @router.delete("/{printer_id}")
 def delete_printer(
     printer_id: int,

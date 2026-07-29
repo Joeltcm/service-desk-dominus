@@ -3,7 +3,24 @@ import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock } from 'lucide-
 import toast from 'react-hot-toast'
 import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial } from '../services/api'
 import { useModules } from '../context/ModulesContext'
+import { useCompany } from '../context/CompanyContext'
 import { RoleFeaturesPanel } from './Settings'
+
+// En vertical 'it_support' el grupo de impresión se presenta como "Equipos"
+// (el módulo 'impresoras' habilita la sección de Equipos).
+function verticalizeGroups(groups, itMode) {
+  if (!itMode) return groups
+  return groups.map(g => ({
+    ...g,
+    group: g.group === 'MPS / Impresión' ? 'Equipos / Soporte' : g.group,
+    items: g.items.map(it => {
+      if (it.key === 'impresoras') return { ...it, label: 'Equipos', desc: 'Gestión de equipos en campo (impresoras, PC, redes, portátiles…)' }
+      if (it.key === 'contratos')  return { ...it, desc: 'Contratos de servicio y soporte técnico' }
+      if (it.key === 'suministros') return { ...it, desc: 'Stock de repuestos y suministros' }
+      return it
+    }),
+  }))
+}
 
 const MODULE_GROUPS = [
   {
@@ -53,6 +70,8 @@ export default function SystemConfig() {
   const [modules, setModulesLocal] = useState(null)
   const [saving, setSaving] = useState(false)
   const { setModules: setGlobalModules } = useModules()
+  const { vertical } = useCompany()
+  const groups = verticalizeGroups(MODULE_GROUPS, vertical === 'it_support')
 
   const [trial, setTrial] = useState({ enabled: false, start_date: null, days: 14 })
   const [trialSaving, setTrialSaving] = useState(false)
@@ -135,7 +154,7 @@ export default function SystemConfig() {
         </button>
       </div>
 
-      {MODULE_GROUPS.map(({ group, items }) => (
+      {groups.map(({ group, items }) => (
         <div key={group} className="card space-y-1">
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">{group}</h2>
           {items.map(({ key, label, desc }) => {
