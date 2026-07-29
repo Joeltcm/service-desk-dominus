@@ -754,6 +754,7 @@ def _migrate_pg():
             ("csat_rating", "INTEGER"),
             ("csat_comment", "TEXT"),
             ("csat_submitted_at", "TIMESTAMP WITH TIME ZONE"),
+            ("charger", "VARCHAR(20)"),
         ]:
             try:
                 conn.execute(text(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {col} {typedef}"))

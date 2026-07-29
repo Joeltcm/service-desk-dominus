@@ -96,6 +96,7 @@ class Ticket(Base):
     assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     category = Column(String(100), nullable=True)
     location = Column(String(255), nullable=True)
+    charger = Column(String(20), nullable=True)  # 'Con cargador' | 'Sin cargador' (vertical it_support)
     subject = Column(String(255), nullable=True)
     cc_email = Column(String(150), nullable=True)
     scheduled_at = Column(DateTime(timezone=True), nullable=True)

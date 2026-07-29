@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getTickets, getStatuses, getCategories, deleteTickets, getAgents, updateTicket } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import { useCompany } from '../context/CompanyContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
 import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown } from 'lucide-react'
@@ -48,6 +49,8 @@ export default function Tickets() {
   }
 
   const { isAgentOrAdmin } = useAuth()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -275,6 +278,11 @@ export default function Tickets() {
                                 <Tag size={10} /> {t.category}
                               </span>
                             )}
+                            {itMode && t.charger && (
+                              <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium">
+                                {t.charger}
+                              </span>
+                            )}
                           </div>
                           {/* Title */}
                           <p className="font-semibold text-gray-900 leading-snug group-hover:text-[#1a3353] transition-colors">
@@ -481,6 +489,7 @@ export default function Tickets() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs text-gray-400 font-mono">#{t.id}</span>
                         {t.category && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{t.category}</span>}
+                        {itMode && t.charger && <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">{t.charger}</span>}
                       </div>
                       <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{t.title}</p>
                       {t.client?.company && <p className="text-xs text-gray-500 mt-0.5 truncate">{t.client.company}</p>}
@@ -562,6 +571,7 @@ export default function Tickets() {
                       </td>
                       <td className="px-4 py-3">
                         {t.category ? <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 max-w-[120px] truncate">{t.category}</span> : <span className="text-gray-300 text-xs">—</span>}
+                        {itMode && t.charger && <span className="inline-flex items-center ml-1 px-2 py-0.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700">{t.charger}</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-sm max-w-[140px] truncate">{t.client?.company || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.client?.name}</td>

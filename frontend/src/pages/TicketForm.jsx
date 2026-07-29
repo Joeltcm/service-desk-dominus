@@ -6,6 +6,7 @@ import {
   getContacts, getCompanies, uploadAttachment,
 } from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import { useCompany } from '../context/CompanyContext'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import { ArrowLeft, UserPlus, X, Mail, Phone, Building2, MapPin, Save, Calendar, Clock, Paperclip, FileText, AlertTriangle } from 'lucide-react'
 import { toUTC, getFmtTz } from '../utils/fmt'
@@ -32,6 +33,8 @@ export default function TicketForm() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { user, isAgentOrAdmin } = useAuth()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
 
   const [form, setForm] = useState({
     title: '',
@@ -42,6 +45,7 @@ export default function TicketForm() {
     assigned_to_id: '',
     category: '',
     location: '',
+    charger: '',
     cc_email: '',
     scheduled_at: '',
   })
@@ -238,6 +242,7 @@ export default function TicketForm() {
             assigned_to_id: t.assigned_agent?.id || '',
             category: t.category || '',
             location: t.location || '',
+            charger: t.charger || '',
             cc_email: t.cc_email || '',
             scheduled_at: scheduledLocal,
           })
@@ -264,6 +269,10 @@ export default function TicketForm() {
     if (isAgentOrAdmin && !form.client_id) {
       toast.error('Selecciona un cliente')
       clientInputRef.current?.focus()
+      return
+    }
+    if (itMode && !form.charger) {
+      toast.error('Selecciona la opción de Cargador')
       return
     }
     setLoading(true)
@@ -619,6 +628,17 @@ export default function TicketForm() {
               ) : null}
             </div>
           </div>
+
+          {itMode && (
+            <div>
+              <label className="label">Cargador *</label>
+              <select name="charger" className="input" style={{fontSize:'16px'}} value={form.charger} onChange={handleChange} required>
+                <option value="">Seleccionar…</option>
+                <option value="Con cargador">Con cargador</option>
+                <option value="Sin cargador">Sin cargador</option>
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="label">CC (correo con copia)</label>
