@@ -1256,7 +1256,11 @@ _backfill_client_ids()
 
 def _seed_fleet():
     """Importa la flota inicial (contratos + impresoras) una sola vez.
-    Omitido en SQLite (desarrollo local) y cuando ya hay impresoras en la DB."""
+    Omitido en SQLite (desarrollo local) y cuando ya hay impresoras en la DB.
+    Datos específicos de la organización DG: se salta si SEED_ORG_DATA=off
+    (instancias de otros clientes arrancan sin la flota de DG)."""
+    if os.getenv("SEED_ORG_DATA", "true").strip().lower() not in ("1", "true", "yes"):
+        return
     if is_sqlite:
         return
     db = SessionLocal()
@@ -1701,7 +1705,10 @@ if not is_sqlite:
 
 
 def _seed_supply_lots():
-    """Carga inicial del inventario de suministros desde CSV 2026-06-17. Idempotente."""
+    """Carga inicial del inventario de suministros desde CSV 2026-06-17. Idempotente.
+    Datos específicos de DG: se salta si SEED_ORG_DATA=off."""
+    if os.getenv("SEED_ORG_DATA", "true").strip().lower() not in ("1", "true", "yes"):
+        return
     from datetime import date as _d
     db = SessionLocal()
     try:
