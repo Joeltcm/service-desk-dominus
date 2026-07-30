@@ -291,7 +291,7 @@ def _migrate():
         except Exception:
             pass
         # ── Soft-delete columns ───────────────────────────────────────────────
-        for tbl in ("tickets", "invoices", "quotes", "expenses", "contacts", "companies", "orders", "dispatches"):
+        for tbl in ("tickets", "invoices", "quotes", "expenses", "contacts", "companies", "orders", "dispatches", "kb_articles"):
             try:
                 conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN deleted_at DATETIME"))
                 conn.commit()
@@ -464,7 +464,7 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
-        for tbl in ("tickets", "invoices", "quotes", "expenses", "contacts", "companies", "orders", "dispatches"):
+        for tbl in ("tickets", "invoices", "quotes", "expenses", "contacts", "companies", "orders", "dispatches", "kb_articles"):
             try:
                 conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE"))
                 conn.commit()
