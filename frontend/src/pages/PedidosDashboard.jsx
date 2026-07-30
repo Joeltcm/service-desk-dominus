@@ -113,7 +113,8 @@ const selectCls = 'text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white 
 export default function PedidosDashboard() {
   const navigate = useNavigate()
   const { vertical } = useCompany()
-  const nounPl = vertical === 'it_support' ? 'pedidos' : 'despachos'
+  const itMode = vertical === 'it_support'
+  const nounPl = itMode ? 'pedidos' : 'despachos'
   const now = new Date()
 
   const [data, setData]           = useState(null)
@@ -215,7 +216,7 @@ export default function PedidosDashboard() {
                 bg="bg-sky-100" color="text-sky-500"
               />
               <KpiCard
-                label="Total facturado"
+                label={itMode ? 'Total en pedidos' : 'Total facturado'}
                 value={fmtMoney(data.total_cost)}
                 icon={DollarSign}
                 bg="bg-emerald-100" color="text-emerald-500"
@@ -240,7 +241,7 @@ export default function PedidosDashboard() {
             {/* Monthly trend */}
             {monthData.length > 0 && (
               <div className="card">
-                <h2 className="text-sm font-semibold text-gray-700 mb-4">Facturación por mes</h2>
+                <h2 className="text-sm font-semibold text-gray-700 mb-4">{itMode ? 'Monto de pedidos por mes' : 'Facturación por mes'}</h2>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={monthData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
