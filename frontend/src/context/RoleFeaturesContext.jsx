@@ -7,6 +7,7 @@ export const ROLE_FEATURE_DEFS = [
   { key: 'dashboard_ventas',    label: 'Dashboard Ventas',      roles: ['agent', 'ventas'] },
   { key: 'tickets',             label: 'Tickets',               roles: ['agent', 'client', 'supplies'] },
   { key: 'agenda',              label: 'Agenda',                roles: ['agent', 'client'] },
+  { key: 'mis_documentos',      label: 'Mis Documentos',        roles: ['client'] },
   { key: 'contacts',            label: 'Contactos',             roles: ['agent', 'client'] },
   { key: 'suppliers',           label: 'Proveedores',           roles: ['ventas'] },
   { key: 'quotes',              label: 'Cotizaciones',          roles: ['agent', 'ventas'] },
