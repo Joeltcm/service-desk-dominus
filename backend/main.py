@@ -12,7 +12,7 @@ from database import engine, SessionLocal, is_sqlite, get_db as _get_db_main
 import models
 import storage
 from auth import get_password_hash, get_current_user
-from routers import auth, users, tickets, attachments, calendar, knowledge_base, dashboard, reports, contacts, suppliers, orders, warranties, despacho, companies, quotes, invoices, ventas, settings, expenses, letters, papelera, audit, inventory, opportunities, licenses, push, canned_responses, projects, contracts, printers, supplies, system, stats, part_requests
+from routers import auth, users, tickets, attachments, calendar, knowledge_base, dashboard, reports, contacts, suppliers, orders, warranties, despacho, companies, quotes, invoices, ventas, settings, expenses, letters, papelera, audit, inventory, opportunities, licenses, push, canned_responses, projects, contracts, printers, supplies, system, stats, part_requests, notifications
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -2029,6 +2029,7 @@ app.include_router(expenses.router,      dependencies=[Depends(require_module("g
 app.include_router(despacho.router,      dependencies=[Depends(require_module("pedidos")), Depends(require_module_write("pedidos"))])
 app.include_router(inventory.router,     dependencies=[Depends(require_module("inventario")), Depends(require_module_write("inventario"))])
 app.include_router(part_requests.router, dependencies=[Depends(require_module("tickets"))])
+app.include_router(notifications.router)
 app.include_router(suppliers.router,     dependencies=[Depends(require_module("proveedores")), Depends(require_module_write("suppliers"))])
 app.include_router(warranties.router,    dependencies=[Depends(require_module("garantias")), Depends(require_module_write("warranties"))])
 app.include_router(licenses.router,      dependencies=[Depends(require_module("licencias"))])

@@ -703,6 +703,19 @@ class PartRequest(Base):
     approved_by = relationship("User", foreign_keys=[approved_by_id])
 
 
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    body = Column(String(500), nullable=True)
+    url = Column(String(300), nullable=True)
+    kind = Column(String(40), nullable=True)   # part_request | part_decision | ...
+    read = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CannedResponse(Base):
     __tablename__ = "canned_responses"
 

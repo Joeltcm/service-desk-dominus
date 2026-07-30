@@ -382,6 +382,12 @@ export const cancelPartRequest = (id) => api.post(`/part-requests/${id}/cancel`)
 export const returnPartRequest = (id, data = {}) => api.post(`/part-requests/${id}/return`, data)
 export const getPartRequestsPending = () => api.get('/part-requests/pending-count')
 
+// Notificaciones (para todos los usuarios)
+export const getNotifications = () => api.get('/notifications')
+export const getNotificationsUnread = () => api.get('/notifications/unread-count')
+export const markNotificationRead = (id) => api.post(`/notifications/${id}/read`)
+export const markAllNotificationsRead = () => api.post('/notifications/read-all')
+
 // Time Tracking
 export const getTimeLogs = (ticketId) => api.get(`/tickets/${ticketId}/time-logs`)
 export const addTimeLog = (ticketId, data) => api.post(`/tickets/${ticketId}/time-logs`, data)

@@ -67,19 +67,21 @@ def create_part_request(
     db.commit()
     db.refresh(pr)
 
-    # Notifica (push + campana) a administradores y responsables de inventario.
+    # Notifica (campana + push) a administradores y responsables de inventario.
     try:
-        from push_helper import notify_roles
-        notify_roles(
+        from notify import notify_roles as notify_roles_inapp
+        notify_roles_inapp(
             db,
             [models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supplies],
             "Nueva solicitud de parte",
             f"{current_user.name}: {item.name} (x{data.quantity}) · Ticket #{data.ticket_id}",
             url="/partes",
+            kind="part_request",
             exclude_user_id=current_user.id,
         )
+        db.commit()
     except Exception:
-        pass
+        db.rollback()
     return _serialize(pr)
 
 
@@ -166,6 +168,17 @@ def approve_part_request(
     pr.approved_by_id = current_user.id
     pr.decision_notes = (data.decision_notes or None)
     pr.decided_at = datetime.now(timezone.utc)
+    if pr.requested_by_id:
+        try:
+            from notify import create_notification
+            create_notification(
+                db, pr.requested_by_id,
+                "Solicitud de parte aprobada ✓",
+                f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — aprobó {current_user.name}",
+                url=f"/tickets/{pr.ticket_id}", kind="part_decision",
+            )
+        except Exception:
+            pass
     db.commit()
     db.refresh(pr)
     return _serialize(pr)
@@ -225,6 +238,18 @@ def reject_part_request(
     pr.approved_by_id = current_user.id
     pr.decision_notes = (data.decision_notes or None)
     pr.decided_at = datetime.now(timezone.utc)
+    if pr.requested_by_id:
+        try:
+            from notify import create_notification
+            create_notification(
+                db, pr.requested_by_id,
+                "Solicitud de parte rechazada",
+                f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — {current_user.name}"
+                + (f": {pr.decision_notes}" if pr.decision_notes else ""),
+                url=f"/tickets/{pr.ticket_id}", kind="part_decision",
+            )
+        except Exception:
+            pass
     db.commit()
     db.refresh(pr)
     return _serialize(pr)
