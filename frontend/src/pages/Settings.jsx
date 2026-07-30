@@ -785,8 +785,8 @@ function LevelSelect({ value, onChange }) {
         const active = value === lvl
         return (
           <button key={lvl} type="button" title={m.label} onClick={() => onChange(lvl)}
-            className={`px-2 py-1.5 flex items-center justify-center transition-colors ${active ? m.active : 'text-gray-300 hover:bg-gray-50'}`}>
-            <m.Icon size={13} />
+            className={`px-1.5 py-1 flex items-center justify-center transition-colors ${active ? m.active : 'text-gray-300 hover:bg-gray-50'}`}>
+            <m.Icon size={12} />
           </button>
         )
       })}
@@ -823,7 +823,7 @@ export function RoleFeaturesPanel() {
   if (!features) return <div className="p-6 text-center text-sm text-gray-400">Cargando permisos...</div>
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4">
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4 w-full min-w-0 max-w-full">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50 flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <Shield size={16} className="text-violet-600" />
@@ -845,12 +845,12 @@ export function RoleFeaturesPanel() {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
+        <table className="w-full text-sm min-w-[600px]">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 w-full">MÓDULO</th>
               {CONFIGURABLE_ROLES.map(r => (
-                <th key={r.value} className="px-4 py-3 text-center w-28">
+                <th key={r.value} className="px-2 py-3 text-center w-24">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${r.color}`}>{r.label}</span>
                 </th>
               ))}
@@ -864,7 +864,7 @@ export function RoleFeaturesPanel() {
                   const eligible = feat.roles.includes(r.value)
                   const level = normLevel(features[r.value]?.[feat.key]) ?? 'write'
                   return (
-                    <td key={r.value} className="px-4 py-3 text-center">
+                    <td key={r.value} className="px-2 py-3 text-center">
                       {eligible ? (
                         <div className="flex justify-center">
                           <LevelSelect value={level} onChange={(lvl) => setLevel(r.value, feat.key, lvl)} />
