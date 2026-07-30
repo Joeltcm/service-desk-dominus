@@ -379,6 +379,7 @@ export const createPartRequest = (data) => api.post('/part-requests', data)
 export const approvePartRequest = (id, data = {}) => api.post(`/part-requests/${id}/approve`, data)
 export const rejectPartRequest = (id, data = {}) => api.post(`/part-requests/${id}/reject`, data)
 export const cancelPartRequest = (id) => api.post(`/part-requests/${id}/cancel`)
+export const returnPartRequest = (id, data = {}) => api.post(`/part-requests/${id}/return`, data)
 export const getPartRequestsPending = () => api.get('/part-requests/pending-count')
 
 // Time Tracking

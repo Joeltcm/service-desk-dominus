@@ -48,11 +48,13 @@ function fmtQty(q) {
 
 const SOURCE_LABEL = {
   manual:           'Ajuste manual',
-  dispatch:         'Salida por pedido',
-  dispatch_revert:  'Reposición de pedido',
-  invoice:          'Factura',
-  order:            'Pedido',
-  consumo_interno:  'Consumo interno',
+  dispatch:            'Salida por pedido',
+  dispatch_revert:     'Reposición de pedido',
+  ticket_part:         'Salida por ticket (parte)',
+  ticket_part_return:  'Devolución de parte (ticket)',
+  invoice:             'Factura',
+  order:               'Pedido',
+  consumo_interno:     'Consumo interno',
 }
 
 const SOURCE_COLOR = {

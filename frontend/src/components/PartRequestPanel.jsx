@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest } from '../services/api'
+import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest, returnPartRequest } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { Boxes, Plus, Check, X, Search, Clock, Ban } from 'lucide-react'
+import { Boxes, Plus, Check, X, Search, Clock, Ban, Undo2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const STATUS = {
@@ -9,6 +9,7 @@ const STATUS = {
   aprobado:  { label: 'Aprobado',  cls: 'bg-emerald-100 text-emerald-700' },
   rechazado: { label: 'Rechazado', cls: 'bg-red-100 text-red-700' },
   cancelado: { label: 'Cancelado', cls: 'bg-gray-100 text-gray-500' },
+  devuelto:  { label: 'Devuelto',  cls: 'bg-blue-100 text-blue-700' },
 }
 
 export default function PartRequestPanel({ ticketId }) {
@@ -51,6 +52,7 @@ export default function PartRequestPanel({ ticketId }) {
     try {
       if (action === 'approve') { await approvePartRequest(id); toast.success('Aprobado · descontado del inventario') }
       else if (action === 'cancel') { await cancelPartRequest(id); toast.success('Solicitud cancelada') }
+      else if (action === 'return') { await returnPartRequest(id); toast.success('Parte devuelta · repuesta al inventario') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()
     } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
@@ -119,6 +121,12 @@ export default function PartRequestPanel({ ticketId }) {
                       <span className="text-xs text-amber-500 flex items-center gap-1"><Clock size={12} /> En espera</span>
                     )}
                   </div>
+                )}
+                {r.status === 'aprobado' && isApprover && (
+                  <button onClick={() => decide(r.id, 'return')} disabled={acting === r.id}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 text-xs hover:bg-blue-50 disabled:opacity-50 flex-shrink-0" title="Devolver la parte al inventario">
+                    <Undo2 size={13} /> Devolver
+                  </button>
                 )}
               </div>
             )

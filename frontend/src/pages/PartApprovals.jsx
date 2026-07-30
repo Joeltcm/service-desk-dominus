@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getPartRequests, approvePartRequest, rejectPartRequest } from '../services/api'
-import { Boxes, Check, X, ExternalLink } from 'lucide-react'
+import { getPartRequests, approvePartRequest, rejectPartRequest, returnPartRequest } from '../services/api'
+import { Boxes, Check, X, ExternalLink, Undo2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { fmtDT } from '../utils/fmt'
 
@@ -10,8 +10,9 @@ const STATUS = {
   aprobado:  { label: 'Aprobado',  cls: 'bg-emerald-100 text-emerald-700' },
   rechazado: { label: 'Rechazado', cls: 'bg-red-100 text-red-700' },
   cancelado: { label: 'Cancelado', cls: 'bg-gray-100 text-gray-500' },
+  devuelto:  { label: 'Devuelto',  cls: 'bg-blue-100 text-blue-700' },
 }
-const FILTERS = [['pendiente', 'Pendientes'], ['aprobado', 'Aprobadas'], ['rechazado', 'Rechazadas'], ['', 'Todas']]
+const FILTERS = [['pendiente', 'Pendientes'], ['aprobado', 'Aprobadas'], ['rechazado', 'Rechazadas'], ['devuelto', 'Devueltas'], ['', 'Todas']]
 
 export default function PartApprovals() {
   const navigate = useNavigate()
@@ -33,6 +34,7 @@ export default function PartApprovals() {
     setActing(id)
     try {
       if (action === 'approve') { await approvePartRequest(id); toast.success('Aprobado · descontado del inventario') }
+      else if (action === 'return') { await returnPartRequest(id); toast.success('Parte devuelta · repuesta al inventario') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()
     } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
@@ -95,6 +97,12 @@ export default function PartApprovals() {
                         <X size={14} /> <span className="hidden sm:inline">Rechazar</span>
                       </button>
                     </div>
+                  )}
+                  {r.status === 'aprobado' && (
+                    <button onClick={() => decide(r.id, 'return')} disabled={acting === r.id}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-200 text-blue-600 text-sm hover:bg-blue-50 disabled:opacity-50 flex-shrink-0" title="Devolver al inventario">
+                      <Undo2 size={14} /> <span className="hidden sm:inline">Devolver</span>
+                    </button>
                   )}
                 </div>
               )

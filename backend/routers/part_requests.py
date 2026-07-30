@@ -171,6 +171,44 @@ def approve_part_request(
     return _serialize(pr)
 
 
+@router.post("/{req_id}/return", response_model=schemas.PartRequestOut)
+def return_part_request(
+    req_id: int,
+    data: schemas.PartRequestDecision,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin_or_supplies),
+):
+    """Devuelve al inventario una parte que ya fue aprobada/despachada (repone el stock)."""
+    pr = db.query(models.PartRequest).filter(models.PartRequest.id == req_id).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if pr.status != "aprobado":
+        raise HTTPException(status_code=400, detail=f"Solo se pueden devolver partes aprobadas (actual: '{pr.status}')")
+
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
+    if item:
+        try:
+            qty = float(pr.quantity or "0")
+            current = float(item.quantity or "0")
+        except (ValueError, TypeError):
+            qty, current = 0.0, 0.0
+        item.quantity = f"{current + qty:.4f}".rstrip("0").rstrip(".") or "0"
+        db.add(models.InventoryTransaction(
+            item_code=pr.item_code,
+            qty_delta=f"+{qty:.4f}".rstrip("0").rstrip("."),
+            source_type="ticket_part_return",
+            source_id=pr.ticket_id,
+            notes=f"Devolución de parte · ticket #{pr.ticket_id} · {current_user.name}",
+        ))
+    pr.status = "devuelto"
+    pr.approved_by_id = current_user.id
+    pr.decision_notes = (data.decision_notes or pr.decision_notes)
+    pr.decided_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(pr)
+    return _serialize(pr)
+
+
 @router.post("/{req_id}/reject", response_model=schemas.PartRequestOut)
 def reject_part_request(
     req_id: int,
