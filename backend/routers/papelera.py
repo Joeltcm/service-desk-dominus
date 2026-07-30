@@ -80,6 +80,22 @@ def restore_item(
     return {"ok": True, "message": f"{display_name} restaurado"}
 
 
+def _purge_ticket_dependents(db: Session, ticket_id: int):
+    """Elimina/desvincula todo lo que referencia al ticket antes de borrarlo de forma
+    permanente, evitando violaciones de llave foránea (FK NOT NULL)."""
+    # Hijos que se eliminan junto con el ticket.
+    db.query(models.TicketTimeline).filter(models.TicketTimeline.ticket_id == ticket_id).delete(synchronize_session=False)
+    db.query(models.TicketAttachment).filter(models.TicketAttachment.ticket_id == ticket_id).delete(synchronize_session=False)
+    db.query(models.TicketVisit).filter(models.TicketVisit.ticket_id == ticket_id).delete(synchronize_session=False)
+    db.query(models.PartRequest).filter(models.PartRequest.ticket_id == ticket_id).delete(synchronize_session=False)
+    # Documentos independientes: solo se desvinculan (no se borran).
+    db.query(models.Order).filter(models.Order.ticket_id == ticket_id).update({"ticket_id": None}, synchronize_session=False)
+    db.query(models.Quote).filter(models.Quote.ticket_id == ticket_id).update({"ticket_id": None}, synchronize_session=False)
+    db.query(models.Invoice).filter(models.Invoice.ticket_id == ticket_id).update({"ticket_id": None}, synchronize_session=False)
+    # Sub-tickets: se desvinculan del padre.
+    db.query(models.Ticket).filter(models.Ticket.parent_id == ticket_id).update({"parent_id": None}, synchronize_session=False)
+
+
 @router.delete("/{entity_type}/{item_id}")
 def permanent_delete(
     entity_type: str,
@@ -100,6 +116,8 @@ def permanent_delete(
 
     name = _entity_name(obj, name_field)
     log_action(db, current_user, "permanent_delete", entity_type, obj.id, name)
+    if entity_type == "ticket":
+        _purge_ticket_dependents(db, obj.id)
     db.delete(obj)
     db.commit()
     return {"ok": True, "message": f"{display_name} eliminado permanentemente"}
