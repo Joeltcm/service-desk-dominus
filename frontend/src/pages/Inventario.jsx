@@ -2,15 +2,17 @@ import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, getAllInventoryTransactions, getSuppliers, importInventoryCSV } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download } from 'lucide-react'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { useCompany } from '../context/CompanyContext'
+import { useCompany, getCompanyCache } from '../context/CompanyContext'
+import { openPdfWindow } from '../utils/pdfViewer'
 
 const EMPTY_FORM = {
   code: '', name: '', description: '', unit: 'unidad',
   unit_price: '0.00', cost_price: '0.00', quantity: '0', category: '', notes: '', warehouse: 'principal', supplier_id: '',
+  condition: 'nuevo', item_status: 'ingresado', location: '',
 }
 
 const UNITS = ['unidad', 'caja', 'metro', 'rollo', 'par', 'juego', 'litro', 'kg', 'hora']
@@ -20,6 +22,23 @@ const WAREHOUSE_LABEL = {
   principal:       'Principal',
   partes:          'Bodega de Partes',
   impresoras_mps:  'Bodega de Impresoras MPS',
+}
+
+const CONDITIONS = ['nuevo', 'funcional', 'dañado', 'incompleto']
+const CONDITION_LABEL = { nuevo: 'Nuevo', funcional: 'Funcional', 'dañado': 'Dañado', incompleto: 'Incompleto' }
+const CONDITION_COLOR = {
+  nuevo:      'bg-emerald-100 text-emerald-700',
+  funcional:  'bg-blue-100 text-blue-700',
+  'dañado':   'bg-red-100 text-red-700',
+  incompleto: 'bg-amber-100 text-amber-700',
+}
+
+const ITEM_STATUSES = ['ingresado', 'revisado', 'por_devolver']
+const ITEM_STATUS_LABEL = { ingresado: 'Ingresado', revisado: 'Revisado', por_devolver: 'Por devolver' }
+const ITEM_STATUS_COLOR = {
+  ingresado:    'bg-slate-100 text-slate-700',
+  revisado:     'bg-indigo-100 text-indigo-700',
+  por_devolver: 'bg-orange-100 text-orange-700',
 }
 
 function fmtQty(q) {
@@ -90,6 +109,9 @@ export default function Inventario() {
   const [sortDir, setSortDir] = useState('asc')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterWarehouse, setFilterWarehouse] = useState('')
+  const [filterCondition, setFilterCondition] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterLocation, setFilterLocation] = useState('')
   const [tab, setTab] = useState('items')
   const [allTxns, setAllTxns] = useState([])
   const [allTxnsLoading, setAllTxnsLoading] = useState(false)
@@ -115,13 +137,27 @@ export default function Inventario() {
   useEffect(() => { getSuppliers().then(r => setSuppliers(r.data)).catch(() => {}) }, [])
 
   const categories = [...new Set(items.map(i => i.category).filter(Boolean))].sort()
+  const locations = [...new Set(items.map(i => i.location).filter(Boolean))].sort()
+  // Descripciones existentes (para autocomplete y detección de duplicados)
+  const descriptions = [...new Set(items.map(i => i.description).filter(Boolean))].sort()
+  const names = [...new Set(items.map(i => i.name).filter(Boolean))].sort()
+
+  // Aviso: descripción igual a otro artículo YA cargado con un código distinto.
+  const descDup = (() => {
+    const d = (form.description || '').trim().toLowerCase()
+    if (!d) return null
+    return items.find(it => (it.description || '').trim().toLowerCase() === d && it.code !== form.code) || null
+  })()
 
   const filtered = items.filter(it => {
     const q = search.toLowerCase()
-    const matchSearch = !q || it.code.toLowerCase().includes(q) || it.name.toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q)
+    const matchSearch = !q || it.code.toLowerCase().includes(q) || it.name.toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q) || (it.location || '').toLowerCase().includes(q)
     const matchCat = !filterCategory || it.category === filterCategory
     const matchWarehouse = !filterWarehouse || it.warehouse === filterWarehouse
-    return matchSearch && matchCat && matchWarehouse
+    const matchCondition = !filterCondition || it.condition === filterCondition
+    const matchStatus = !filterStatus || it.item_status === filterStatus
+    const matchLocation = !filterLocation || it.location === filterLocation
+    return matchSearch && matchCat && matchWarehouse && matchCondition && matchStatus && matchLocation
   }).sort((a, b) => {
     let va = a[sortField] || ''
     let vb = b[sortField] || ''
@@ -157,6 +193,9 @@ export default function Inventario() {
       quantity: item.quantity || '0', category: item.category || '', notes: item.notes || '',
       warehouse: item.warehouse || 'principal',
       supplier_id: item.supplier_id || '',
+      condition: item.condition || 'nuevo',
+      item_status: item.item_status || 'ingresado',
+      location: item.location || '',
     })
     setShowForm(true)
   }
@@ -184,14 +223,62 @@ export default function Inventario() {
   }
 
   const downloadTemplate = () => {
-    const headers = ['codigo', 'nombre', 'categoria', 'descripcion', 'unidad', 'precio_venta', 'costo', 'stock', 'proveedor', 'bodega']
-    const example = ['CAB-001', 'Cable HDMI 2m', 'Cables', 'Cable HDMI alta velocidad', 'unidad', '12.50', '7.00', '10', '', 'Principal']
+    const headers = ['codigo', 'nombre', 'categoria', 'descripcion', 'unidad', 'precio_venta', 'costo', 'stock', 'proveedor', 'bodega', 'condicion', 'estado', 'ubicacion']
+    const example = ['CAB-001', 'Cable HDMI 2m', 'Cables', 'Cable HDMI alta velocidad', 'unidad', '12.50', '7.00', '10', '', 'Principal', 'nuevo', 'ingresado', 'Estante A-3']
     const csv = headers.join(',') + '\n' + example.join(',') + '\n'
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url; a.download = 'plantilla_inventario.csv'; a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const exportPDF = () => {
+    if (filtered.length === 0) { toast.error('No hay artículos para exportar'); return }
+    const co = getCompanyCache()
+    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const supplierName = (id) => suppliers.find(s => s.id === id)?.name || '—'
+    const th = 'padding:5px 6px;text-align:left;font-size:7.5pt;border:1px solid #2d4d7a;white-space:nowrap'
+    const td = 'padding:4px 6px;border:1px solid #d1d5db;font-size:7.5pt;vertical-align:top'
+    const rows = filtered.map((it, i) => `<tr style="background:${i % 2 ? '#fff' : '#f8f9fb'}">
+      <td style="${td};font-family:monospace">${esc(it.code)}</td>
+      <td style="${td}">${esc(it.name)}${it.description ? `<div style="font-size:6.5pt;color:#666">${esc(it.description)}</div>` : ''}</td>
+      <td style="${td}">${esc(it.category || '—')}</td>
+      <td style="${td}">${esc(CONDITION_LABEL[it.condition] || it.condition || '—')}</td>
+      <td style="${td}">${esc(ITEM_STATUS_LABEL[it.item_status] || it.item_status || '—')}</td>
+      <td style="${td}">${esc(it.location || '—')}</td>
+      <td style="${td}">${esc(WAREHOUSE_LABEL[it.warehouse] || it.warehouse || '—')}</td>
+      <td style="${td};text-align:right;white-space:nowrap">${esc(fmtQty(it.quantity))} ${esc(it.unit || '')}</td>
+      <td style="${td}">${esc(supplierName(it.supplier_id))}</td>
+      <td style="${td};text-align:right">$${parseFloat(it.cost_price || '0').toFixed(2)}</td>
+      <td style="${td};text-align:right">$${parseFloat(it.unit_price || '0').toFixed(2)}</td>
+    </tr>`).join('')
+    const totalValue = filtered.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0), 0)
+    const filterNote = [
+      filterCategory && `Categoría: ${filterCategory}`,
+      filterWarehouse && `Bodega: ${WAREHOUSE_LABEL[filterWarehouse]}`,
+      filterCondition && `Condición: ${CONDITION_LABEL[filterCondition]}`,
+      filterStatus && `Estado: ${ITEM_STATUS_LABEL[filterStatus]}`,
+      filterLocation && `Ubicación: ${filterLocation}`,
+      search && `Búsqueda: "${search}"`,
+    ].filter(Boolean).join(' · ')
+    const body = `<div style="font-family:Arial,sans-serif;color:#111;padding:4px">
+      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1e3a5f;padding-bottom:6px;margin-bottom:8px">
+        <div><div style="font-size:14pt;font-weight:bold;color:#1e3a5f">${esc(co.company_name || 'Inventario')}</div>
+        <div style="font-size:8pt;color:#555">Reporte de inventario${filterNote ? ` · ${esc(filterNote)}` : ''}</div></div>
+        <div style="text-align:right;font-size:8pt;color:#555">${filtered.length} artículo(s)<br>Valor total: <b>$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#1e3a5f;color:#fff">
+          <th style="${th}">Código</th><th style="${th}">Nombre / Descripción</th><th style="${th}">Categoría</th>
+          <th style="${th}">Condición</th><th style="${th}">Estado</th><th style="${th}">Ubicación</th><th style="${th}">Bodega</th>
+          <th style="${th};text-align:right">Stock</th><th style="${th}">Proveedor</th>
+          <th style="${th};text-align:right">Costo</th><th style="${th};text-align:right">P. venta</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`
+    openPdfWindow('Inventario', body, { extraCss: '@page{size:A4 landscape;margin:8mm}' })
   }
 
   const handleSave = async () => {
@@ -314,6 +401,9 @@ export default function Inventario() {
             </button>
             <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-60">
               <Upload size={14} /> {importing ? 'Importando…' : 'Importar CSV'}
+            </button>
+            <button onClick={exportPDF} title="Exportar a PDF lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
+              <FileText size={14} /> <span className="hidden sm:inline">Exportar PDF</span>
             </button>
             <button onClick={openNew} className="btn-primary flex items-center gap-2">
               <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
@@ -527,6 +617,20 @@ export default function Inventario() {
           <option value="">Todas las bodegas</option>
           {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
         </select>
+        <select className="input py-2 text-sm" value={filterCondition} onChange={e => setFilterCondition(e.target.value)}>
+          <option value="">Toda condición</option>
+          {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
+        </select>
+        <select className="input py-2 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="">Todo estado</option>
+          {ITEM_STATUSES.map(s => <option key={s} value={s}>{ITEM_STATUS_LABEL[s]}</option>)}
+        </select>
+        {locations.length > 0 && (
+          <select className="input py-2 text-sm" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+            <option value="">Toda ubicación</option>
+            {locations.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Table */}
@@ -574,6 +678,11 @@ export default function Inventario() {
                   <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      {it.condition && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span>}
+                      {it.item_status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span>}
+                      {it.location && <span className="text-[10px] text-gray-500">📍 {it.location}</span>}
+                    </div>
                     {/* "Valor" visible en móvil/tablet dentro de la celda Nombre */}
                     <p className="text-xs text-emerald-700 font-semibold lg:hidden mt-0.5">
                       Valor: ${((parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0)).toFixed(2)}
@@ -745,12 +854,26 @@ export default function Inventario() {
               <div>
                 <label className="label">Nombre *</label>
                 <input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Nombre del artículo o servicio" style={{ fontSize: '16px' }} />
+                  placeholder="Nombre del artículo o servicio" style={{ fontSize: '16px' }} list="inv-names" />
+                <datalist id="inv-names">
+                  {names.map(n => <option key={n} value={n} />)}
+                </datalist>
               </div>
               <div>
                 <label className="label">Descripción</label>
-                <textarea className="input h-16 resize-none" value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+                <input className="input" value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Descripción del artículo" style={{ fontSize: '16px' }} list="inv-descs" />
+                <datalist id="inv-descs">
+                  {descriptions.map(d => <option key={d} value={d} />)}
+                </datalist>
+                {descDup && (
+                  <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
+                    <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                    <span>Esta descripción ya existe en <span className="font-semibold">{descDup.code}</span>
+                      {descDup.name ? ` · ${descDup.name}` : ''} (código distinto). ¿Es un duplicado?</span>
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
@@ -788,6 +911,28 @@ export default function Inventario() {
                   <option value="">— Sin proveedor —</option>
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="label">Condición</label>
+                  <select className="input" value={form.condition} onChange={e => setForm(f => ({ ...f, condition: e.target.value }))}>
+                    {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Estado</label>
+                  <select className="input" value={form.item_status} onChange={e => setForm(f => ({ ...f, item_status: e.target.value }))}>
+                    {ITEM_STATUSES.map(s => <option key={s} value={s}>{ITEM_STATUS_LABEL[s]}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Ubicación</label>
+                  <input className="input" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                    placeholder="Ej: Estante A-3" style={{ fontSize: '16px' }} list="inv-locs" />
+                  <datalist id="inv-locs">
+                    {locations.map(l => <option key={l} value={l} />)}
+                  </datalist>
+                </div>
               </div>
               <div>
                 <label className="label">Notas</label>

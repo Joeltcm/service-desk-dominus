@@ -15,6 +15,18 @@ _WAREHOUSE_ALIASES = {
     "impresoras_mps": "impresoras_mps", "bodega de impresoras mps": "impresoras_mps",
 }
 
+_CONDITION_ALIASES = {
+    "nuevo": "nuevo", "funcional": "funcional",
+    "dañado": "dañado", "danado": "dañado", "dañada": "dañado",
+    "incompleto": "incompleto", "incompleta": "incompleto",
+}
+
+_STATUS_ALIASES = {
+    "ingresado": "ingresado", "ingresada": "ingresado",
+    "revisado": "revisado", "revisada": "revisado",
+    "por_devolver": "por_devolver", "por devolver": "por_devolver",
+}
+
 
 def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None):
     delta_str = f"{qty_delta:.4f}".rstrip("0").rstrip(".")
@@ -260,6 +272,14 @@ async def import_inventory_csv(
                 errors.append({"row": i, "message": f"Proveedor '{prov}' no existe (quedó sin proveedor)"})
         wh = (r.get("bodega") or r.get("warehouse") or "").strip().lower()
         warehouse = _WAREHOUSE_ALIASES.get(wh, "principal")
+        cond_raw = (r.get("condicion") or r.get("condición") or "").strip().lower()
+        condition = _CONDITION_ALIASES.get(cond_raw, "nuevo") if cond_raw else "nuevo"
+        if cond_raw and cond_raw not in _CONDITION_ALIASES:
+            errors.append({"row": i, "message": f"Condición '{cond_raw}' inválida (se usó 'nuevo')"})
+        st_raw = (r.get("estado") or r.get("item_status") or "").strip().lower()
+        item_status = _STATUS_ALIASES.get(st_raw, "ingresado") if st_raw else "ingresado"
+        if st_raw and st_raw not in _STATUS_ALIASES:
+            errors.append({"row": i, "message": f"Estado '{st_raw}' inválido (se usó 'ingresado')"})
         fields = {
             "name": name,
             "description": r.get("descripcion") or r.get("descripción") or None,
@@ -269,6 +289,9 @@ async def import_inventory_csv(
             "quantity": r.get("stock") or r.get("cantidad") or "0",
             "category": r.get("categoria") or r.get("categoría") or None,
             "warehouse": warehouse,
+            "condition": condition,
+            "item_status": item_status,
+            "location": r.get("ubicacion") or r.get("ubicación") or None,
         }
         if supplier_id is not None:
             fields["supplier_id"] = supplier_id

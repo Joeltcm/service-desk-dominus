@@ -647,6 +647,9 @@ class InventoryItem(Base):
     is_active = Column(Boolean, default=True)
     warehouse = Column(String(30), nullable=False, default="principal")  # principal | suministros_mps | partes | impresoras_mps
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    condition = Column(String(20), nullable=True, default="nuevo")       # nuevo | funcional | dañado | incompleto
+    item_status = Column(String(20), nullable=True, default="ingresado")  # ingresado | revisado | por_devolver
+    location = Column(String(150), nullable=True)                         # ubicación física dentro de la bodega
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

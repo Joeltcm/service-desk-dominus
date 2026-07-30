@@ -888,6 +888,18 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        # ── Condición / estado / ubicación del artículo de inventario ──
+        for _col, _type, _default in (
+            ("condition", "VARCHAR(20)", "'nuevo'"),
+            ("item_status", "VARCHAR(20)", "'ingresado'"),
+            ("location", "VARCHAR(150)", None),
+        ):
+            try:
+                _def = f" DEFAULT {_default}" if _default else ""
+                conn.execute(text(f"ALTER TABLE inventory ADD COLUMN IF NOT EXISTS {_col} {_type}{_def}"))
+                conn.commit()
+            except Exception:
+                pass
         # ── Factura externa (texto libre) en garantías ──
         try:
             conn.execute(text("ALTER TABLE warranties ADD COLUMN IF NOT EXISTS invoice_ref VARCHAR(100)"))
