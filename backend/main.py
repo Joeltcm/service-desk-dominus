@@ -882,6 +882,12 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        # ── Proveedor del artículo de inventario ──
+        try:
+            conn.execute(text("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier_id INTEGER REFERENCES suppliers(id)"))
+            conn.commit()
+        except Exception:
+            pass
         # ── Tipo de contrato (MPS | Soporte) ──
         try:
             conn.execute(text("ALTER TABLE contracts ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50) DEFAULT 'MPS'"))

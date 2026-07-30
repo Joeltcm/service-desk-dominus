@@ -645,8 +645,11 @@ class InventoryItem(Base):
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     warehouse = Column(String(30), nullable=False, default="principal")  # principal | suministros_mps | partes | impresoras_mps
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    supplier = relationship("Supplier")
 
 
 class TicketTimeLog(Base):

@@ -1,10 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
+import csv, io
 import models, schemas
 from database import get_db
 from auth import require_staff, require_agent_or_admin, require_supplies_or_above
+
+# Mapea etiquetas/claves de bodega del CSV a la clave interna del enum.
+_WAREHOUSE_ALIASES = {
+    "principal": "principal", "bodega principal": "principal",
+    "partes": "partes", "bodega de partes": "partes",
+    "suministros_mps": "suministros_mps", "suministros mps": "suministros_mps",
+    "impresoras_mps": "impresoras_mps", "bodega de impresoras mps": "impresoras_mps",
+}
 
 
 def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None):
@@ -205,6 +214,74 @@ def create_inventory_item(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.post("/import")
+async def import_inventory_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    """Importa/actualiza artículos desde CSV (upsert por código).
+    Columnas: codigo, nombre, categoria, descripcion, unidad, precio_venta, costo, stock, proveedor, bodega."""
+    if not (file.filename or "").lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser .csv")
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El archivo excede 5 MB")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    sample = text[:2048]
+    delim = ";" if sample.count(";") > sample.count(",") else ","
+    reader = csv.DictReader(io.StringIO(text), delimiter=delim)
+
+    def norm(s):
+        return (s or "").strip().lower().replace(" ", "_")
+
+    suppliers = {s.name.strip().lower(): s.id for s in db.query(models.Supplier).all() if s.name}
+
+    created = updated = 0
+    errors = []
+    for i, row in enumerate(reader, start=2):  # fila 1 = encabezados
+        r = {norm(k): (v.strip() if isinstance(v, str) else v) for k, v in row.items() if k is not None}
+        code = r.get("codigo") or r.get("code") or r.get("código")
+        name = r.get("nombre") or r.get("name")
+        if not code or not name:
+            if any((v for v in r.values() if v)):
+                errors.append({"row": i, "message": "Falta código o nombre"})
+            continue
+        supplier_id = None
+        prov = r.get("proveedor")
+        if prov:
+            supplier_id = suppliers.get(prov.lower())
+            if supplier_id is None:
+                errors.append({"row": i, "message": f"Proveedor '{prov}' no existe (quedó sin proveedor)"})
+        wh = (r.get("bodega") or r.get("warehouse") or "").strip().lower()
+        warehouse = _WAREHOUSE_ALIASES.get(wh, "principal")
+        fields = {
+            "name": name,
+            "description": r.get("descripcion") or r.get("descripción") or None,
+            "unit": r.get("unidad") or "unidad",
+            "unit_price": r.get("precio_venta") or r.get("precio") or "0.00",
+            "cost_price": r.get("costo") or "0.00",
+            "quantity": r.get("stock") or r.get("cantidad") or "0",
+            "category": r.get("categoria") or r.get("categoría") or None,
+            "warehouse": warehouse,
+        }
+        if supplier_id is not None:
+            fields["supplier_id"] = supplier_id
+        existing = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+        if existing:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+            updated += 1
+        else:
+            db.add(models.InventoryItem(code=code, **fields))
+            created += 1
+    db.commit()
+    return {"created": created, "updated": updated, "error_count": len(errors), "errors": errors[:100]}
 
 
 @router.put("/{item_id}", response_model=schemas.InventoryItemOut)

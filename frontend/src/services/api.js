@@ -367,6 +367,11 @@ export const deleteInventoryItem = (id) => api.delete(`/inventory/${id}`)
 export const getInventoryTransactions = (id, limit = 50) => api.get(`/inventory/${id}/transactions`, { params: { limit } })
 export const withdrawInventoryItem = (id, data) => api.post(`/inventory/${id}/withdraw`, data)
 export const getAllInventoryTransactions = (params) => api.get('/inventory/transactions/all', { params })
+export const importInventoryCSV = (file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/inventory/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
 
 // Time Tracking
 export const getTimeLogs = (ticketId) => api.get(`/tickets/${ticketId}/time-logs`)

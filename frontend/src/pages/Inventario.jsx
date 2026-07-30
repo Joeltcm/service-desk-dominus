@@ -1,15 +1,16 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, getAllInventoryTransactions } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink } from 'lucide-react'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, getAllInventoryTransactions, getSuppliers, importInventoryCSV } from '../services/api'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
+import { useCompany } from '../context/CompanyContext'
 
 const EMPTY_FORM = {
   code: '', name: '', description: '', unit: 'unidad',
-  unit_price: '0.00', cost_price: '0.00', quantity: '0', category: '', notes: '', warehouse: 'principal',
+  unit_price: '0.00', cost_price: '0.00', quantity: '0', category: '', notes: '', warehouse: 'principal', supplier_id: '',
 }
 
 const UNITS = ['unidad', 'caja', 'metro', 'rollo', 'par', 'juego', 'litro', 'kg', 'hora']
@@ -71,6 +72,13 @@ function TxnRow({ txn }) {
 
 export default function Inventario() {
   const navigate = useNavigate()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
+  // En it_support se oculta la bodega de impresoras MPS.
+  const warehouses = itMode ? WAREHOUSES.filter(w => w !== 'impresoras_mps') : WAREHOUSES
+  const fileInputRef = React.useRef(null)
+  const [suppliers, setSuppliers] = useState([])
+  const [importing, setImporting] = useState(false)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -104,6 +112,7 @@ export default function Inventario() {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { getSuppliers().then(r => setSuppliers(r.data)).catch(() => {}) }, [])
 
   const categories = [...new Set(items.map(i => i.category).filter(Boolean))].sort()
 
@@ -147,20 +156,55 @@ export default function Inventario() {
       cost_price: item.cost_price || '0.00',
       quantity: item.quantity || '0', category: item.category || '', notes: item.notes || '',
       warehouse: item.warehouse || 'principal',
+      supplier_id: item.supplier_id || '',
     })
     setShowForm(true)
+  }
+
+  const handleImportCSV = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''  // permite re-seleccionar el mismo archivo
+    if (!file) return
+    setImporting(true)
+    try {
+      const { data } = await importInventoryCSV(file)
+      const parts = [`${data.created} creado(s)`, `${data.updated} actualizado(s)`]
+      if (data.error_count) parts.push(`${data.error_count} con aviso`)
+      toast.success(`Importación: ${parts.join(' · ')}`, { duration: 6000 })
+      if (data.error_count && data.errors?.length) {
+        const preview = data.errors.slice(0, 5).map(er => `Fila ${er.row}: ${er.message}`).join('\n')
+        toast(preview, { duration: 9000, icon: '⚠️' })
+      }
+      load()
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error al importar el CSV')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const downloadTemplate = () => {
+    const headers = ['codigo', 'nombre', 'categoria', 'descripcion', 'unidad', 'precio_venta', 'costo', 'stock', 'proveedor', 'bodega']
+    const example = ['CAB-001', 'Cable HDMI 2m', 'Cables', 'Cable HDMI alta velocidad', 'unidad', '12.50', '7.00', '10', '', 'Principal']
+    const csv = headers.join(',') + '\n' + example.join(',') + '\n'
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'plantilla_inventario.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleSave = async () => {
     if (!form.code.trim()) return toast.error('El código es obligatorio')
     if (!form.name.trim()) return toast.error('El nombre es obligatorio')
     setSaving(true)
+    const payload = { ...form, supplier_id: form.supplier_id ? Number(form.supplier_id) : null }
     try {
       if (selected) {
-        await updateInventoryItem(selected.id, form)
+        await updateInventoryItem(selected.id, payload)
         toast.success('Artículo actualizado')
       } else {
-        await createInventoryItem(form)
+        await createInventoryItem(payload)
         toast.success('Artículo creado')
       }
       setShowForm(false)
@@ -263,9 +307,18 @@ export default function Inventario() {
           <h1 className="text-xl font-bold text-gray-900">Inventario</h1>
         </div>
         {tab === 'items' && (
-          <button onClick={openNew} className="btn-primary flex items-center gap-2">
-            <Plus size={15} /> Nuevo artículo
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleImportCSV} />
+            <button onClick={downloadTemplate} title="Descargar plantilla CSV" className="btn-secondary flex items-center gap-2 text-sm">
+              <Download size={14} /> <span className="hidden sm:inline">Plantilla</span>
+            </button>
+            <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-60">
+              <Upload size={14} /> {importing ? 'Importando…' : 'Importar CSV'}
+            </button>
+            <button onClick={openNew} className="btn-primary flex items-center gap-2">
+              <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
+            </button>
+          </div>
         )}
         {tab === 'movimientos' && (
           <button onClick={loadAllTxns} className="btn-secondary flex items-center gap-2 text-sm">
@@ -472,7 +525,7 @@ export default function Inventario() {
           onChange={e => setFilterWarehouse(e.target.value)}
         >
           <option value="">Todas las bodegas</option>
-          {WAREHOUSES.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
+          {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
         </select>
       </div>
 
@@ -726,7 +779,14 @@ export default function Inventario() {
               <div>
                 <label className="label">Bodega</label>
                 <select className="input" value={form.warehouse} onChange={e => setForm(f => ({ ...f, warehouse: e.target.value }))}>
-                  {WAREHOUSES.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
+                  {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Proveedor</label>
+                <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Sin proveedor —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
               <div>

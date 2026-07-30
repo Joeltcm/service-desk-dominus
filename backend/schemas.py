@@ -1245,6 +1245,7 @@ class InventoryItemCreate(BaseModel):
     category: Optional[str] = None
     notes: Optional[str] = None
     warehouse: Optional[str] = "principal"
+    supplier_id: Optional[int] = None
 
 
 class InventoryItemUpdate(BaseModel):
@@ -1259,6 +1260,7 @@ class InventoryItemUpdate(BaseModel):
     notes: Optional[str] = None
     is_active: Optional[bool] = None
     warehouse: Optional[str] = None
+    supplier_id: Optional[int] = None
 
 
 class InventoryItemOut(BaseModel):
@@ -1274,6 +1276,7 @@ class InventoryItemOut(BaseModel):
     notes: Optional[str] = None
     is_active: bool
     warehouse: Optional[str] = None
+    supplier_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
