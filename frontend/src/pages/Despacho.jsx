@@ -406,7 +406,7 @@ export default function Despacho() {
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.title.trim()) return toast.error('El título es requerido')
-    if (form.status !== 'Borrador' && form.status !== 'Cancelado' && !form.quote_id) return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
+    if (!itMode && form.status !== 'Borrador' && form.status !== 'Cancelado' && !form.quote_id) return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
     const validItems = form.items.filter((it) => it.description?.trim())
     const { subtotal, itbmsAmt, total } = calcTotals(validItems, form.itbms_enabled)
     const payload = {
@@ -797,7 +797,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
   }
 
   const handleStatusSelect = async (val) => {
-    if (val !== 'Borrador' && val !== 'Cancelado' && !d.quote_id) {
+    if (!itMode && val !== 'Borrador' && val !== 'Cancelado' && !d.quote_id) {
       return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
     }
     setChangingStatus(true)

@@ -5,6 +5,20 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Search } from 'lucide-react'
 import { searchInventory } from '../services/api'
+import toast from 'react-hot-toast'
+
+const LOW_STOCK_THRESHOLD = 5
+
+// Aviso al seleccionar un artículo del inventario: alerta restrictiva si no hay
+// stock, o aviso si está bajo. (El campo quantity viene en la respuesta del buscador.)
+function alertStockOnSelect(inv) {
+  const qty = parseFloat(inv.quantity || '0') || 0
+  if (qty <= 0) {
+    toast.error(`⛔ Sin stock disponible de "${inv.name || inv.code}" (0 en inventario)`, { duration: 6000 })
+  } else if (qty <= LOW_STOCK_THRESHOLD) {
+    toast(`Stock bajo de "${inv.name || inv.code}": ${qty} disponible(s)`, { icon: '⚠️', duration: 5000 })
+  }
+}
 
 export const EMPTY_ITEM = { code: '', description: '', qty: 1, unit_price: '', itbms: true }
 
@@ -96,6 +110,7 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
     onChange(idx, 'unit_price', inv.unit_price || '')
+    alertStockOnSelect(inv)
     setCodeInvResults([])
     setShowCodeSugg(false)
     descRef.current?.focus()
@@ -105,6 +120,7 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
     onChange(idx, 'unit_price', inv.unit_price || '')
+    alertStockOnSelect(inv)
     setDescInvResults([])
     setShowDescSugg(false)
   }
@@ -149,7 +165,11 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
                     <span className="text-xs text-gray-400">${parseFloat(inv.unit_price || 0).toFixed(2)}</span>
                   </div>
                   <p className="text-xs text-gray-700 truncate">{inv.name}</p>
-                  <p className="text-xs text-gray-400">Stock: {inv.quantity || '0'} {inv.unit || ''}</p>
+                  {(() => { const q = parseFloat(inv.quantity || '0') || 0; return (
+                    <p className={`text-xs ${q <= 0 ? 'text-red-500 font-semibold' : q <= LOW_STOCK_THRESHOLD ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                      Stock: {inv.quantity || '0'} {inv.unit || ''}{q <= 0 ? ' · ⛔ sin stock' : q <= LOW_STOCK_THRESHOLD ? ' · ⚠️ bajo' : ''}
+                    </p>
+                  )})()}
                 </button>
               </li>
             ))}
@@ -183,7 +203,9 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
                     <span className="text-sm text-gray-800 font-medium truncate">{inv.name}</span>
                     <span className="text-xs text-gray-400 flex-shrink-0">${parseFloat(inv.unit_price || 0).toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-blue-600 font-mono">{inv.code} · Stock: {inv.quantity || '0'}</p>
+                  {(() => { const q = parseFloat(inv.quantity || '0') || 0; return (
+                    <p className="text-xs font-mono"><span className="text-blue-600">{inv.code}</span> · <span className={q <= 0 ? 'text-red-500 font-semibold' : q <= LOW_STOCK_THRESHOLD ? 'text-amber-600 font-medium' : 'text-gray-400'}>Stock: {inv.quantity || '0'}{q <= 0 ? ' ⛔' : q <= LOW_STOCK_THRESHOLD ? ' ⚠️' : ''}</span></p>
+                  )})()}
                 </button>
               </li>
             ))}
