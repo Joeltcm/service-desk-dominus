@@ -2,6 +2,7 @@ import { showConfirm } from '../utils/confirm'
 import { companyLogoSrc } from '../utils/branding'
 import React, { useEffect, useState, useRef } from 'react'
 import { openPdfViewerFromHtml, sharePdfFromFullHtml, writePdfViewerToWindow } from '../utils/pdfViewer'
+import qrcode from 'qrcode-generator'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -302,6 +303,70 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
 </div><!-- /page -->
 </body>
 </html>`
+}
+
+// ── Comprobante térmico 80mm ───────────────────────────────────────────────
+// Layout tipo recibo (ancho útil ~72mm, B/N) para impresoras térmicas de 80mm.
+function buildThermalTicketHTML(ticket) {
+  const co = getCompanyCache()
+  const coName    = co.company_name || 'Service Desk'
+  const coAddress = co.company_address || ''
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const PRIORITY_LABELS_MAP = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' }
+  const created = fmtDT(ticket.created_at)
+  const desc = (ticket.description || '').trim()
+  const descShort = desc.length > 220 ? desc.slice(0, 220) + '…' : desc
+
+  // QR → URL del ticket en el sistema
+  const rawBase = (import.meta.env.BASE_URL || '/')
+  const base = rawBase.endsWith('/') ? rawBase : rawBase + '/'
+  const url = `${window.location.origin}${base}tickets/${ticket.id}`
+  const qr = qrcode(0, 'M'); qr.addData(url); qr.make()
+  const qrImg = qr.createDataURL(4, 1)
+
+  const line = '<div style="border-top:1px dashed #000;margin:6px 0"></div>'
+  return `<div class="receipt" style="font-family:'Segoe UI',system-ui,sans-serif;color:#000;font-size:12px;line-height:1.4">
+    <div style="text-align:center">
+      <div style="font-size:15px;font-weight:800;letter-spacing:.3px">${esc(coName)}</div>
+      ${coAddress ? `<div style="font-size:10px">${esc(coAddress)}</div>` : ''}
+    </div>
+    ${line}
+    <div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px">
+      <span>TICKET #${ticket.id}</span><span>${esc(created)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px">
+      <span>Estado: <b>${esc(ticket.status_rel?.name || '—')}</b></span>
+      <span>Prioridad: <b>${esc(PRIORITY_LABELS_MAP[ticket.priority] || ticket.priority || '—')}</b></span>
+    </div>
+    ${line}
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Cliente</div>
+    <div style="font-weight:600">${esc(ticket.client?.name || '—')}</div>
+    ${ticket.client?.company ? `<div style="font-size:11px">${esc(ticket.client.company)}</div>` : ''}
+    ${ticket.client?.phone ? `<div style="font-size:11px">Tel: ${esc(ticket.client.phone)}</div>` : ''}
+    ${line}
+    ${ticket.category ? `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px">${esc(ticket.category)}</div>` : ''}
+    <div style="font-weight:700;font-size:13px;margin:2px 0">${esc(ticket.title)}</div>
+    ${descShort ? `<div style="font-size:11px;white-space:pre-wrap">${esc(descShort)}</div>` : ''}
+    <div style="font-size:11px;margin-top:4px">Técnico: <b>${esc(ticket.assigned_agent?.name || 'Sin asignar')}</b></div>
+    ${line}
+    <div style="text-align:center">
+      <img src="${qrImg}" style="width:130px;height:130px;image-rendering:pixelated" alt="QR"/>
+      <div style="font-size:10px;margin-top:2px">Escanea para ver el ticket</div>
+    </div>
+    ${line}
+    <div style="text-align:center;font-size:10px">${esc(coName)} · Gracias por su preferencia</div>
+  </div>`
+}
+
+// Abre una ventana e imprime en formato térmico 80mm.
+function printThermalTicket(bodyHtml) {
+  const pw = window.open('', '_blank', 'width=360,height=640')
+  if (!pw) return false
+  pw.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Ticket 80mm</title>
+<style>@page{size:80mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff}body{width:80mm}.receipt{width:72mm;margin:0 auto;padding:3mm 2mm}</style>
+</head><body>${bodyHtml}<script>setTimeout(function(){window.print();window.addEventListener('afterprint',function(){window.close()},{once:true})},350)<\/script></body></html>`)
+  pw.document.close()
+  return true
 }
 
 function InlineImage({ ticketId, attId }) {
@@ -1102,6 +1167,11 @@ export default function TicketDetail() {
     }
   }
 
+  const handlePrintThermal = () => {
+    const ok = printThermalTicket(buildThermalTicketHTML(ticket))
+    if (!ok) toast.error('El navegador bloqueó la ventana emergente')
+  }
+
   const handleShare = async () => {
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
 
@@ -1235,6 +1305,9 @@ export default function TicketDetail() {
           </button>
           {isAgentOrAdmin && (
             <>
+              <button onClick={handlePrintThermal} title="Imprimir comprobante en impresora térmica 80mm" className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
+                <Printer size={14} /> <span className="hidden sm:inline">80mm</span>
+              </button>
               <button onClick={() => navigate(`/tickets/${id}/edit`)} className="btn-secondary flex items-center gap-1.5 text-sm">
                 <Edit size={14} /> <span className="hidden sm:inline">Editar</span>
               </button>
