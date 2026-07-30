@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin'
   const isAgent = user?.role === 'agent'
   const isVentas = user?.role === 'ventas'
   const isAgentOrAdmin = isAdmin || isAgent

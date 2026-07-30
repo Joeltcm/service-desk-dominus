@@ -988,6 +988,11 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id)"))
+            conn.commit()
+        except Exception:
+            pass
         # ── Enum userrole: agregar 'supplies' si no existe ──
         try:
             exists = conn.execute(text(
