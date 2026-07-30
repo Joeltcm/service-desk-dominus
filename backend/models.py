@@ -682,6 +682,27 @@ class InventoryTransaction(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PartRequest(Base):
+    __tablename__ = "part_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False, index=True)
+    item_code = Column(String(100), nullable=False)
+    item_name = Column(String(300), nullable=True)
+    quantity = Column(String(50), nullable=False, default="1")
+    status = Column(String(20), nullable=False, default="pendiente")  # pendiente | aprobado | rechazado
+    notes = Column(Text, nullable=True)             # nota del solicitante
+    decision_notes = Column(Text, nullable=True)    # nota del aprobador
+    requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    ticket = relationship("Ticket")
+    requested_by = relationship("User", foreign_keys=[requested_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+
+
 class CannedResponse(Base):
     __tablename__ = "canned_responses"
 

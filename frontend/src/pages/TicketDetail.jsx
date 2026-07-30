@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext'
 import { useCompany, getCompanyCache } from '../context/CompanyContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
+import PartRequestPanel from '../components/PartRequestPanel'
 import {
   ArrowLeft, Edit, Paperclip, Send, Lock, Unlock,
   Calendar, ExternalLink, Trash2, Download, X, Printer, AlertTriangle,
@@ -1423,6 +1424,9 @@ export default function TicketDetail() {
               </div>
             </div>
           )}
+
+          {/* Solicitud de partes del inventario (staff) */}
+          {isAgentOrAdmin && <PartRequestPanel ticketId={id} />}
 
           {/* Auditoría (colapsable) */}
           <div className="card">

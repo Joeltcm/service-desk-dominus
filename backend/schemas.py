@@ -1823,3 +1823,33 @@ class SupplyDeliveryOut(BaseModel):
 Token.model_rebuild()
 TicketOut.model_rebuild()
 TicketListItem.model_rebuild()
+
+
+# ── Solicitudes de partes (desde tickets) ──────────────────────────────────────
+class PartRequestCreate(BaseModel):
+    ticket_id: int
+    item_code: str
+    quantity: str = "1"
+    notes: Optional[str] = None
+
+
+class PartRequestDecision(BaseModel):
+    decision_notes: Optional[str] = None
+
+
+class PartRequestOut(BaseModel):
+    id: int
+    ticket_id: int
+    ticket_title: Optional[str] = None
+    item_code: str
+    item_name: Optional[str] = None
+    quantity: str
+    status: str
+    notes: Optional[str] = None
+    decision_notes: Optional[str] = None
+    requested_by_id: Optional[int] = None
+    requested_by_name: Optional[str] = None
+    approved_by_id: Optional[int] = None
+    approved_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    decided_at: Optional[datetime] = None

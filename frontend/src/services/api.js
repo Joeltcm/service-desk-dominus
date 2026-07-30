@@ -373,6 +373,13 @@ export const importInventoryCSV = (file) => {
   return api.post('/inventory/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
 }
 
+// Solicitudes de partes (desde tickets) + aprobación
+export const getPartRequests = (params) => api.get('/part-requests', { params })
+export const createPartRequest = (data) => api.post('/part-requests', data)
+export const approvePartRequest = (id, data = {}) => api.post(`/part-requests/${id}/approve`, data)
+export const rejectPartRequest = (id, data = {}) => api.post(`/part-requests/${id}/reject`, data)
+export const getPartRequestsPending = () => api.get('/part-requests/pending-count')
+
 // Time Tracking
 export const getTimeLogs = (ticketId) => api.get(`/tickets/${ticketId}/time-logs`)
 export const addTimeLog = (ticketId, data) => api.post(`/tickets/${ticketId}/time-logs`, data)

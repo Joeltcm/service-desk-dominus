@@ -33,6 +33,7 @@ export const ROLES = [
   { value: 'supervisor', label: 'Supervisor',     color: 'bg-indigo-100 text-indigo-700',    desc: 'Supervisión de operaciones sin gestión de usuarios' },
   { value: 'agent',      label: 'Técnico',        color: 'bg-blue-100 text-blue-700',        desc: 'Gestión de tickets y servicio técnico' },
   { value: 'ventas',     label: 'Ventas',         color: 'bg-emerald-100 text-emerald-700',  desc: 'Cotizaciones, pedidos y facturas' },
+  { value: 'supplies',   label: 'Responsable de Inventario', color: 'bg-teal-100 text-teal-700', desc: 'Inventario, suministros, despachos y aprobación de partes' },
   { value: 'client',     label: 'Cliente',        color: 'bg-gray-100 text-gray-700',        desc: 'Acceso a sus propios tickets' },
 ]
 

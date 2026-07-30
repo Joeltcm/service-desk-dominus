@@ -41,6 +41,7 @@ import Impresoras from './pages/Impresoras'
 import Suministros from './pages/Suministros'
 import Papelera from './pages/Papelera'
 import Inventario from './pages/Inventario'
+import PartApprovals from './pages/PartApprovals'
 import CuentasPorCobrar from './pages/CuentasPorCobrar'
 import CuentasPorPagar from './pages/CuentasPorPagar'
 import Pagos from './pages/Pagos'
@@ -127,6 +128,7 @@ function AppRoutes() {
       <Route path="/cuentas-por-pagar" element={<PrivateRoute roles={['admin', 'agent', 'supervisor']}><CuentasPorPagar /></PrivateRoute>} />
       <Route path="/pagos" element={<PrivateRoute roles={['admin', 'agent', 'ventas', 'supervisor']}><Pagos /></PrivateRoute>} />
       <Route path="/inventario" element={<PrivateRoute roles={['admin', 'agent', 'ventas', 'supplies', 'supervisor']}><Inventario /></PrivateRoute>} />
+      <Route path="/partes" element={<PrivateRoute roles={['admin', 'supervisor', 'supplies', 'superadmin']}><PartApprovals /></PrivateRoute>} />
       <Route path="/cartas/:ref?" element={<PrivateRoute roles={['admin', 'agent', 'supervisor']}><Letters /></PrivateRoute>} />
       <Route path="/reports" element={<PrivateRoute roles={['admin', 'agent', 'client', 'supplies', 'supervisor']}><Reports /></PrivateRoute>} />
       <Route path="/papelera" element={<PrivateRoute roles={['admin']}><Papelera /></PrivateRoute>} />
