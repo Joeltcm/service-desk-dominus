@@ -9,7 +9,7 @@ import toast from 'react-hot-toast'
 import { getWarranties, getNextWarrantyNumber, createWarranty, updateWarranty, deleteWarranty, getInvoices, getContacts, getCompanies, createContact, getAgents, uploadMySignature, deleteMySignature } from '../services/api'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import { useAuth } from '../context/AuthContext'
-import { useCompany } from '../context/CompanyContext'
+import { useCompany, getCompanyCache } from '../context/CompanyContext'
 import { fmtD } from '../utils/fmt'
 
 // ── Warranty conditions per equipment type ─────────────
@@ -178,6 +178,10 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
 
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+  const _co = getCompanyCache()
+  const coAddress = esc(_co.company_address || 'Panamá, Punta Pacífica, PH Pacific Wind')
+  const coRuc     = esc(_co.company_ruc     || '4-754-575 DV 85')
+
   const infoBox = (label, value, highlight = false) =>
     `<div style="padding:5px 8px;background:${highlight ? '#eff6ff' : '#f8f9fb'};border:1px solid ${highlight ? '#93c5fd' : '#e5e7eb'};border-radius:5px">
       <div style="font-size:6.5pt;color:#6b7280;font-weight:bold;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:1px">${esc(label)}</div>
@@ -252,9 +256,8 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
       <img src="${companyLogoSrc(origin)}" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px">
       <div style="flex:1">
         <div style="font-size:18pt;font-weight:bold;color:#1e3a5f;letter-spacing:0.5px">${companyName}</div>
-        <div style="font-size:9pt;color:#555;margin-top:2px">Panamá, Punta Pacífica, PH Pacific Wind</div>
-        <div style="font-size:9pt;color:#555">Servicios de Soporte Técnico y Tecnología</div>
-        <div style="font-size:9pt;color:#555">RUC: 4-754-575 DV 85</div>
+        <div style="font-size:9pt;color:#555;margin-top:2px">${coAddress}</div>
+        <div style="font-size:9pt;color:#555">RUC: ${coRuc}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">CERTIFICADO DE GARANTÍA</div>
@@ -287,7 +290,7 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
       ${sigLine('Firma del Cliente', f.client)}
     </div>
     <div style="margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:7.5pt;color:#888;text-align:center">
-      Este certificado de garantía es emitido por ${companyName} • Panamá, Punta Pacífica, PH Pacific Wind •
+      Este certificado de garantía es emitido por ${companyName} • ${coAddress} •
       Válido únicamente con sello y firma del técnico autorizado • N° ${esc(f.certNumber)}
     </div>
   </div>`
@@ -324,8 +327,10 @@ export function buildWarrantyHTML(w, origin) {
 
 export default function Warranties() {
   const { user: currentUser } = useAuth()
-  const { company_name } = useCompany()
+  const { company_name, company_address, company_ruc } = useCompany()
   const coName = company_name || 'Service Desk'
+  const coAddress = company_address || 'Panamá, Punta Pacífica, PH Pacific Wind'
+  const coRuc = company_ruc || '4-754-575 DV 85'
   const navigate = useNavigate()
   const location = useLocation()
   const { ref: urlRef } = useParams()
@@ -1474,9 +1479,8 @@ export default function Warranties() {
                   <img src={companyLogoSrc()} alt="Logo" style={{ width: '52px', height: '52px', objectFit: 'contain', borderRadius: '6px' }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '18pt', fontWeight: 'bold', color: '#1e3a5f', letterSpacing: '0.5px' }}>{coName}</div>
-                    <div style={{ fontSize: '9pt', color: '#555', marginTop: '2px' }}>Panamá, Punta Pacífica, PH Pacific Wind</div>
-                    <div style={{ fontSize: '9pt', color: '#555' }}>Servicios de Soporte Técnico y Tecnología</div>
-                    <div style={{ fontSize: '9pt', color: '#555' }}>RUC: 4-754-575 DV 85</div>
+                    <div style={{ fontSize: '9pt', color: '#555', marginTop: '2px' }}>{coAddress}</div>
+                    <div style={{ fontSize: '9pt', color: '#555' }}>RUC: {coRuc}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '15pt', fontWeight: 'bold', color: '#1e3a5f' }}>CERTIFICADO DE GARANTÍA</div>

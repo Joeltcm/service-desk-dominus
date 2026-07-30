@@ -21,6 +21,7 @@ import {
   getCannedResponses, createCannedResponse, updateCannedResponse, deleteCannedResponse,
 } from '../services/api'
 import { ROLE_FEATURE_DEFS } from '../context/RoleFeaturesContext'
+import { setCompanyCache, getCompanyCache } from '../context/CompanyContext'
 import { setFmtConfig } from '../utils/fmt'
 import { useAuth } from '../context/AuthContext'
 import { useFormGuard } from '../context/UnsavedChangesContext'
@@ -273,7 +274,13 @@ export default function Settings() {
 
   const handleSaveCo = async () => {
     setSavingCo(true)
-    try { await saveCompanySettings(coForm); toast.success('Datos de empresa guardados') }
+    try {
+      await saveCompanySettings(coForm)
+      // Refresca el singleton que usan los generadores de PDF/documentos, así los
+      // datos de empresa (dirección, RUC, etc.) se reflejan sin recargar la página.
+      setCompanyCache({ ...getCompanyCache(), ...coForm })
+      toast.success('Datos de empresa guardados')
+    }
     catch { toast.error('Error al guardar datos de empresa') }
     finally { setSavingCo(false) }
   }
