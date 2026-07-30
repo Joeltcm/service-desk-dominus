@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCompany, getCompanyCache } from '../context/CompanyContext'
+import { useModuleAccess } from '../context/RoleFeaturesContext'
 import { openPdfWindow } from '../utils/pdfViewer'
 
 const EMPTY_FORM = {
@@ -96,6 +97,8 @@ export default function Inventario() {
   const navigate = useNavigate()
   const { vertical } = useCompany()
   const itMode = vertical === 'it_support'
+  const { canWrite } = useModuleAccess()
+  const canEdit = canWrite('inventario')  // false = solo lectura
   // En it_support se oculta la bodega de impresoras MPS.
   const warehouses = itMode ? WAREHOUSES.filter(w => w !== 'impresoras_mps') : WAREHOUSES
   const fileInputRef = React.useRef(null)
@@ -419,18 +422,22 @@ export default function Inventario() {
             <button onClick={downloadTemplate} title="Descargar plantilla CSV" className="btn-secondary flex items-center gap-2 text-sm">
               <Download size={14} /> <span className="hidden sm:inline">Plantilla</span>
             </button>
-            <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-60">
-              <Upload size={14} /> {importing ? 'Importando…' : 'Importar CSV'}
-            </button>
+            {canEdit && (
+              <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-60">
+                <Upload size={14} /> {importing ? 'Importando…' : 'Importar CSV'}
+              </button>
+            )}
             <button onClick={exportCSV} title="Exportar a CSV lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
               <Download size={14} /> <span className="hidden sm:inline">Exportar CSV</span>
             </button>
             <button onClick={exportPDF} title="Exportar a PDF lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
               <FileText size={14} /> <span className="hidden sm:inline">Exportar PDF</span>
             </button>
-            <button onClick={openNew} className="btn-primary flex items-center gap-2">
-              <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
-            </button>
+            {canEdit && (
+              <button onClick={openNew} className="btn-primary flex items-center gap-2">
+                <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
+              </button>
+            )}
           </div>
         )}
         {tab === 'movimientos' && (
@@ -742,15 +749,19 @@ export default function Inventario() {
                       <button onClick={() => openHistory(it)} className="p-1.5 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
                         <History size={14} />
                       </button>
-                      <button onClick={() => openWithdraw(it)} className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
-                        <ArrowDownCircle size={14} />
-                      </button>
-                      <button onClick={() => openEdit(it)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
-                        <Edit size={14} />
-                      </button>
-                      <button onClick={() => handleDelete(it)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Eliminar">
-                        <Trash2 size={14} />
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button onClick={() => openWithdraw(it)} className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
+                            <ArrowDownCircle size={14} />
+                          </button>
+                          <button onClick={() => openEdit(it)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
+                            <Edit size={14} />
+                          </button>
+                          <button onClick={() => handleDelete(it)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Eliminar">
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

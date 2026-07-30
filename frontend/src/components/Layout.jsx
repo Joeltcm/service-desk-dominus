@@ -13,7 +13,7 @@ import {
 import TicketScanner from './TicketScanner'
 import NotificationBell from './NotificationBell'
 import { ROLE_MAP } from '../pages/Settings'
-import { useRoleFeatures } from '../context/RoleFeaturesContext'
+import { useRoleFeatures, useModuleAccess, normLevel } from '../context/RoleFeaturesContext'
 import { useInstall } from '../context/InstallContext'
 import { useCompany } from '../context/CompanyContext'
 import { useModules } from '../context/ModulesContext'
@@ -185,6 +185,7 @@ export default function Layout({ children }) {
   const closeMobile = () => setMobileOpen(false)
 
   const { features } = useRoleFeatures()
+  const { canWrite } = useModuleAccess()
   const { company_name: companyName, company_app_name: appName, company_sidebar_color: sidebarColor, has_logo: hasLogo } = useCompany()
   const logoSrc = hasLogo ? '/api/settings/logo' : defaultLogo
   const { modules } = useModules()
@@ -220,8 +221,15 @@ export default function Layout({ children }) {
     if (item.moduleKey && modules[item.moduleKey] === false) return false
     if (user?.role === 'admin' || !item.featureKey) return true
     const roleFeats = features[user?.role] || {}
-    return roleFeats[item.featureKey] !== false
+    // Nivel 'none' (o false antiguo) oculta el módulo; 'read'/'write' lo muestran.
+    return normLevel(roleFeats[item.featureKey]) !== 'none'
   })
+  // Acciones rápidas del FAB (crear): requieren nivel de EDICIÓN en su módulo.
+  const MODULE_TO_FEATURE = { cotizaciones: 'quotes', contactos: 'contacts', garantias: 'warranties' }
+  const fabAllowed = (i) =>
+    i.roles.includes(user?.role) &&
+    (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false)) &&
+    (i.action === 'scan' || canWrite(MODULE_TO_FEATURE[i.moduleKey] || i.moduleKey))
   const initials = user?.name?.[0]?.toUpperCase()
 
   // Auto-expand subgroup containing the active route
@@ -462,13 +470,13 @@ export default function Layout({ children }) {
       </main>
 
       {/* FAB Speed Dial */}
-      {FAB_ITEMS.some(i => i.roles.includes(user?.role) && (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false))) && (
+      {FAB_ITEMS.some(fabAllowed) && (
         <div className="fixed right-6 z-50" style={{ bottom: 'max(24px, calc(env(safe-area-inset-bottom, 0px) + 16px))' }}>
           {fabOpen && (
             <>
               <div className="fixed inset-0" onClick={() => setFabOpen(false)} />
               <div className="absolute bottom-16 right-0 flex flex-col-reverse gap-2.5 items-end pb-1">
-                {FAB_ITEMS.filter(i => i.roles.includes(user?.role) && (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false))).map(({ label, to, action, Icon, bg }) => (
+                {FAB_ITEMS.filter(fabAllowed).map(({ label, to, action, Icon, bg }) => (
                   <button
                     key={to || action}
                     onClick={() => { if (action === 'scan') setShowScanner(true); else navigate(to); setFabOpen(false) }}

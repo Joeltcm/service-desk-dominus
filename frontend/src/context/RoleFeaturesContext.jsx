@@ -51,3 +51,33 @@ export function RoleFeaturesProvider({ children }) {
 }
 
 export const useRoleFeatures = () => useContext(RoleFeaturesCtx)
+
+// ── Niveles de acceso ──────────────────────────────────────────────────────
+// Compatibilidad: los valores antiguos eran booleanos (true = acceso total,
+// false = sin acceso). Los nuevos son 'none' | 'read' | 'write'.
+export const ACCESS_LEVELS = ['none', 'read', 'write']
+
+export function normLevel(v) {
+  if (v === true) return 'write'
+  if (v === false) return 'none'
+  if (v === 'read' || v === 'write' || v === 'none') return v
+  return undefined  // no configurado
+}
+
+// Acceso del USUARIO ACTUAL a un módulo (por su rol).
+export function useModuleAccess() {
+  const { features } = useRoleFeatures()
+  const { user } = useAuth()
+  const role = user?.role
+  const isAdminish = role === 'admin' || role === 'superadmin'
+  const level = (key) => {
+    if (isAdminish) return 'write'
+    const n = normLevel(features?.[role]?.[key])
+    return n === undefined ? 'write' : n  // sin configurar = acceso completo (comportamiento previo)
+  }
+  return {
+    level,
+    canWrite: (key) => level(key) === 'write',
+    canRead: (key) => level(key) !== 'none',
+  }
+}

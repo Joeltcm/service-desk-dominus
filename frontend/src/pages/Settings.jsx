@@ -5,7 +5,7 @@ import {
   Settings as SettingsIcon, Mail, Send, Save, Eye, EyeOff,
   MessageCircle, Inbox, RefreshCw, Globe, Clock, ChevronRight,
   Users, Plus, Edit, Trash2, X, Shield, UserCheck, Search, Building2,
-  Activity, Filter, Tag, Check, Timer, Zap, Palette, Image,
+  Activity, Filter, Tag, Check, Timer, Zap, Palette, Image, Ban, Pencil,
 } from 'lucide-react'
 import {
   getSmtpSettings, saveSmtpSettings, testSmtpSettings,
@@ -20,7 +20,7 @@ import {
   getClientCategories, createClientCategory, updateClientCategory, deleteClientCategory,
   getCannedResponses, createCannedResponse, updateCannedResponse, deleteCannedResponse,
 } from '../services/api'
-import { ROLE_FEATURE_DEFS } from '../context/RoleFeaturesContext'
+import { ROLE_FEATURE_DEFS, normLevel } from '../context/RoleFeaturesContext'
 import { setCompanyCache, getCompanyCache } from '../context/CompanyContext'
 import { setFmtConfig } from '../utils/fmt'
 import { useAuth } from '../context/AuthContext'
@@ -771,17 +771,26 @@ const CONFIGURABLE_ROLES = [
   { value: 'client',     label: 'Cliente',    color: 'bg-gray-100 text-gray-700' },
 ]
 
-function Toggle({ checked, onChange }) {
+const LEVEL_META = {
+  none:  { label: 'Sin acceso', Icon: Ban,    active: 'bg-gray-200 text-gray-600' },
+  read:  { label: 'Lectura',    Icon: Eye,    active: 'bg-blue-100 text-blue-700' },
+  write: { label: 'Edición',    Icon: Pencil, active: 'bg-violet-600 text-white' },
+}
+
+function LevelSelect({ value, onChange }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${checked ? 'bg-violet-600' : 'bg-gray-200'}`}
-    >
-      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-0'}`} />
-    </button>
+    <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+      {['none', 'read', 'write'].map(lvl => {
+        const m = LEVEL_META[lvl]
+        const active = value === lvl
+        return (
+          <button key={lvl} type="button" title={m.label} onClick={() => onChange(lvl)}
+            className={`px-2 py-1.5 flex items-center justify-center transition-colors ${active ? m.active : 'text-gray-300 hover:bg-gray-50'}`}>
+            <m.Icon size={13} />
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -794,10 +803,10 @@ export function RoleFeaturesPanel() {
     getRoleFeatures().then(r => setFeatures(r.data)).catch(() => toast.error('Error cargando permisos'))
   }, [])
 
-  const toggle = (role, key) => {
+  const setLevel = (role, key, level) => {
     setFeatures(f => ({
       ...f,
-      [role]: { ...f[role], [key]: !f[role]?.[key] },
+      [role]: { ...f[role], [key]: level },
     }))
   }
 
@@ -816,10 +825,15 @@ export function RoleFeaturesPanel() {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-4">
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gray-50 flex-wrap gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Shield size={16} className="text-violet-600" />
           <h2 className="font-semibold text-gray-800 text-sm">Acceso por rol</h2>
-          <span className="text-xs text-gray-400 ml-1">El Administrador siempre tiene acceso total</span>
+          <span className="hidden sm:inline text-xs text-gray-400 ml-1">El Administrador siempre tiene acceso total</span>
+          <span className="text-[11px] text-gray-400 flex items-center gap-2 ml-2">
+            <span className="flex items-center gap-1"><Ban size={12} className="text-gray-400" /> Sin acceso</span>
+            <span className="flex items-center gap-1"><Eye size={12} className="text-blue-500" /> Lectura</span>
+            <span className="flex items-center gap-1"><Pencil size={12} className="text-violet-600" /> Edición</span>
+          </span>
         </div>
         <button
           onClick={handleSave}
@@ -831,7 +845,7 @@ export function RoleFeaturesPanel() {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[460px]">
+        <table className="w-full text-sm min-w-[720px]">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 w-full">MÓDULO</th>
@@ -848,12 +862,12 @@ export function RoleFeaturesPanel() {
                 <td className="px-5 py-3 text-sm text-gray-700 font-medium">{feat.label}</td>
                 {CONFIGURABLE_ROLES.map(r => {
                   const eligible = feat.roles.includes(r.value)
-                  const enabled = features[r.value]?.[feat.key] ?? false
+                  const level = normLevel(features[r.value]?.[feat.key]) ?? 'write'
                   return (
                     <td key={r.value} className="px-4 py-3 text-center">
                       {eligible ? (
                         <div className="flex justify-center">
-                          <Toggle checked={enabled} onChange={() => toggle(r.value, feat.key)} />
+                          <LevelSelect value={level} onChange={(lvl) => setLevel(r.value, feat.key, lvl)} />
                         </div>
                       ) : (
                         <span className="text-gray-200 text-lg">—</span>
