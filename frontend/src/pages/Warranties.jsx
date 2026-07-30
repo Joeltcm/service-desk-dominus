@@ -153,6 +153,7 @@ function blankForm() {
     technician: '',
     notes: '',
     invoice_id: null,
+    invoice_ref: '',
   }
 }
 
@@ -349,7 +350,8 @@ export function buildWarrantyHTML(w, origin) {
 
 export default function Warranties() {
   const { user: currentUser } = useAuth()
-  const { company_name, company_address, company_ruc } = useCompany()
+  const { company_name, company_address, company_ruc, vertical } = useCompany()
+  const itMode = vertical === 'it_support'
   const coName = company_name || 'Service Desk'
   const coAddress = company_address || 'Panamá, Punta Pacífica, PH Pacific Wind'
   const coRuc = company_ruc || '4-754-575 DV 85'
@@ -425,6 +427,7 @@ export default function Warranties() {
       technician: w.technician || '',
       notes: w.notes || '',
       invoice_id: w.invoice_id || null,
+      invoice_ref: w.invoice_ref || '',
     }
     setInvoiceSearch(w.invoice ? (w.invoice.invoice_number || '') : '')
     const newItems = w.items && w.items.length > 0
@@ -550,7 +553,8 @@ export default function Warranties() {
         warranty_end: warrantyEnd(),
         technician: form.technician,
         notes: form.notes,
-        invoice_id: form.invoice_id || null,
+        invoice_id: itMode ? null : (form.invoice_id || null),
+        invoice_ref: itMode ? (form.invoice_ref || null) : null,
         items: items.map((it, i) => ({ ...it, sort_order: i })),
       }
       if (selectedId) {
@@ -595,7 +599,7 @@ export default function Warranties() {
   const handlePrint = (autoprint = true) => {
     const linkedInv = invoices.find((i) => i.id === form.invoice_id)
     const wEnd = warrantyEnd()
-    const printForm = { ...form, invoiceNumber: linkedInv?.invoice_number || '' }
+    const printForm = { ...form, invoiceNumber: itMode ? (form.invoice_ref || '') : (linkedInv?.invoice_number || '') }
     const origin = window.location.origin
     openCertWindow(form.certNumber, buildCertHTML(printForm, items, wEnd, origin, selectedSig?.url || null, coName), autoprint)
   }
@@ -603,7 +607,7 @@ export default function Warranties() {
   const handleShare = async () => {
     const linkedInv = invoices.find((i) => i.id === form.invoice_id)
     const wEnd = warrantyEnd()
-    const printForm = { ...form, invoiceNumber: linkedInv?.invoice_number || '' }
+    const printForm = { ...form, invoiceNumber: itMode ? (form.invoice_ref || '') : (linkedInv?.invoice_number || '') }
     const html = buildCertHTML(printForm, items, wEnd, window.location.origin, selectedSig?.url || null, coName)
     await sharePdfFromHtml(`Certificado ${form.certNumber}`, html, `Garantia-${form.certNumber || 'documento'}.pdf`)
   }
@@ -618,7 +622,7 @@ export default function Warranties() {
       warrantyPeriod: w.warranty_period || '',
       technician: w.technician || '',
       notes: w.notes || '',
-      invoiceNumber: w.invoice?.invoice_number || '',
+      invoiceNumber: itMode ? (w.invoice_ref || '') : (w.invoice?.invoice_number || ''),
     }
     const wItems =
       w.items?.length > 0
@@ -640,7 +644,7 @@ export default function Warranties() {
       warrantyPeriod: w.warranty_period || '',
       technician: w.technician || '',
       notes: w.notes || '',
-      invoiceNumber: w.invoice?.invoice_number || '',
+      invoiceNumber: itMode ? (w.invoice_ref || '') : (w.invoice?.invoice_number || ''),
     }
     const wItems =
       w.items?.length > 0
@@ -1228,7 +1232,15 @@ export default function Warranties() {
               {/* Factura relacionada */}
               <section className="space-y-3">
                 <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Factura relacionada</h2>
-                {form.invoice_id ? (
+                {itMode ? (
+                  <input
+                    className="input w-full"
+                    placeholder="N° de factura (sistema externo)"
+                    value={form.invoice_ref || ''}
+                    onChange={(e) => setForm((f) => ({ ...f, invoice_ref: e.target.value }))}
+                    style={{ fontSize: '16px' }}
+                  />
+                ) : form.invoice_id ? (
                   (() => {
                     const inv = invoices.find((i) => i.id === form.invoice_id)
                     return (

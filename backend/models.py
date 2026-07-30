@@ -421,6 +421,7 @@ class Warranty(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    invoice_ref = Column(String(100), nullable=True)  # N° de factura como texto libre (factura externa)
 
     created_by = relationship("User", foreign_keys=[created_by_id])
     invoice = relationship("Invoice", foreign_keys=[invoice_id])

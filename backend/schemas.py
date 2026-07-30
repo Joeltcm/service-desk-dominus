@@ -846,6 +846,7 @@ class WarrantyCreate(BaseModel):
     technician: str = ""
     notes: str = ""
     invoice_id: Optional[int] = None
+    invoice_ref: Optional[str] = None
     items: List[WarrantyItemCreate] = []
 
 
@@ -875,6 +876,7 @@ class WarrantyOut(BaseModel):
     technician: Optional[str] = None
     notes: Optional[str] = None
     invoice_id: Optional[int] = None
+    invoice_ref: Optional[str] = None
     invoice: Optional[InvoiceRef] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

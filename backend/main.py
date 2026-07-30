@@ -888,6 +888,12 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        # ── Factura externa (texto libre) en garantías ──
+        try:
+            conn.execute(text("ALTER TABLE warranties ADD COLUMN IF NOT EXISTS invoice_ref VARCHAR(100)"))
+            conn.commit()
+        except Exception:
+            pass
         # ── Tipo de contrato (MPS | Soporte) ──
         try:
             conn.execute(text("ALTER TABLE contracts ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50) DEFAULT 'MPS'"))

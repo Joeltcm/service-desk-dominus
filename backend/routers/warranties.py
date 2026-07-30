@@ -79,27 +79,31 @@ def create_warranty(
     )
     if existing:
         raise HTTPException(status_code=400, detail="Ya existe un certificado con ese número")
-    if not data.invoice_id:
-        raise HTTPException(status_code=400, detail="Se requiere una factura vinculada al certificado de garantía")
-    invoice = db.query(models.Invoice).filter(
-        models.Invoice.id == data.invoice_id,
-        models.Invoice.deleted_at.is_(None),
-    ).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Factura no encontrada")
-    if invoice.status != "Pagada":
-        raise HTTPException(
-            status_code=400,
-            detail=f"La garantía solo aplica a facturas pagadas (estado actual: '{invoice.status}')"
-        )
-    existing_for_invoice = db.query(models.Warranty).filter(
-        models.Warranty.invoice_id == data.invoice_id,
-    ).first()
-    if existing_for_invoice:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Ya existe la garantía {existing_for_invoice.cert_number} para esta factura"
-        )
+    invoice_ref = (data.invoice_ref or "").strip() or None
+    # Se acepta una factura interna (invoice_id, con validación) O un número de factura
+    # externo como texto libre (invoice_ref, cuando la factura viene de otro sistema).
+    if not data.invoice_id and not invoice_ref:
+        raise HTTPException(status_code=400, detail="Se requiere una factura vinculada (interna o número de factura externo)")
+    if data.invoice_id:
+        invoice = db.query(models.Invoice).filter(
+            models.Invoice.id == data.invoice_id,
+            models.Invoice.deleted_at.is_(None),
+        ).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada")
+        if invoice.status != "Pagada":
+            raise HTTPException(
+                status_code=400,
+                detail=f"La garantía solo aplica a facturas pagadas (estado actual: '{invoice.status}')"
+            )
+        existing_for_invoice = db.query(models.Warranty).filter(
+            models.Warranty.invoice_id == data.invoice_id,
+        ).first()
+        if existing_for_invoice:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe la garantía {existing_for_invoice.cert_number} para esta factura"
+            )
 
     w = models.Warranty(
         cert_number=data.cert_number,
@@ -112,6 +116,7 @@ def create_warranty(
         technician=data.technician or None,
         notes=data.notes or None,
         invoice_id=data.invoice_id,
+        invoice_ref=invoice_ref,
         created_by_id=current_user.id,
     )
     db.add(w)
@@ -155,8 +160,9 @@ def update_warranty(
     if conflict:
         raise HTTPException(status_code=400, detail="Ya existe un certificado con ese número")
 
-    if not data.invoice_id:
-        raise HTTPException(status_code=400, detail="Se requiere una factura vinculada al certificado de garantía")
+    invoice_ref = (data.invoice_ref or "").strip() or None
+    if not data.invoice_id and not invoice_ref:
+        raise HTTPException(status_code=400, detail="Se requiere una factura vinculada (interna o número de factura externo)")
     w.cert_number = data.cert_number
     w.client_name = data.client_name or None
     w.client_company = data.client_company or None
@@ -167,6 +173,7 @@ def update_warranty(
     w.technician = data.technician or None
     w.notes = data.notes or None
     w.invoice_id = data.invoice_id
+    w.invoice_ref = invoice_ref
 
     db.query(models.WarrantyItem).filter(models.WarrantyItem.warranty_id == wid).delete()
     for i, item in enumerate(data.items):
