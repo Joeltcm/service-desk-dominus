@@ -319,7 +319,7 @@ export default function Agenda() {
       )}
 
       {!loading && view === 'day' && (
-        <DayView events={periodEvents} currentDate={currentDate} navigate={navigate} />
+        <DayView events={periodEvents} currentDate={currentDate} navigate={navigate} onCancel={handleCancelVisit} cancelling={cancelling} />
       )}
 
       {!loading && view === 'list' && (
@@ -533,7 +533,7 @@ function WeekView({ events, currentDate, navigate, onDayClick }) {
 }
 
 // ── Day View ──────────────────────────────────────────────
-function DayView({ events, currentDate, navigate }) {
+function DayView({ events, currentDate, navigate, onCancel, cancelling }) {
   const isToday = isSameDay(currentDate, new Date())
   const hasAny = events.length > 0
   const scrollRef = useRef(null)
@@ -661,7 +661,7 @@ function DayView({ events, currentDate, navigate }) {
                       )}
                     </div>
                     {ev.source === 'ticket' && ev.visit_id && ev.visit_status !== 'cancelled' && (
-                      <button onClick={(e) => handleCancelVisit(ev.visit_id, e)} disabled={cancelling === ev.visit_id}
+                      <button onClick={(e) => onCancel(ev.visit_id, e)} disabled={cancelling === ev.visit_id}
                         className="p-1 rounded text-gray-300 hover:text-red-500 disabled:opacity-50 flex-shrink-0" title="Cancelar visita">
                         <XCircle size={14} />
                       </button>
