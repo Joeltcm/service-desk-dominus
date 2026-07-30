@@ -149,7 +149,7 @@ function blankForm() {
     address: '',
     ruc: '',
     date: new Date().toISOString().slice(0, 10),
-    warrantyPeriod: '3 meses',
+    warrantyPeriod: '6 meses',
     technician: '',
     notes: '',
     invoice_id: null,
@@ -486,21 +486,25 @@ export default function Warranties() {
     }
   }, []) // eslint-disable-line
 
+  // Limpia el formulario y prepara un certificado nuevo con el siguiente número
+  // secuencial. Deja el snapshot igual al formulario → estado "sin cambios".
+  async function doNewCert() {
+    const f = blankForm()
+    try {
+      const res = await getNextWarrantyNumber()
+      f.certNumber = res.data.number
+    } catch { /* keep date-based fallback */ }
+    const i = [{ ...EMPTY_ITEM }]
+    setSelectedId(null)
+    setForm(f)
+    setItems(i)
+    setSnapshot({ form: f, items: i })
+    setActiveTab('editor')
+    navigate('/warranties', { replace: true })
+  }
+
   function newCert() {
-    guardAction(async () => {
-      const f = blankForm()
-      try {
-        const res = await getNextWarrantyNumber()
-        f.certNumber = res.data.number
-      } catch { /* keep date-based fallback */ }
-      const i = [{ ...EMPTY_ITEM }]
-      setSelectedId(null)
-      setForm(f)
-      setItems(i)
-      setSnapshot({ form: f, items: i })
-      setActiveTab('editor')
-      navigate('/warranties', { replace: true })
-    })
+    guardAction(doNewCert)
   }
 
   const setField = (f) => (e) => setForm((prev) => ({ ...prev, [f]: e.target.value }))
@@ -571,15 +575,14 @@ export default function Warranties() {
       }
       if (selectedId) {
         await updateWarranty(selectedId, payload)
-        toast.success('Certificado actualizado')
+        toast.success('Cambios guardados ✓')
       } else {
-        const res = await createWarranty(payload)
-        setSelectedId(res.data.id)
-        toast.success('Certificado guardado')
+        await createWarranty(payload)
+        toast.success('Certificado guardado ✓')
       }
-      setSnapshot({ form: { ...form }, items: items.map((it) => ({ ...it })) })
       await loadList()
-      autoSelectSigByTechnician(form.technician, agents)
+      // Limpia el formulario automáticamente y prepara el siguiente certificado.
+      await doNewCert()
       return true
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Error al guardar')
