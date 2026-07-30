@@ -197,7 +197,7 @@ export default function Tickets() {
     const resolved = tickets.filter((t) => t.status_rel?.is_closed)
 
     return (
-      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
         {/* Hero de bienvenida */}
         <div
           className="rounded-2xl p-5 sm:p-6 mb-5 text-white shadow-sm"
