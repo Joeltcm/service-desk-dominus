@@ -387,7 +387,7 @@ export default function Inventario() {
   const lowStock = (it) => parseFloat(it.quantity || '0') <= 5 && parseFloat(it.quantity || '0') >= 0
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 w-full max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Package size={22} className="text-emerald-600" />
@@ -650,6 +650,9 @@ export default function Inventario() {
                   <span className="flex items-center gap-1 cursor-pointer select-none">Categoría <SortIcon field="category" /></span>
                 </th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Bodega</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Condición</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Estado</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Ubicación</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden md:table-cell">Unidad</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('cost_price')}>
                   <span className="flex items-center gap-1 justify-end">Costo <SortIcon field="cost_price" /></span>
@@ -666,10 +669,10 @@ export default function Inventario() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">Cargando...</td></tr>
+                <tr><td colSpan={13} className="py-10 text-center text-gray-400">Cargando...</td></tr>
               )}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">
+                <tr><td colSpan={13} className="py-10 text-center text-gray-400">
                   {search || filterCategory || filterWarehouse ? 'Sin resultados' : 'No hay artículos en el inventario'}
                 </td></tr>
               )}
@@ -678,7 +681,7 @@ export default function Inventario() {
                   <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 lg:hidden">
                       {it.condition && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span>}
                       {it.item_status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span>}
                       {it.location && <span className="text-[10px] text-gray-500">📍 {it.location}</span>}
@@ -692,6 +695,13 @@ export default function Inventario() {
                     {it.category ? <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">{it.category}</span> : '—'}
                   </td>
                   <td className="px-4 py-3 text-gray-500 hidden lg:table-cell text-xs">{WAREHOUSE_LABEL[it.warehouse] || it.warehouse || 'Principal'}</td>
+                  <td className="px-4 py-3 hidden lg:table-cell">
+                    {it.condition ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span> : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 hidden lg:table-cell">
+                    {it.item_status ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span> : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 hidden lg:table-cell text-xs">{it.location || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell text-xs">{it.unit || 'unidad'}</td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">${parseFloat(it.cost_price || '0').toFixed(2)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-blue-700 hidden sm:table-cell">${parseFloat(it.unit_price || '0').toFixed(2)}</td>
