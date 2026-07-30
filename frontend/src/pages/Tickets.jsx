@@ -48,8 +48,8 @@ export default function Tickets() {
     }, { replace: true })
   }
 
-  const { isAgentOrAdmin } = useAuth()
-  const { vertical } = useCompany()
+  const { isAgentOrAdmin, user } = useAuth()
+  const { vertical, company_sidebar_color, company_accent_color, company_name } = useCompany()
   const itMode = vertical === 'it_support'
   const navigate = useNavigate()
 
@@ -197,20 +197,32 @@ export default function Tickets() {
     const resolved = tickets.filter((t) => t.status_rel?.is_closed)
 
     return (
-      <div className="p-4 sm:p-6 max-w-3xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Mis Solicitudes</h1>
-            <p className="text-sm text-gray-400 mt-0.5">Seguimiento de tus tickets de soporte</p>
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+        {/* Hero de bienvenida */}
+        <div
+          className="rounded-2xl p-5 sm:p-6 mb-5 text-white shadow-sm"
+          style={{ background: `linear-gradient(135deg, ${company_sidebar_color || '#1a3353'} 0%, ${company_accent_color || '#3b82f6'} 100%)` }}
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold leading-tight">
+                Hola{user?.name ? `, ${user.name.split(' ')[0]}` : ''} <span className="align-middle">👋</span>
+              </h1>
+              <p className="text-sm text-white/75 mt-1 truncate">
+                Centro de soporte{company_name ? ` · ${company_name}` : ''}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate('/tickets/new')}
+              className="flex items-center gap-2 text-sm font-medium bg-white/15 hover:bg-white/25 border border-white/25 text-white rounded-lg px-3.5 py-2 transition-colors flex-shrink-0"
+            >
+              <Plus size={15} /> Nueva solicitud
+            </button>
           </div>
-          <button onClick={() => navigate('/tickets/new')} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={15} /> Nueva solicitud
-          </button>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-3 gap-3 mb-5">
           <div className="card text-center py-4">
             <p className="text-2xl font-bold text-gray-900">{tickets.length}</p>
             <p className="text-xs text-gray-400 mt-0.5">Total</p>
@@ -225,6 +237,8 @@ export default function Tickets() {
           </div>
         </div>
 
+        {/* Panel: filtros + lista */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5">
         {/* Filtros */}
         <div className="flex gap-2 mb-4">
           <div className="relative flex-1">
@@ -312,6 +326,7 @@ export default function Tickets() {
             })}
           </div>
         )}
+        </div>
       </div>
     )
   }
