@@ -15,7 +15,7 @@ import {
   getCannedResponses, getTimeLogs, addTimeLog, deleteTimeLog, submitCsat,
 } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { useCompany } from '../context/CompanyContext'
+import { useCompany, getCompanyCache } from '../context/CompanyContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
 import {
@@ -46,6 +46,10 @@ async function fetchAsBase64(url) {
 
 function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyName = 'Service Desk') {
   const logoUrl = companyLogoSrc(window.location.origin)
+  const _co = getCompanyCache()
+  const coName    = companyName || _co.company_name || 'Service Desk'
+  const coAddress = _co.company_address || 'Panamá, Punta Pacífica, PH Pacific Wind'
+  const coRuc     = _co.company_ruc     || '4-754-575 DV 85'
   const now = fmtDT(new Date())
   const created = fmtDT(ticket.created_at)
   const closed = ticket.closed_at ? fmtDT(ticket.closed_at) : null
@@ -93,7 +97,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
     </div>`
   }
 
-  const commentBlocks  = publicComments.map(e => renderCommentBlock(e, '#3b82f6', '#dbeafe', '#1d4ed8')).join('')
+  const commentBlocks  = publicComments.map(e => renderCommentBlock(e, '#1e3a5f', '#e6ecf5', '#1e3a5f')).join('')
   const internalBlocks = internalNotes.map(e => renderCommentBlock(e, '#f59e0b', '#fef3c7', '#92400e')).join('')
 
   // Timeline-style visits
@@ -140,7 +144,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
       <span style="font-size:11px;color:#1e293b;font-weight:500;word-break:break-word">${value}</span>
     </div>` : ''
 
-  const sectionHead = (title, color = '#1d4ed8', afterColor = '#dbeafe') => `
+  const sectionHead = (title, color = '#1e3a5f', afterColor = '#e5e7eb') => `
     <div class="section-head" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
       <div style="width:4px;height:18px;border-radius:2px;background:${color};flex-shrink:0"></div>
       <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:${color}">${title}</span>
@@ -154,7 +158,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
   <title>Informe Técnico — Ticket #${ticket.id}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif; color: #0f172a; background: #fff; font-size: 13px; line-height: 1.5; }
+    body { font-family: Arial, 'Segoe UI', system-ui, -apple-system, sans-serif; color: #111; background: #fff; font-size: 13px; line-height: 1.5; }
     .page { max-width: 800px; margin: 0 auto; background: #fff; }
     .section { margin-bottom: 28px; }
     .section-head { break-after: avoid; page-break-after: avoid; }
@@ -173,67 +177,58 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
 <body>
 <div class="page">
 
-  <!-- ═══ HEADER ═══ -->
-  <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a6e 60%,#1d4ed8 100%);padding:18px 28px 14px;position:relative">
-    <!-- decorative circles -->
-    <div style="position:absolute;top:6px;right:6px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,.04)"></div>
-    <div style="position:absolute;bottom:6px;right:60px;width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.03)"></div>
-
-    <div style="display:flex;align-items:center;justify-content:space-between;position:relative">
-      <!-- left: logo + company -->
-      <div style="display:flex;align-items:center;gap:12px">
-        <div style="width:40px;height:40px;border-radius:10px;overflow:hidden;background:rgba(255,255,255,.12);flex-shrink:0;border:1.5px solid rgba(255,255,255,.2)">
-          <img src="${logoUrl}" alt="Logo" style="width:100%;height:100%;object-fit:cover" />
-        </div>
-        <div>
-          <div style="font-size:16px;font-weight:800;color:#fff;letter-spacing:-.02em;line-height:1">${companyName}</div>
-          <div style="font-size:10px;color:rgba(255,255,255,.55);margin-top:3px;letter-spacing:.02em">Informe Técnico de Soporte</div>
-        </div>
+  <!-- ═══ HEADER (estilo casa) ═══ -->
+  <div style="padding:24px 36px 0">
+    <div style="display:flex;align-items:center;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:14px;gap:14px">
+      <img src="${logoUrl}" alt="Logo" style="width:52px;height:52px;object-fit:contain;border-radius:6px">
+      <div style="flex:1">
+        <div style="font-size:18pt;font-weight:bold;color:#1e3a5f">${coName}</div>
+        <div style="font-size:9pt;color:#555;margin-top:2px">${coAddress}</div>
+        <div style="font-size:9pt;color:#555">RUC: ${coRuc}</div>
       </div>
-      <!-- right: ticket number + label -->
       <div style="text-align:right">
-        <div style="display:inline-block;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:2px 10px;font-size:9px;font-weight:700;color:rgba(255,255,255,.7);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px">Ticket</div>
-        <div style="font-size:26px;font-weight:900;color:#fff;letter-spacing:-.02em;line-height:1">#${ticket.id}</div>
+        <div style="font-size:16pt;font-weight:bold;color:#1e3a5f">INFORME TÉCNICO</div>
+        <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">Ticket N° #${ticket.id}</div>
       </div>
     </div>
 
-    <!-- ticket title bar -->
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12)">
-      <div style="font-size:13px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:8px">${ticket.title}</div>
+    <!-- título + estado -->
+    <div style="background:#f8f9fb;border:1px solid #e5e7eb;border-radius:6px;padding:11px 14px;margin-bottom:6px">
+      <div style="font-size:12pt;font-weight:700;color:#111;line-height:1.35;margin-bottom:8px">${ticket.title}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:20px;background:${statusColor};color:#fff;font-size:10px;font-weight:700;letter-spacing:.02em">&#9679; ${ticket.status_rel?.name || '—'}</span>
-        <span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;background:${priorityBg};color:${priorityColor};font-size:10px;font-weight:700;border:1px solid ${priorityColor}40">${PRIORITY_LABELS_MAP[ticket.priority] || ticket.priority}</span>
-        ${ticket.category ? `<span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.15);color:rgba(255,255,255,.85);font-size:10px;font-weight:600">${ticket.category}</span>` : ''}
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:20px;background:${statusColor};color:#fff;font-size:9pt;font-weight:700">&#9679; ${ticket.status_rel?.name || '—'}</span>
+        <span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;background:${priorityBg};color:${priorityColor};font-size:9pt;font-weight:700;border:1px solid ${priorityColor}40">${PRIORITY_LABELS_MAP[ticket.priority] || ticket.priority}</span>
+        ${ticket.category ? `<span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;background:#eef1f6;color:#1e3a5f;font-size:9pt;font-weight:600">${ticket.category}</span>` : ''}
       </div>
     </div>
   </div>
 
   <!-- ═══ META BAR ═══ -->
-  <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:10px 36px;display:flex;gap:28px;flex-wrap:wrap">
-    <div style="font-size:11px;color:#64748b"><span style="font-weight:700;color:#475569">Creado:</span> ${created}</div>
-    ${closed ? `<div style="font-size:11px;color:#64748b"><span style="font-weight:700;color:#475569">Cerrado:</span> ${closed}</div>` : ''}
-    ${ticket.assigned_agent?.name ? `<div style="font-size:11px;color:#64748b"><span style="font-weight:700;color:#475569">Agente:</span> ${ticket.assigned_agent.name}</div>` : ''}
-    <div style="margin-left:auto;font-size:11px;color:#94a3b8">Generado: ${now}</div>
+  <div style="padding:0 36px 6px;display:flex;gap:24px;flex-wrap:wrap">
+    <div style="font-size:9pt;color:#64748b"><span style="font-weight:700;color:#475569">Creado:</span> ${created}</div>
+    ${closed ? `<div style="font-size:9pt;color:#64748b"><span style="font-weight:700;color:#475569">Cerrado:</span> ${closed}</div>` : ''}
+    ${ticket.assigned_agent?.name ? `<div style="font-size:9pt;color:#64748b"><span style="font-weight:700;color:#475569">Agente:</span> ${ticket.assigned_agent.name}</div>` : ''}
+    <div style="margin-left:auto;font-size:9pt;color:#94a3b8">Generado: ${now}</div>
   </div>
 
   <!-- ═══ BODY ═══ -->
-  <div style="padding:28px 36px">
+  <div style="padding:16px 36px 28px">
 
     <!-- INFO GENERAL -->
     <div class="section">
       ${sectionHead('Información general')}
       <div class="info-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <!-- cliente -->
-        <div class="card" style="border-top:3px solid #3b82f6;padding:10px 13px">
-          <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#3b82f6;margin-bottom:7px">Cliente</div>
+        <div class="card" style="background:#f8f9fb;border:1px solid #e5e7eb;border-top:3px solid #1e3a5f;padding:10px 13px">
+          <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#1e3a5f;margin-bottom:7px">Cliente</div>
           ${field('Nombre', ticket.client?.name)}
           ${field('Empresa', ticket.client?.company)}
           ${field('Correo electrónico', ticket.client?.email)}
           ${field('Teléfono', ticket.client?.phone)}
         </div>
         <!-- ticket -->
-        <div class="card" style="border-top:3px solid #8b5cf6;padding:10px 13px">
-          <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#8b5cf6;margin-bottom:7px">Detalles del ticket</div>
+        <div class="card" style="background:#f8f9fb;border:1px solid #e5e7eb;border-top:3px solid #1e3a5f;padding:10px 13px">
+          <div style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:#1e3a5f;margin-bottom:7px">Detalles del ticket</div>
           ${field('Agente asignado', ticket.assigned_agent?.name || 'Sin asignar')}
           ${field('Ubicación', ticket.location)}
           ${field('Asunto', ticket.subject)}
@@ -245,7 +240,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
     <!-- DESCRIPCIÓN -->
     <div class="section">
       ${sectionHead('Descripción del problema')}
-      <div class="desc-block" style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #3b82f6;border-radius:0 10px 10px 0;padding:15px 18px;font-size:13px;color:#334155;line-height:1.75;white-space:pre-wrap">${ticket.description || '<em style="color:#94a3b8">Sin descripción</em>'}</div>
+      <div class="desc-block" style="background:#f8f9fb;border:1px solid #e5e7eb;border-left:4px solid #1e3a5f;border-radius:0 10px 10px 0;padding:15px 18px;font-size:13px;color:#334155;line-height:1.75;white-space:pre-wrap">${ticket.description || '<em style="color:#94a3b8">Sin descripción</em>'}</div>
     </div>
 
     ${ticket.resolution_notes ? `
@@ -299,10 +294,9 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
 
   </div><!-- /body -->
 
-  <!-- ═══ FOOTER ═══ -->
-  <div style="background:#0f172a;padding:16px 36px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-    <span style="font-size:11px;color:rgba(255,255,255,.4);font-weight:600;letter-spacing:.04em">${companyName.toUpperCase()} · SOPORTE TÉCNICO</span>
-    <span style="font-size:11px;color:rgba(255,255,255,.35)">Generado el ${now}</span>
+  <!-- ═══ FOOTER (estilo casa) ═══ -->
+  <div style="margin:0 36px;padding:10px 0 20px;border-top:1px solid #ddd;font-size:7.5pt;color:#888;text-align:center">
+    ${coName} · ${coAddress} · RUC: ${coRuc} · Informe Técnico · Ticket N° #${ticket.id}
   </div>
 
 </div><!-- /page -->

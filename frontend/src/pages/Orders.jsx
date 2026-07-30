@@ -24,7 +24,7 @@ import { toZonedTime, fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor from '../components/ItemEditor'
-import { getCompanyCache } from '../context/CompanyContext'
+import { getCompanyCache, useCompany } from '../context/CompanyContext'
 
 const STATUSES = ['Pendiente', 'En proceso', 'Retiro Programado', 'Recibido', 'Inventariado', 'Cancelado']
 const SUPPLIER_CATEGORIES = ['Hardware', 'Software', 'Consumibles', 'Servicios', 'Redes', 'Impresión', 'Otro']
@@ -894,6 +894,8 @@ export default function Orders() {
 
 // ── Detail view ─────────────────────────────────────────
 function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPrint, onShare, onConvertToDispatch, onViewDispatch, onStatusChange, onCalendarChange, onInventoryApplied, onExpenseUpdated }) {
+  const { vertical } = useCompany()
+  const nounPlCap = vertical === 'it_support' ? 'Pedidos' : 'Despachos'
   const supplierList = [order.supplier1, order.supplier2, order.supplier3].filter(Boolean)
   const items = parseItems(order.purchase_items)
   const hasItems = items.some((it) => it.description?.trim())
@@ -1237,7 +1239,7 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
       {order.dispatches?.length > 0 && (
         <div className="card">
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-            <PackageCheck size={13} /> Despachos generados
+            <PackageCheck size={13} /> {nounPlCap} generados
           </h3>
           <div className="space-y-2">
             {order.dispatches.map((d) => (

@@ -9,6 +9,7 @@ import {
   BarChart2, ArrowLeft, RefreshCw,
 } from 'lucide-react'
 import { getDespachoDashboard } from '../services/api'
+import { useCompany } from '../context/CompanyContext'
 
 // ── Constants ────────────────────────────────────────────
 const MONTH_NAMES = [
@@ -111,6 +112,8 @@ const selectCls = 'text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white 
 // ── Main ─────────────────────────────────────────────────
 export default function PedidosDashboard() {
   const navigate = useNavigate()
+  const { vertical } = useCompany()
+  const nounPl = vertical === 'it_support' ? 'pedidos' : 'despachos'
   const now = new Date()
 
   const [data, setData]           = useState(null)
@@ -206,7 +209,7 @@ export default function PedidosDashboard() {
             {/* KPIs */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <KpiCard
-                label="Total despachos"
+                label={`Total ${nounPl}`}
                 value={data.total_orders}
                 icon={ShoppingCart}
                 bg="bg-sky-100" color="text-sky-500"

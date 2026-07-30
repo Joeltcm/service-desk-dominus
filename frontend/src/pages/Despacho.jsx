@@ -22,7 +22,7 @@ import { toZonedTime, fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
-import { getCompanyCache } from '../context/CompanyContext'
+import { getCompanyCache, useCompany } from '../context/CompanyContext'
 
 const STATUSES = ['Borrador', 'Emitido', 'Despacho Programado', 'Entregado', 'Cancelado']
 
@@ -58,6 +58,8 @@ function buildDispatchHTML(d, items, origin) {
   const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
   const fmtDate = (iso) => fmtD(iso)
   const co = getCompanyCache()
+  const itMode = co.vertical === 'it_support'
+  const docTitle = itMode ? 'PEDIDO' : 'DESPACHO DE MERCANCÍA'
   const coName    = esc(co.company_name    || 'Service Desk')
   const coAddress = esc(co.company_address || 'Panamá, Punta Pacífica, PH Pacific Wind')
   const coRuc     = esc(co.company_ruc     || '4-754-575 DV 85')
@@ -82,7 +84,7 @@ function buildDispatchHTML(d, items, origin) {
         <div style="font-size:9pt;color:#555">RUC: ${coRuc}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">DESPACHO DE MERCANCÍA</div>
+        <div style="font-size:15pt;font-weight:bold;color:#1e3a5f">${docTitle}</div>
         <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">N° ${esc(d.dispatch_number || String(d.id))}</div>
       </div>
     </div>
@@ -139,7 +141,8 @@ function buildDispatchHTML(d, items, origin) {
 }
 
 function openDispatchWindow(d, bodyHTML, autoprint) {
-  const ok = openPdfWindow(`Despacho ${d.dispatch_number || d.id}`, bodyHTML, { autoprint })
+  const _noun = getCompanyCache().vertical === 'it_support' ? 'Pedido' : 'Despacho'
+  const ok = openPdfWindow(`${_noun} ${d.dispatch_number || d.id}`, bodyHTML, { autoprint })
   if (!ok) toast.error('El navegador bloqueó la ventana emergente')
 }
 
@@ -247,6 +250,12 @@ export default function Despacho() {
   const location = useLocation()
   const navigate = useNavigate()
   const { ref: urlRef } = useParams()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
+  const noun = itMode ? 'pedido' : 'despacho'
+  const Noun = itMode ? 'Pedido' : 'Despacho'
+  const nounPl = itMode ? 'pedidos' : 'despachos'
+  const NounPl = itMode ? 'Pedidos' : 'Despachos'
   const [dispatches, setDispatches] = useState([])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -270,7 +279,7 @@ export default function Despacho() {
   const load = useCallback(() => {
     getDispatches({ search: debouncedSearch || undefined, status: filterStatus || undefined })
       .then((r) => setDispatches(r.data))
-      .catch(() => toast.error('Error cargando despachos'))
+      .catch(() => toast.error(`Error cargando ${nounPl}`))
   }, [debouncedSearch, filterStatus])
 
   useEffect(() => { load() }, [load])
@@ -309,7 +318,7 @@ export default function Despacho() {
   // Step 2: apply once quotes are loaded so we inherit quote sale prices
   useEffect(() => {
     if (!pendingFromOrder || !quotesLoaded) return
-    getNextDispatchNumber().then((r) => r.data.number).catch(() => 'DSP-0001').then((num) => {
+    getNextDispatchNumber().then((r) => r.data.number).catch(() => (itMode ? 'PED-0001' : 'DSP-0001')).then((num) => {
     const linkedQuote = quotes.find((q) => q.order_id === pendingFromOrder.id)
     const rawItems = linkedQuote?.items || pendingFromOrder.purchase_items
     const items = parseItems(rawItems)
@@ -346,11 +355,11 @@ export default function Despacho() {
     }).catch(() => {})
   }, [])
 
-  const handleSelect = (d) => { setSelected(d); setShowForm(false); setMobileDetailOpen(true); navigate(`/despacho/${d.dispatch_number || d.id}`) }
+  const handleSelect = (d) => { setSelected(d); setShowForm(false); setMobileDetailOpen(true); navigate(`/pedidos/${d.dispatch_number || d.id}`) }
 
   const handleNew = async () => {
     setSelected(null)
-    const num = await getNextDispatchNumber().then((r) => r.data.number).catch(() => 'DSP-0001')
+    const num = await getNextDispatchNumber().then((r) => r.data.number).catch(() => (itMode ? 'PED-0001' : 'DSP-0001'))
     setForm({ ...EMPTY_FORM, dispatch_number: num, date: new Date().toISOString().slice(0, 10) })
     setShowForm(true)
     setMobileDetailOpen(true)
@@ -397,7 +406,7 @@ export default function Despacho() {
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.title.trim()) return toast.error('El título es requerido')
-    if (form.status !== 'Borrador' && form.status !== 'Cancelado' && !form.quote_id) return toast.error('Se requiere una cotización vinculada para cambiar el estado del despacho')
+    if (form.status !== 'Borrador' && form.status !== 'Cancelado' && !form.quote_id) return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
     const validItems = form.items.filter((it) => it.description?.trim())
     const { subtotal, itbmsAmt, total } = calcTotals(validItems, form.itbms_enabled)
     const payload = {
@@ -423,11 +432,11 @@ export default function Despacho() {
       if (selected && showForm) {
         const res = await updateDispatch(selected.id, payload)
         setSelected(res.data)
-        toast.success('Despacho actualizado')
+        toast.success(`${Noun} actualizado`)
       } else {
         const res = await createDispatch(payload)
         setSelected(res.data)
-        toast.success('Despacho guardado en la lista')
+        toast.success(`${Noun} guardado en la lista`)
       }
       setShowForm(false)
       load()
@@ -437,7 +446,7 @@ export default function Despacho() {
       if (Array.isArray(detail) && detail.length) {
         msg = detail.map((d) => `${(d.loc || []).slice(1).join('.')}: ${d.msg}`).join('; ')
       } else {
-        msg = (typeof detail === 'string' && detail) || 'Error guardando despacho'
+        msg = (typeof detail === 'string' && detail) || `Error guardando ${noun}`
       }
       console.error('Error guardando despacho:', err?.response?.data)
       toast.error(msg, { duration: 6000 })
@@ -447,14 +456,14 @@ export default function Despacho() {
   }
 
   const handleDelete = async (d) => {
-    if (!confirm(`¿Eliminar el despacho "${d.title}"?`)) return
+    if (!confirm(`¿Eliminar el ${noun} "${d.title}"?`)) return
     try {
       await deleteDispatch(d.id)
-      toast.success('Despacho eliminado')
+      toast.success(`${Noun} eliminado`)
       if (selected?.id === d.id) { setSelected(null); setMobileDetailOpen(false); navigate('/pedidos', { replace: true }) }
       load()
     } catch {
-      toast.error('Error eliminando despacho')
+      toast.error(`Error eliminando ${noun}`)
     }
   }
 
@@ -470,8 +479,8 @@ export default function Despacho() {
   const handleShare = async (d) => {
     const items = parseItems(d.items)
     const origin = window.location.origin
-    const filename = `Despacho-${d.dispatch_number || d.id}.pdf`
-    await sharePdfFromHtml(`Despacho ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
+    const filename = `${Noun}-${d.dispatch_number || d.id}.pdf`
+    await sharePdfFromHtml(`${Noun} ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
   }
 
   return (
@@ -480,7 +489,7 @@ export default function Despacho() {
       <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold text-gray-900">Despachos</h1>
+            <h1 className="text-lg font-bold text-gray-900">{NounPl}</h1>
             <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
               <Plus size={15} /> Nuevo
             </button>
@@ -494,7 +503,7 @@ export default function Despacho() {
         <div className="px-4 py-3 space-y-2 border-b border-gray-100">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input className="input pl-8 w-full text-sm" placeholder="Buscar despachos..." value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
+            <input className="input pl-8 w-full text-sm" placeholder={`Buscar ${nounPl}...`} value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
           </div>
           <select className="input w-full text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{fontSize:'16px'}}>
             <option value="">Todos los estados</option>
@@ -517,8 +526,8 @@ export default function Despacho() {
                   <FileCheck size={20} className="text-blue-200" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-400">Sin despachos guardados</p>
-                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer despacho</p>
+                  <p className="text-sm font-medium text-gray-400">Sin {nounPl} guardados</p>
+                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer {noun}</p>
                 </div>
               </div>
             )
@@ -576,7 +585,7 @@ export default function Despacho() {
               <FileCheck size={24} className="text-blue-200" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-400">Selecciona un despacho guardado</p>
+              <p className="text-sm font-medium text-gray-400">Selecciona un {noun} guardado</p>
               <p className="text-xs text-gray-300 mt-1">o usa "Nuevo" para crear uno</p>
             </div>
           </div>
@@ -667,6 +676,10 @@ function StatusSelector({ status, onChange, loading }) {
 // ── Detail ─────────────────────────────────────────────
 function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onDeliveryDateChange, onCalendarChange }) {
   const navigate = useNavigate()
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
+  const noun = itMode ? 'pedido' : 'despacho'
+  const Noun = itMode ? 'Pedido' : 'Despacho'
   const items = parseItems(d.items)
   const hasItems = items.some((it) => it.description?.trim())
   const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
@@ -756,7 +769,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
   }
 
   const handleDeleteCalendarEvent = async () => {
-    if (!window.confirm('¿Eliminar el evento de Google Calendar para este despacho?')) return
+    if (!window.confirm(`¿Eliminar el evento de Google Calendar para este ${noun}?`)) return
     try {
       await deleteDispatchCalendarEvent(d.id)
       toast.success('Evento eliminado')
@@ -785,7 +798,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
 
   const handleStatusSelect = async (val) => {
     if (val !== 'Borrador' && val !== 'Cancelado' && !d.quote_id) {
-      return toast.error('Se requiere una cotización vinculada para cambiar el estado del despacho')
+      return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
     }
     setChangingStatus(true)
     await onStatusChange(val)
@@ -914,7 +927,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
           {d.client_name && <div><p className="text-xs text-gray-400">Cliente</p><p className="text-sm font-semibold text-gray-900">{d.client_name}</p></div>}
           {d.client_ruc && <div><p className="text-xs text-gray-400">RUC</p><p className="text-sm font-medium text-gray-800">{d.client_ruc}</p></div>}
           {d.client_address && <div className="sm:col-span-2"><p className="text-xs text-gray-400">Dirección</p><p className="text-sm text-gray-700">{d.client_address}</p></div>}
-          {d.date && <div><p className="text-xs text-gray-400">Fecha despacho</p><p className="text-sm font-medium text-gray-800">{fmtD(d.date + 'T12:00:00')}</p></div>}
+          {d.date && <div><p className="text-xs text-gray-400">Fecha {noun}</p><p className="text-sm font-medium text-gray-800">{fmtD(d.date + 'T12:00:00')}</p></div>}
           <div>
             <p className="text-xs text-gray-400 mb-1">Fecha de entrega</p>
             <input
@@ -1039,7 +1052,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
             <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
               <p className="text-xs font-semibold text-purple-700 mb-1">Evento en Google Calendar:</p>
               <p className="text-xs text-purple-600 font-mono break-all">
-                Despacho #{d.id} - {d.title}{d.client_name ? ` - ${d.client_name}` : ''}
+                {Noun} #{d.id} - {d.title}{d.client_name ? ` - ${d.client_name}` : ''}
               </p>
             </div>
 
@@ -1156,6 +1169,10 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
 
 // ── Form ───────────────────────────────────────────────
 function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onSave, onCancel, saving, isEdit, onBack }) {
+  const { vertical } = useCompany()
+  const itMode = vertical === 'it_support'
+  const noun = itMode ? 'pedido' : 'despacho'
+  const Noun = itMode ? 'Pedido' : 'Despacho'
   const [isDirty, setIsDirty] = useState(false)
   const [clientSuggestions, setClientSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -1302,7 +1319,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
         <ArrowLeft size={16} /> Volver
       </button>
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-gray-900">{isEdit ? 'Editar despacho' : 'Nuevo despacho'}</h2>
+        <h2 className="text-lg font-bold text-gray-900">{isEdit ? `Editar ${noun}` : `Nuevo ${noun}`}</h2>
         <button
           type="button"
           onClick={() => setShowQuoteSelect(true)}
@@ -1321,11 +1338,11 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
               <input className="input w-full" value={form.title} onChange={set('title')} placeholder="Ej: Entrega de equipos a cliente" required style={{fontSize:'16px'}} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">N° de despacho</label>
-              <input className="input w-full font-mono" value={form.dispatch_number} onChange={set('dispatch_number')} placeholder="DSP-0001" style={{fontSize:'16px'}} />
+              <label className="block text-xs font-medium text-gray-600 mb-1">N° de {noun}</label>
+              <input className="input w-full font-mono" value={form.dispatch_number} onChange={set('dispatch_number')} placeholder={itMode ? 'PED-0001' : 'DSP-0001'} style={{fontSize:'16px'}} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha despacho</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Fecha {noun}</label>
               <input className="input w-full" type="date" value={form.date} onChange={set('date')} style={{fontSize:'16px'}} />
             </div>
             <div>
@@ -1473,7 +1490,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
         {/* Notes */}
         <div className="card">
           <label className="block text-xs font-medium text-gray-600 mb-1">Observaciones</label>
-          <textarea className="input w-full h-16 resize-none" value={form.notes} onChange={set('notes')} placeholder="Notas adicionales del despacho..." style={{fontSize:'16px'}} />
+          <textarea className="input w-full h-16 resize-none" value={form.notes} onChange={set('notes')} placeholder={`Notas adicionales del ${noun}...`} style={{fontSize:'16px'}} />
         </div>
 
       </form>
@@ -1487,7 +1504,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
           <button type="button" onClick={onCancel} className="btn-secondary text-sm py-1.5 px-3">Cancelar</button>
           <button type="submit" form="dispatch-form" disabled={saving} className="btn-primary text-sm py-1.5 px-3 flex items-center gap-1.5">
             <Save size={13} />
-            {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear despacho'}
+            {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : `Crear ${noun}`}
           </button>
         </div>
       </div>
