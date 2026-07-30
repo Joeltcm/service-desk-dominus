@@ -403,6 +403,18 @@ export default function Warranties() {
     const f = blankForm()
     const i = [{ ...EMPTY_ITEM }]
     setSnapshot({ form: f, items: i })
+    // Número de certificado secuencial (GRT-0001…), igual que pedidos/tickets.
+    // Solo si es un certificado nuevo (no se está abriendo uno existente por URL).
+    if (!urlRef) {
+      getNextWarrantyNumber()
+        .then((r) => {
+          const num = r?.data?.number
+          if (!num) return
+          setForm((prev) => (prev.certNumber === f.certNumber ? { ...prev, certNumber: num } : prev))
+          setSnapshot((s) => (s && s.form.certNumber === f.certNumber ? { ...s, form: { ...s.form, certNumber: num } } : s))
+        })
+        .catch(() => {})
+    }
   }, [])
 
   async function loadList() {
