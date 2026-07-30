@@ -6,7 +6,8 @@ import { useAuth } from '../context/AuthContext'
 import { useCompany } from '../context/CompanyContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
-import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown } from 'lucide-react'
+import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown, QrCode } from 'lucide-react'
+import TicketScanner from '../components/TicketScanner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { fmtDT, fmtD } from '../utils/fmt'
@@ -15,6 +16,7 @@ import toast from 'react-hot-toast'
 
 export default function Tickets() {
   const [tickets, setTickets] = useState([])
+  const [showScanner, setShowScanner] = useState(false)
   const [statuses, setStatuses] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -339,12 +341,19 @@ export default function Tickets() {
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Tickets</h1>
           <p className="text-sm text-gray-500 mt-0.5">{displayedTickets.length}{filterSla ? ` / ${tickets.length}` : ''} ticket(s) encontrado(s)</p>
         </div>
-        <button onClick={() => navigate('/tickets/new')} className="btn-primary flex items-center gap-2 text-sm">
-          <Plus size={16} />
-          <span className="hidden sm:inline">Nuevo Ticket</span>
-          <span className="sm:hidden">Nuevo</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowScanner(true)} title="Escanear QR de un ticket" className="flex items-center gap-2 text-sm font-medium bg-slate-700 text-white rounded-lg px-3 py-2 hover:bg-slate-800 transition-colors">
+            <QrCode size={16} />
+            <span className="hidden sm:inline">Escanear</span>
+          </button>
+          <button onClick={() => navigate('/tickets/new')} className="btn-primary flex items-center gap-2 text-sm">
+            <Plus size={16} />
+            <span className="hidden sm:inline">Nuevo Ticket</span>
+            <span className="sm:hidden">Nuevo</span>
+          </button>
+        </div>
       </div>
+      {showScanner && <TicketScanner onClose={() => setShowScanner(false)} />}
 
       {/* Filtros */}
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 mb-4">
