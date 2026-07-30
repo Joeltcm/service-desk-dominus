@@ -764,9 +764,11 @@ function UsersPanel({ currentUser }) {
 
 // ── Role Features Panel ────────────────────────────────────────────────────
 const CONFIGURABLE_ROLES = [
-  { value: 'agent',  label: 'Técnico',  color: 'bg-blue-100 text-blue-700' },
-  { value: 'ventas', label: 'Ventas',   color: 'bg-emerald-100 text-emerald-700' },
-  { value: 'client', label: 'Cliente',  color: 'bg-gray-100 text-gray-700' },
+  { value: 'agent',      label: 'Técnico',    color: 'bg-blue-100 text-blue-700' },
+  { value: 'supervisor', label: 'Supervisor', color: 'bg-indigo-100 text-indigo-700' },
+  { value: 'ventas',     label: 'Ventas',     color: 'bg-emerald-100 text-emerald-700' },
+  { value: 'supplies',   label: 'Resp. Inventario', color: 'bg-teal-100 text-teal-700' },
+  { value: 'client',     label: 'Cliente',    color: 'bg-gray-100 text-gray-700' },
 ]
 
 function Toggle({ checked, onChange }) {

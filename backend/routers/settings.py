@@ -1697,6 +1697,7 @@ import json as _json
 
 _DEFAULT_ROLE_FEATURES = {
     "agent":    {"dashboard_servicios": True, "dashboard_ventas": True, "tickets": True, "agenda": True, "contacts": True, "quotes": True, "pedidos": True, "facturas": True, "warranties": True, "gastos": True, "cartas": True, "knowledge_base": True, "reports": True, "contratos": True, "impresoras": True, "suministros": True, "inventario": True},
+    "supervisor": {"dashboard_servicios": True, "dashboard_ventas": True, "tickets": True, "agenda": True, "contacts": True, "suppliers": True, "quotes": True, "pedidos": True, "facturas": True, "warranties": True, "gastos": True, "cartas": True, "knowledge_base": True, "reports": True, "contratos": True, "impresoras": True, "suministros": True, "inventario": True},
     "ventas":   {"dashboard_ventas": True, "suppliers": True, "quotes": True, "pedidos": True, "facturas": True},
     "supplies": {"tickets": True, "suministros": True, "inventario": True, "impresoras": True, "contratos": True, "reports": True},
     "client":   {"tickets": True, "agenda": True, "mis_documentos": True, "contacts": True, "knowledge_base": True},
