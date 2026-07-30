@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react'
-import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest } from '../services/api'
+import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { Boxes, Plus, Check, X, Search, Clock } from 'lucide-react'
+import { Boxes, Plus, Check, X, Search, Clock, Ban } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const STATUS = {
   pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700' },
   aprobado:  { label: 'Aprobado',  cls: 'bg-emerald-100 text-emerald-700' },
   rechazado: { label: 'Rechazado', cls: 'bg-red-100 text-red-700' },
+  cancelado: { label: 'Cancelado', cls: 'bg-gray-100 text-gray-500' },
 }
 
 export default function PartRequestPanel({ ticketId }) {
@@ -49,6 +50,7 @@ export default function PartRequestPanel({ ticketId }) {
     setActing(id)
     try {
       if (action === 'approve') { await approvePartRequest(id); toast.success('Aprobado · descontado del inventario') }
+      else if (action === 'cancel') { await cancelPartRequest(id); toast.success('Solicitud cancelada') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()
     } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
@@ -93,20 +95,30 @@ export default function PartRequestPanel({ ticketId }) {
                   </div>
                   {r.notes && <div className="text-xs text-gray-500 mt-0.5 italic">“{r.notes}”</div>}
                 </div>
-                {isApprover && r.status === 'pendiente' && (
-                  <div className="flex gap-1.5 flex-shrink-0">
-                    <button onClick={() => decide(r.id, 'approve')} disabled={acting === r.id}
-                      className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title="Aprobar y despachar">
-                      <Check size={14} />
-                    </button>
-                    <button onClick={() => decide(r.id, 'reject')} disabled={acting === r.id}
-                      className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50" title="Rechazar">
-                      <X size={14} />
-                    </button>
+                {r.status === 'pendiente' && (
+                  <div className="flex gap-1.5 flex-shrink-0 items-center">
+                    {isApprover && (
+                      <>
+                        <button onClick={() => decide(r.id, 'approve')} disabled={acting === r.id}
+                          className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title="Aprobar y despachar">
+                          <Check size={14} />
+                        </button>
+                        <button onClick={() => decide(r.id, 'reject')} disabled={acting === r.id}
+                          className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50" title="Rechazar">
+                          <X size={14} />
+                        </button>
+                      </>
+                    )}
+                    {(r.requested_by_id === user?.id || isApprover) && (
+                      <button onClick={() => decide(r.id, 'cancel')} disabled={acting === r.id}
+                        className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-50" title="Cancelar solicitud">
+                        <Ban size={14} />
+                      </button>
+                    )}
+                    {!isApprover && r.requested_by_id !== user?.id && (
+                      <span className="text-xs text-amber-500 flex items-center gap-1"><Clock size={12} /> En espera</span>
+                    )}
                   </div>
-                )}
-                {!isApprover && r.status === 'pendiente' && (
-                  <span className="text-xs text-amber-500 flex items-center gap-1 flex-shrink-0"><Clock size={12} /> En espera</span>
                 )}
               </div>
             )

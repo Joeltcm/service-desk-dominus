@@ -128,6 +128,31 @@ def notify_agents(db, title: str, body: str, url: str = "/", exclude_user_id: in
         db.commit()
 
 
+def notify_roles(db, roles, title: str, body: str, url: str = "/", exclude_user_id: int = None):
+    """Send push to all active users whose role is in `roles`."""
+    if not _fix_key(VAPID_PRIVATE_KEY):
+        return
+    from models import PushSubscription, User
+    subs = (
+        db.query(PushSubscription)
+        .join(User, User.id == PushSubscription.user_id)
+        .filter(User.role.in_(roles), User.is_active == True)
+        .all()
+    )
+    dead = []
+    for sub in subs:
+        if exclude_user_id and sub.user_id == exclude_user_id:
+            continue
+        info = {"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}}
+        result = send_push(info, title, body, url)
+        if result is None:
+            dead.append(sub.id)
+    if dead:
+        from models import PushSubscription as PS
+        db.query(PS).filter(PS.id.in_(dead)).delete(synchronize_session=False)
+        db.commit()
+
+
 def notify_user(db, user_id: int, title: str, body: str, url: str = "/"):
     """Send push to all subscriptions for a specific user."""
     if not _fix_key(VAPID_PRIVATE_KEY):

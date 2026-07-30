@@ -66,6 +66,43 @@ def create_part_request(
     db.add(pr)
     db.commit()
     db.refresh(pr)
+
+    # Notifica (push + campana) a administradores y responsables de inventario.
+    try:
+        from push_helper import notify_roles
+        notify_roles(
+            db,
+            [models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supplies],
+            "Nueva solicitud de parte",
+            f"{current_user.name}: {item.name} (x{data.quantity}) · Ticket #{data.ticket_id}",
+            url="/partes",
+            exclude_user_id=current_user.id,
+        )
+    except Exception:
+        pass
+    return _serialize(pr)
+
+
+@router.post("/{req_id}/cancel", response_model=schemas.PartRequestOut)
+def cancel_part_request(
+    req_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    pr = db.query(models.PartRequest).filter(models.PartRequest.id == req_id).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if pr.status != "pendiente":
+        raise HTTPException(status_code=400, detail=f"Solo se pueden cancelar solicitudes pendientes (actual: '{pr.status}')")
+    # Puede cancelar el solicitante o un admin/responsable de inventario.
+    if pr.requested_by_id != current_user.id and current_user.role not in (
+        models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supplies,
+    ):
+        raise HTTPException(status_code=403, detail="Solo el solicitante o un administrador puede cancelar")
+    pr.status = "cancelado"
+    pr.decided_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(pr)
     return _serialize(pr)
 
 

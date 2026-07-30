@@ -11,6 +11,7 @@ import {
   LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes
 } from 'lucide-react'
 import TicketScanner from './TicketScanner'
+import NotificationBell from './NotificationBell'
 import { ROLE_MAP } from '../pages/Settings'
 import { useRoleFeatures } from '../context/RoleFeaturesContext'
 import { useInstall } from '../context/InstallContext'
@@ -298,12 +299,15 @@ export default function Layout({ children }) {
             </div>
             <span className="font-bold text-white text-sm tracking-tight">{companyName || 'Service Desk'}</span>
           </div>
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="hidden md:flex p-1.5 rounded-lg hover:bg-white/10 text-slate-400 transition-colors"
-          >
-            {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
-          </button>
+          <div className="flex items-center gap-1">
+            <NotificationBell align="left" className="hidden md:block" />
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="hidden md:flex p-1.5 rounded-lg hover:bg-white/10 text-slate-400 transition-colors"
+            >
+              {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
+            </button>
+          </div>
           <button onClick={closeMobile} className="md:hidden p-1.5 rounded-lg hover:bg-white/10 text-slate-400">
             <X size={18} />
           </button>
@@ -400,12 +404,15 @@ export default function Layout({ children }) {
             </div>
             <span className="font-bold text-sm text-white tracking-tight">{companyName || 'Service Desk'}</span>
           </div>
-          <button
-            className="ml-auto w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-blue-400/30"
-            onClick={() => guardNavigate('/profile')}
-          >
-            {initials}
-          </button>
+          <div className="ml-auto flex items-center gap-1">
+            <NotificationBell align="right" />
+            <button
+              className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-blue-400/30"
+              onClick={() => guardNavigate('/profile')}
+            >
+              {initials}
+            </button>
+          </div>
         </div>
 
         {trialLoading ? (

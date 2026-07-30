@@ -9,6 +9,7 @@ const STATUS = {
   pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700' },
   aprobado:  { label: 'Aprobado',  cls: 'bg-emerald-100 text-emerald-700' },
   rechazado: { label: 'Rechazado', cls: 'bg-red-100 text-red-700' },
+  cancelado: { label: 'Cancelado', cls: 'bg-gray-100 text-gray-500' },
 }
 const FILTERS = [['pendiente', 'Pendientes'], ['aprobado', 'Aprobadas'], ['rechazado', 'Rechazadas'], ['', 'Todas']]
 
