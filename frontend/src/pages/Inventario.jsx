@@ -685,7 +685,7 @@ export default function Inventario() {
                   <span className="flex items-center gap-1 justify-end">Stock <SortIcon field="quantity" /></span>
                 </th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 hidden lg:table-cell">Valor</th>
-                <th className="px-2 py-3 w-16" />
+                <th className="px-2 py-3 sticky right-0 bg-gray-50 z-10 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.06)]" />
               </tr>
             </thead>
             <tbody>
@@ -735,7 +735,7 @@ export default function Inventario() {
                   <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700 hidden lg:table-cell">
                     ${((parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0)).toFixed(2)}
                   </td>
-                  <td className="px-2 py-3">
+                  <td className="px-2 py-3 sticky right-0 bg-white group-hover:bg-gray-50 z-10 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.06)]">
                     <div className="flex gap-1 justify-end">
                       <button onClick={() => openHistory(it)} className="p-1.5 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
                         <History size={14} />
