@@ -415,6 +415,29 @@ export default function Warranties() {
         })
         .catch(() => {})
     }
+
+    // Prellenado al venir desde un pedido despachado ("Generar garantía").
+    const fd = location.state?.fromDispatch
+    if (fd) {
+      const newItems = (fd.items && fd.items.length)
+        ? fd.items.map((it) => ({ type: 'Laptop', description: it.description || '', brand: '', model: '', serial: '' }))
+        : [{ ...EMPTY_ITEM }]
+      setItems(newItems)
+      setForm((prev) => ({
+        ...prev,
+        client: fd.client_name || prev.client,
+        address: fd.client_address || prev.address,
+        ruc: fd.client_ruc || prev.ruc,
+        invoice_ref: fd.dispatch_number || prev.invoice_ref,
+      }))
+      setSnapshot((s) => (s ? {
+        ...s,
+        form: { ...s.form, client: fd.client_name || '', address: fd.client_address || '', ruc: fd.client_ruc || '', invoice_ref: fd.dispatch_number || '' },
+        items: newItems.map((x) => ({ ...x })),
+      } : s))
+      setActiveTab('editor')
+      navigate(location.pathname, { replace: true, state: {} })
+    }
   }, [])
 
   async function loadList() {

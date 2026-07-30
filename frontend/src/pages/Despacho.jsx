@@ -15,7 +15,7 @@ import {
   PackageCheck, FileText, X, CheckCircle2, Clock, Send,
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
   Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
-  Tag,
+  Tag, ShieldCheck,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -853,6 +853,21 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
             <button onClick={() => setShowCalendarModal(true)} title="Agendar" className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg transition-colors ${d.calendar_event_id ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
               <CalendarDays size={13} /> <span className="hidden sm:inline">{d.calendar_event_id ? 'Reagendar' : 'Agendar'}</span>
             </button>
+            {d.status !== 'Borrador' && d.status !== 'Cancelado' && (
+              <button
+                onClick={() => navigate('/warranties', { state: { fromDispatch: {
+                  client_name: d.client_name || '',
+                  client_ruc: d.client_ruc || '',
+                  client_address: d.client_address || '',
+                  dispatch_number: d.dispatch_number || `#${d.id}`,
+                  items: parseItems(d.items).filter(it => it.description?.trim()).map(it => ({ description: it.description })),
+                } } })}
+                title="Generar certificado de garantía de este pedido"
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors"
+              >
+                <ShieldCheck size={13} /> <span className="hidden sm:inline">Garantía</span>
+              </button>
+            )}
             <button onClick={onEdit} className="btn-secondary flex items-center gap-1.5 text-sm">
               <Pencil size={13} /> <span className="hidden sm:inline">Editar</span>
             </button>
