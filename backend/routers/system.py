@@ -3,7 +3,7 @@ import os
 from datetime import date, timedelta
 from typing import Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -12,6 +12,47 @@ from auth import get_current_user, require_superadmin
 import models
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+# ── Permiso de escritura por módulo (nivel Edición) ────────────────────────────
+def _role_feature_level(db: Session, role, key: str) -> str:
+    """Nivel del rol para un módulo: 'none' | 'read' | 'write'. Sin configurar = 'write'
+    (preserva el comportamiento previo). Compatible con valores booleanos antiguos."""
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "role_features").first()
+    data = {}
+    if row and row.value:
+        try:
+            data = json.loads(row.value)
+        except Exception:
+            data = {}
+    rname = role.value if hasattr(role, "value") else str(role)
+    v = (data.get(rname) or {}).get(key)
+    if v is True:
+        return "write"
+    if v is False:
+        return "none"
+    if v in ("read", "write", "none"):
+        return v
+    return "write"
+
+
+def require_module_write(feature_key: str) -> Callable:
+    """Dependencia a nivel de router: las lecturas (GET) siempre pasan; las escrituras
+    (POST/PUT/PATCH/DELETE) exigen nivel 'write' del rol para ese módulo. Admin/superadmin
+    siempre pueden escribir."""
+    def _dep(
+        request: Request,
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> models.User:
+        if request.method.upper() in ("GET", "HEAD", "OPTIONS"):
+            return current_user
+        if current_user.role in (models.UserRole.admin, models.UserRole.superadmin):
+            return current_user
+        if _role_feature_level(db, current_user.role, feature_key) != "write":
+            raise HTTPException(status_code=403, detail="Tu rol es de solo lectura en este módulo")
+        return current_user
+    return _dep
 
 # Roles que cuentan como "staff" (asientos de trabajo). No incluye superadmin ni cliente.
 STAFF_ROLES = (

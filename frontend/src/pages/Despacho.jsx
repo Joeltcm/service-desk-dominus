@@ -23,6 +23,7 @@ import toast from 'react-hot-toast'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
 import { getCompanyCache, useCompany } from '../context/CompanyContext'
+import { useModuleAccess } from '../context/RoleFeaturesContext'
 
 const STATUSES = ['Borrador', 'Emitido', 'Despacho Programado', 'Entregado', 'Cancelado']
 
@@ -256,6 +257,8 @@ export default function Despacho() {
   const Noun = itMode ? 'Pedido' : 'Despacho'
   const nounPl = itMode ? 'pedidos' : 'despachos'
   const NounPl = itMode ? 'Pedidos' : 'Despachos'
+  const { canWrite } = useModuleAccess()
+  const canEditPedidos = canWrite('pedidos')
   const [dispatches, setDispatches] = useState([])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -490,9 +493,9 @@ export default function Despacho() {
         <div className="px-4 py-3 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold text-gray-900">{NounPl}</h1>
-            <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
+            {canEditPedidos && <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
               <Plus size={15} /> Nuevo
-            </button>
+            </button>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <FileCheck size={12} className="text-blue-400" />

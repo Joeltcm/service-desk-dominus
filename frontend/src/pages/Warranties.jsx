@@ -10,6 +10,7 @@ import { getWarranties, getNextWarrantyNumber, createWarranty, updateWarranty, d
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import { useAuth } from '../context/AuthContext'
 import { useCompany, getCompanyCache } from '../context/CompanyContext'
+import { useModuleAccess } from '../context/RoleFeaturesContext'
 import { fmtD } from '../utils/fmt'
 
 // ── Warranty conditions per equipment type ─────────────
@@ -352,6 +353,8 @@ export default function Warranties() {
   const { user: currentUser } = useAuth()
   const { company_name, company_address, company_ruc, vertical } = useCompany()
   const itMode = vertical === 'it_support'
+  const { canWrite } = useModuleAccess()
+  const canEditWarr = canWrite('warranties')
   const coName = company_name || 'Service Desk'
   const coAddress = company_address || 'Panamá, Punta Pacífica, PH Pacific Wind'
   const coRuc = company_ruc || '4-754-575 DV 85'
@@ -915,12 +918,12 @@ export default function Warranties() {
                   >×</button>
                 )}
               </div>
-              <button
+              {canEditWarr && <button
                 onClick={newCert}
                 className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2 flex-shrink-0"
               >
                 <Plus size={14} /> Nuevo
-              </button>
+              </button>}
             </div>
 
             <p className="text-xs text-gray-400">
@@ -1190,7 +1193,7 @@ export default function Warranties() {
                     )}
                   </div>
                 </div>
-                {selectedId && (
+                {selectedId && canEditWarr && (
                   <button onClick={newCert} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2 flex-shrink-0">
                     <Plus size={14} /> Nuevo
                   </button>

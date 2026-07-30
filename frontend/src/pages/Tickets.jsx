@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getTickets, getStatuses, getCategories, deleteTickets, getAgents, updateTicket } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { useCompany } from '../context/CompanyContext'
+import { useModuleAccess } from '../context/RoleFeaturesContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
 import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown, QrCode } from 'lucide-react'
@@ -51,6 +52,8 @@ export default function Tickets() {
   }
 
   const { isAgentOrAdmin, user } = useAuth()
+  const { canWrite } = useModuleAccess()
+  const canEditTickets = canWrite('tickets')
   const { vertical, company_sidebar_color, company_accent_color, company_name } = useCompany()
   const itMode = vertical === 'it_support'
   const navigate = useNavigate()
@@ -214,12 +217,14 @@ export default function Tickets() {
                 Centro de soporte{company_name ? ` · ${company_name}` : ''}
               </p>
             </div>
-            <button
-              onClick={() => navigate('/tickets/new')}
-              className="flex items-center gap-2 text-sm font-medium bg-white/15 hover:bg-white/25 border border-white/25 text-white rounded-lg px-3.5 py-2 transition-colors flex-shrink-0"
-            >
-              <Plus size={15} /> Nueva solicitud
-            </button>
+            {canEditTickets && (
+              <button
+                onClick={() => navigate('/tickets/new')}
+                className="flex items-center gap-2 text-sm font-medium bg-white/15 hover:bg-white/25 border border-white/25 text-white rounded-lg px-3.5 py-2 transition-colors flex-shrink-0"
+              >
+                <Plus size={15} /> Nueva solicitud
+              </button>
+            )}
           </div>
         </div>
 
@@ -346,11 +351,11 @@ export default function Tickets() {
             <QrCode size={16} />
             <span className="hidden sm:inline">Escanear</span>
           </button>
-          <button onClick={() => navigate('/tickets/new')} className="btn-primary flex items-center gap-2 text-sm">
+          {canEditTickets && <button onClick={() => navigate('/tickets/new')} className="btn-primary flex items-center gap-2 text-sm">
             <Plus size={16} />
             <span className="hidden sm:inline">Nuevo Ticket</span>
             <span className="sm:hidden">Nuevo</span>
-          </button>
+          </button>}
         </div>
       </div>
       {showScanner && <TicketScanner onClose={() => setShowScanner(false)} />}
