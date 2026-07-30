@@ -863,7 +863,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
                   client_ruc: d.client_ruc || '',
                   client_address: d.client_address || '',
                   dispatch_number: d.dispatch_number || `#${d.id}`,
-                  items: parseItems(d.items).filter(it => it.description?.trim()).map(it => ({ description: it.description })),
+                  items: parseItems(d.items).filter(it => it.description?.trim()).map(it => ({ description: it.description, category: it.category || '' })),
                 } } })}
                 title="Generar certificado de garantía de este pedido"
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors"

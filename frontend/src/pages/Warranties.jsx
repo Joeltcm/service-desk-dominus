@@ -203,6 +203,7 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
   const _co = getCompanyCache()
+  const itMode = _co.vertical === 'it_support'
   const coAddress = esc(_co.company_address || 'Panamá, Punta Pacífica, PH Pacific Wind')
   const coRuc     = esc(_co.company_ruc     || '4-754-575 DV 85')
 
@@ -228,8 +229,8 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
       <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${i + 1}</td>
       <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.type)}</td>
       <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.description) || '—'}</td>
-      <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.brand) || '—'}</td>
-      <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.model) || '—'}</td>
+      ${itMode ? '' : `<td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.brand) || '—'}</td>
+      <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${esc(it.model) || '—'}</td>`}
       <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top;font-family:monospace;font-size:9pt">${esc(it.serial) || '—'}</td>
     </tr>`
   ).join('')
@@ -299,8 +300,8 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
             <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">#</th>
             <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Tipo</th>
             <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Descripción</th>
-            <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Marca</th>
-            <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Modelo</th>
+            ${itMode ? '' : `<th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Marca</th>
+            <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">Modelo</th>`}
             <th style="padding:7px 8px;text-align:left;font-weight:600;font-size:8.5pt;border:1px solid #2d4d7a">N° de Serie</th>
           </tr>
         </thead>
@@ -423,7 +424,7 @@ export default function Warranties() {
     const fd = location.state?.fromDispatch
     if (fd) {
       const newItems = (fd.items && fd.items.length)
-        ? fd.items.map((it) => ({ type: 'Laptop', description: it.description || '', brand: '', model: '', serial: '' }))
+        ? fd.items.map((it) => ({ type: it.category || 'Laptop', description: it.description || '', brand: '', model: '', serial: '' }))
         : [{ ...EMPTY_ITEM }]
       setItems(newItems)
       setForm((prev) => ({
@@ -583,6 +584,10 @@ export default function Warranties() {
 
   const handleSave = async () => {
     if (!form.client.trim()) { toast.error('El nombre del cliente es requerido'); return false }
+    if (itMode && items.some((it) => !it.serial?.trim())) {
+      toast.error('El N° de serie es obligatorio para todos los equipos')
+      return false
+    }
     setSaving(true)
     try {
       const payload = {
@@ -1458,36 +1463,55 @@ export default function Warranties() {
                           </button>
                         )}
                       </div>
-                      <select className="input w-full text-sm" value={item.type} onChange={(e) => setItem(i, 'type', e.target.value)} style={{fontSize:'16px'}}>
-                        {EQUIPMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                      </select>
+                      {itMode ? (
+                        // Tipo = categoría del inventario (texto libre, se prellena desde el pedido)
+                        <div>
+                          <input
+                            className="input w-full text-sm"
+                            value={item.type}
+                            onChange={(e) => setItem(i, 'type', e.target.value)}
+                            placeholder="Tipo (categoría del inventario)"
+                            list="warr-type-options"
+                            style={{fontSize:'16px'}}
+                          />
+                          <datalist id="warr-type-options">
+                            {EQUIPMENT_TYPES.map((t) => <option key={t} value={t} />)}
+                          </datalist>
+                        </div>
+                      ) : (
+                        <select className="input w-full text-sm" value={item.type} onChange={(e) => setItem(i, 'type', e.target.value)} style={{fontSize:'16px'}}>
+                          {(EQUIPMENT_TYPES.includes(item.type) ? EQUIPMENT_TYPES : [item.type, ...EQUIPMENT_TYPES]).map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      )}
                       <ItemSuggestInput
                         value={item.description}
                         onChange={(val) => setItem(i, 'description', val)}
                         placeholder="Descripción"
                         suggestions={descSuggs}
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <ItemSuggestInput
-                          value={item.brand}
-                          onChange={(val) => setItem(i, 'brand', val)}
-                          placeholder="Marca"
-                          suggestions={brandSuggs}
-                        />
-                        <ItemSuggestInput
-                          value={item.model}
-                          onChange={(val) => setItem(i, 'model', val)}
-                          placeholder="Modelo"
-                          suggestions={modelSuggs}
-                        />
-                      </div>
+                      {!itMode && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <ItemSuggestInput
+                            value={item.brand}
+                            onChange={(val) => setItem(i, 'brand', val)}
+                            placeholder="Marca"
+                            suggestions={brandSuggs}
+                          />
+                          <ItemSuggestInput
+                            value={item.model}
+                            onChange={(val) => setItem(i, 'model', val)}
+                            placeholder="Modelo"
+                            suggestions={modelSuggs}
+                          />
+                        </div>
+                      )}
                       {/* Serie: sin sugerencias, con aviso de duplicado */}
                       <div>
                         <input
-                          className={`input w-full text-sm ${serialDup ? 'border-amber-400 focus:ring-amber-400' : ''}`}
+                          className={`input w-full text-sm ${serialDup ? 'border-amber-400 focus:ring-amber-400' : ''} ${itMode && !item.serial?.trim() ? 'border-red-300 focus:ring-red-400' : ''}`}
                           value={item.serial}
                           onChange={(e) => setItem(i, 'serial', e.target.value)}
-                          placeholder="N° de serie"
+                          placeholder={itMode ? 'N° de serie (obligatorio)' : 'N° de serie'}
                           style={{fontSize:'16px'}}
                         />
                         {serialDup && (
@@ -1593,8 +1617,8 @@ export default function Warranties() {
                         <th style={thStyle}>#</th>
                         <th style={thStyle}>Tipo</th>
                         <th style={thStyle}>Descripción</th>
-                        <th style={thStyle}>Marca</th>
-                        <th style={thStyle}>Modelo</th>
+                        {!itMode && <th style={thStyle}>Marca</th>}
+                        {!itMode && <th style={thStyle}>Modelo</th>}
                         <th style={thStyle}>N° de Serie</th>
                       </tr>
                     </thead>
@@ -1604,8 +1628,8 @@ export default function Warranties() {
                           <td style={tdStyle}>{i + 1}</td>
                           <td style={tdStyle}>{it.type}</td>
                           <td style={tdStyle}>{it.description || '—'}</td>
-                          <td style={tdStyle}>{it.brand || '—'}</td>
-                          <td style={tdStyle}>{it.model || '—'}</td>
+                          {!itMode && <td style={tdStyle}>{it.brand || '—'}</td>}
+                          {!itMode && <td style={tdStyle}>{it.model || '—'}</td>}
                           <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '9pt' }}>{it.serial || '—'}</td>
                         </tr>
                       ))}

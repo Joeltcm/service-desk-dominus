@@ -20,7 +20,7 @@ function alertStockOnSelect(inv) {
   }
 }
 
-export const EMPTY_ITEM = { code: '', description: '', qty: 1, unit_price: '', itbms: true }
+export const EMPTY_ITEM = { code: '', description: '', category: '', qty: 1, unit_price: '', itbms: true }
 
 export function parseItems(str) {
   if (!str) return [{ ...EMPTY_ITEM }]
@@ -30,6 +30,7 @@ export function parseItems(str) {
       return arr.map(it => ({
         code: it.code || '',
         description: it.description || '',
+        category: it.category || '',
         qty: it.qty ?? 1,
         unit_price: it.unit_price ?? '',
         itbms: it.itbms !== false,
@@ -109,6 +110,7 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
   const selectInventoryFromCode = (inv) => {
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
+    onChange(idx, 'category', inv.category || '')
     onChange(idx, 'unit_price', inv.unit_price || '')
     alertStockOnSelect(inv)
     setCodeInvResults([])
@@ -119,6 +121,7 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
   const selectInventoryFromDesc = (inv) => {
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
+    onChange(idx, 'category', inv.category || '')
     onChange(idx, 'unit_price', inv.unit_price || '')
     alertStockOnSelect(inv)
     setDescInvResults([])
