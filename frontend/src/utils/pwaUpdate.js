@@ -6,21 +6,42 @@ const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 export function watchForUpdates(registration, onUpdateAvailable) {
   if (!registration || !('serviceWorker' in navigator)) return
 
-  // Ya había una actualización esperando (p. ej. se instaló mientras la pestaña estaba cerrada)
-  if (registration.waiting && navigator.serviceWorker.controller) {
-    onUpdateAvailable(registration.waiting)
+  // Dedupe: solo avisamos una vez por worker nuevo (evita toast doble si el mismo
+  // update lo detectan dos ramas a la vez).
+  let notified = false
+  const notify = (worker) => {
+    if (notified || !worker) return
+    notified = true
+    onUpdateAvailable(worker)
   }
 
-  registration.addEventListener('updatefound', () => {
-    const newWorker = registration.installing
-    if (!newWorker) return
-    newWorker.addEventListener('statechange', () => {
-      // navigator.serviceWorker.controller solo existe si ya había una versión activa:
-      // así distinguimos "primera instalación" (no avisar) de "actualización" (avisar)
-      if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-        onUpdateAvailable(newWorker)
+  // navigator.serviceWorker.controller solo existe si ya había una versión activa:
+  // así distinguimos "primera instalación" (no avisar) de "actualización" (avisar).
+  const trackWorker = (worker) => {
+    if (!worker) return
+    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+      notify(worker)
+      return
+    }
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+        notify(worker)
       }
     })
+  }
+
+  // 1) Ya había una actualización esperando (se instaló con la pestaña cerrada)
+  if (registration.waiting && navigator.serviceWorker.controller) {
+    notify(registration.waiting)
+  }
+  // 2) Ya hay una instalándose ahora mismo — cubre la carrera en que el SW nuevo se
+  //    descubrió durante register(), antes de enganchar el listener 'updatefound'.
+  if (registration.installing) {
+    trackWorker(registration.installing)
+  }
+  // 3) Cualquier actualización que se descubra de aquí en adelante.
+  registration.addEventListener('updatefound', () => {
+    trackWorker(registration.installing)
   })
 
   const checkForUpdate = () => registration.update().catch(() => {})
