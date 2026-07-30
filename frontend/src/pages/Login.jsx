@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 
 export default function Login() {
   const { company_sidebar_color: sidebarColor, company_name: companyName } = useCompany()
-  const [publicInfo, setPublicInfo] = useState({ company_name: '', has_logo: false })
+  const [publicInfo, setPublicInfo] = useState({ company_name: '', has_logo: false, modules: {} })
   const [mode, setMode] = useState('login') // 'login' | 'register'
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -193,11 +193,11 @@ export default function Login() {
           <p className="text-blue-200 text-base">Plataforma de Gestión Empresarial</p>
           <div className="mt-10 grid grid-cols-2 gap-4 text-left">
             {[
-              { label: 'Tickets',  desc: 'Soporte y seguimiento' },
-              { label: 'Ventas',   desc: 'Cotizaciones y pedidos' },
-              { label: 'Facturas', desc: 'Facturación y cobros' },
-              { label: 'Reportes', desc: 'Métricas y análisis' },
-            ].map(f => (
+              { label: 'Tickets',  desc: 'Soporte y seguimiento',  module: 'tickets' },
+              { label: 'Ventas',   desc: 'Cotizaciones y pedidos',  module: 'dashboard_ventas' },
+              { label: 'Facturas', desc: 'Facturación y cobros',    module: 'facturas' },
+              { label: 'Reportes', desc: 'Métricas y análisis',     module: 'reportes' },
+            ].filter(f => publicInfo.modules?.[f.module] !== false).map(f => (
               <div key={f.label} className="bg-white/8 rounded-xl px-4 py-3 border border-white/10">
                 <p className="text-white font-semibold text-sm">{f.label}</p>
                 <p className="text-blue-300 text-xs mt-0.5">{f.desc}</p>

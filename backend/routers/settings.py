@@ -1827,7 +1827,13 @@ def save_company_settings(
 def get_public_company_info(db: Session = Depends(get_db)):
     name = _get_setting(db, "company_name") or COMPANY_DEFAULTS.get("company_name", "")
     has_logo = bool(_get_setting(db, "company_logo_b64"))
-    return {"company_name": name, "has_logo": has_logo}
+    # Módulos habilitados → el login muestra solo las tarjetas activas.
+    try:
+        from routers.system import _get_modules
+        modules = _get_modules(db)
+    except Exception:
+        modules = {}
+    return {"company_name": name, "has_logo": has_logo, "modules": modules}
 
 
 @router.get("/logo")
