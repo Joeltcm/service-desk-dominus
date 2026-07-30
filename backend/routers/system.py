@@ -5,12 +5,35 @@ from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from database import get_db
 from auth import get_current_user, require_superadmin
 import models
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+# Roles que cuentan como "staff" (asientos de trabajo). No incluye superadmin ni cliente.
+STAFF_ROLES = (
+    models.UserRole.admin, models.UserRole.supervisor,
+    models.UserRole.agent, models.UserRole.ventas, models.UserRole.supplies,
+)
+
+
+def _get_max_users(db: Session) -> int:
+    """Límite de usuarios staff configurado por el superadmin. 0 = ilimitado."""
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "max_users").first()
+    try:
+        return max(0, int(row.value)) if row and row.value else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def count_staff_users(db: Session) -> int:
+    return db.query(func.count(models.User.id)).filter(
+        models.User.is_active == True,
+        models.User.role.in_(STAFF_ROLES),
+    ).scalar() or 0
 
 ALL_MODULES = [
     "tickets", "agenda", "proyectos", "dashboard_servicios",
@@ -195,3 +218,33 @@ def update_trial_config(
         db.add(models.AppSetting(key="trial", value=json.dumps(trial)))
     db.commit()
     return trial
+
+
+# ── Límite de usuarios ────────────────────────────────────────────────────────
+
+@router.get("/max-users")
+def get_max_users(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Visible para staff: cuántos usuarios staff hay y cuál es el tope."""
+    return {"max_users": _get_max_users(db), "staff_count": count_staff_users(db)}
+
+
+@router.put("/max-users")
+def set_max_users(
+    data: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_superadmin),
+):
+    try:
+        val = max(0, int(data.get("max_users", 0) or 0))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Valor inválido")
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "max_users").first()
+    if row:
+        row.value = str(val)
+    else:
+        db.add(models.AppSetting(key="max_users", value=str(val)))
+    db.commit()
+    return {"max_users": val, "staff_count": count_staff_users(db)}

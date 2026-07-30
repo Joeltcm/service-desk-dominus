@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
@@ -7,6 +7,13 @@ from pydantic import BaseModel
 from database import get_db
 import models, schemas
 from auth import get_current_user, require_admin, require_staff, get_password_hash
+from audit_helper import log_action
+from routers.system import _get_max_users, count_staff_users, STAFF_ROLES
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return fwd or (request.client.host if request.client else None)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -155,6 +162,7 @@ def list_clients(
 @router.post("", response_model=schemas.UserOut)
 def create_user(
     data: schemas.UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_staff),
 ):
@@ -170,6 +178,16 @@ def create_user(
     # cuando HIDE_SUPERADMIN está activo).
     if data.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user):
         raise HTTPException(status_code=403, detail="No autorizado")
+
+    # Límite de usuarios staff (configurado por el superadmin). El superadmin nunca
+    # queda limitado; los clientes no cuentan.
+    if current_user.role != models.UserRole.superadmin and data.role in STAFF_ROLES:
+        limit = _get_max_users(db)
+        if limit and count_staff_users(db) >= limit:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Límite de usuarios alcanzado ({limit}). Contacta al proveedor para ampliarlo.",
+            )
 
     import uuid as _uuid
     email = data.email or f"sin-correo-{_uuid.uuid4().hex[:12]}@sin-correo.local"
@@ -199,6 +217,10 @@ def create_user(
         contact.deleted_at = datetime.now(_tz.utc)
         db.commit()
         db.refresh(user)
+        log_action(db, current_user, "create", "usuario", user.id, user.name,
+                   {"role": user.role.value if hasattr(user.role, "value") else str(user.role)},
+                   _client_ip(request))
+        db.commit()
         return user
 
     user = models.User(
@@ -214,6 +236,10 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    log_action(db, current_user, "create", "usuario", user.id, user.name,
+               {"role": user.role.value if hasattr(user.role, "value") else str(user.role)},
+               _client_ip(request))
+    db.commit()
     return user
 
 
@@ -233,6 +259,7 @@ def get_user(
 def update_user(
     user_id: int,
     data: schemas.UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
@@ -240,6 +267,7 @@ def update_user(
     if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    _changed = [k for k in data.model_fields_set if k != 'password']
     if data.name is not None:
         user.name = data.name
     if data.email is not None:
@@ -263,12 +291,18 @@ def update_user(
 
     db.commit()
     db.refresh(user)
+    details = {"campos": _changed}
+    if data.password:
+        details["password"] = "cambiada"
+    log_action(db, current_user, "update", "usuario", user.id, user.name, details, _client_ip(request))
+    db.commit()
     return user
 
 
 @router.delete("/{user_id}")
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
@@ -292,5 +326,8 @@ def delete_user(
         )
 
     user.is_active = False
+    db.commit()
+    log_action(db, current_user, "delete", "usuario", user.id, user.name,
+               {"accion": "desactivado"}, _client_ip(request))
     db.commit()
     return {"ok": True}

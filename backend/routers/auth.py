@@ -10,8 +10,14 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from routers.settings import _get_setting
+from audit_helper import log_action
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    fwd = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return fwd or (request.client.host if request.client else None)
 
 # ── In-memory captcha store: {id: (answer, expires_ts)} ──
 _captchas: dict = {}
@@ -58,7 +64,7 @@ class LoginJSON(BaseModel):
 
 
 @router.post("/login", response_model=schemas.Token)
-def login_json(data: LoginJSON, db: Session = Depends(get_db)):
+def login_json(data: LoginJSON, request: Request, db: Session = Depends(get_db)):
     entry = _captchas.pop(data.captcha_id, None)
     if not entry:
         raise HTTPException(status_code=400, detail="Captcha expirado, recarga la página")
@@ -66,17 +72,33 @@ def login_json(data: LoginJSON, db: Session = Depends(get_db)):
     if time.time() > expires or data.captcha_answer.strip() != expected:
         raise HTTPException(status_code=400, detail="Respuesta incorrecta")
 
-    user = db.query(models.User).filter(
-        models.User.email == data.email.strip().lower()
-    ).first()
+    ip = _client_ip(request)
+    email = data.email.strip().lower()
+    user = db.query(models.User).filter(models.User.email == email).first()
     if not user or not auth_module.verify_password(data.password, user.password_hash):
+        _audit_login(db, None, email, "fallido", ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email o contraseña incorrectos")
     if not user.is_active:
+        _audit_login(db, user, email, "usuario desactivado", ip)
         raise HTTPException(status_code=403, detail="Usuario desactivado")
 
     expires_delta = timedelta(days=30) if data.remember_me else None
     access_token = auth_module.create_access_token(data={"sub": str(user.id)}, expires_delta=expires_delta)
+    _audit_login(db, user, email, "exitoso", ip)
     return {"access_token": access_token, "token_type": "bearer", "user": user}
+
+
+def _audit_login(db: Session, user, email: str, status_txt: str, ip: Optional[str]):
+    """Registra un intento de inicio de sesión en la auditoría. Nunca rompe el login."""
+    try:
+        log_action(db, user, "login", "usuario",
+                   entity_id=user.id if user else None,
+                   entity_name=(user.name if user else email),
+                   details={"status": status_txt, "email": email},
+                   ip_address=ip)
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 class RegisterRequest(BaseModel):

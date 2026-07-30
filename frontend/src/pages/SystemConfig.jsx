@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock } from 'lucide-react'
+import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial } from '../services/api'
+import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers } from '../services/api'
 import { useModules } from '../context/ModulesContext'
 import { useCompany } from '../context/CompanyContext'
-import { RoleFeaturesPanel } from './Settings'
+import { RoleFeaturesPanel, AuditPanel } from './Settings'
 
 // En vertical 'it_support' el grupo de impresión se presenta como "Equipos"
 // (el módulo 'impresoras' habilita la sección de Equipos).
@@ -76,10 +76,27 @@ export default function SystemConfig() {
   const [trial, setTrial] = useState({ enabled: false, start_date: null, days: 14 })
   const [trialSaving, setTrialSaving] = useState(false)
 
+  const [userLimit, setUserLimit] = useState({ max_users: 0, staff_count: 0 })
+  const [limitSaving, setLimitSaving] = useState(false)
+
   useEffect(() => {
     getSystemModules().then(r => setModulesLocal(r.data)).catch(() => toast.error('Error cargando configuración'))
     getTrialConfig().then(r => setTrial(r.data)).catch(() => {})
+    getMaxUsers().then(r => setUserLimit(r.data)).catch(() => {})
   }, [])
+
+  const handleLimitSave = async () => {
+    setLimitSaving(true)
+    try {
+      const r = await setMaxUsers(Number(userLimit.max_users) || 0)
+      setUserLimit(r.data)
+      toast.success('Límite de usuarios guardado')
+    } catch {
+      toast.error('Error al guardar el límite de usuarios')
+    } finally {
+      setLimitSaving(false)
+    }
+  }
 
   const toggle = (key) => {
     setModulesLocal(prev => ({ ...prev, [key]: !prev[key] }))
@@ -263,6 +280,44 @@ export default function SystemConfig() {
         )}
       </div>
 
+      {/* Límite de usuarios */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+            <Users size={14} className="text-blue-500" /> Límite de usuarios
+          </h2>
+          <button
+            onClick={handleLimitSave}
+            disabled={limitSaving}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+          >
+            <Save size={12} /> {limitSaving ? 'Guardando...' : 'Guardar'}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400">
+          Máximo de usuarios <strong>staff</strong> (técnicos, admin, ventas, etc.) que el administrador puede crear. Los clientes no cuentan. <strong>0 = ilimitado.</strong>
+        </p>
+        <div className="flex items-end gap-4">
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Máximo permitido</label>
+            <input
+              type="number"
+              min="0"
+              value={userLimit.max_users}
+              onChange={e => setUserLimit(u => ({ ...u, max_users: e.target.value }))}
+              className="input-field text-sm w-32"
+            />
+          </div>
+          <div className={`rounded-lg px-3 py-2 text-xs font-medium ${
+            userLimit.max_users > 0 && userLimit.staff_count >= userLimit.max_users
+              ? 'bg-red-50 text-red-700'
+              : 'bg-blue-50 text-blue-700'
+          }`}>
+            En uso: <strong>{userLimit.staff_count}</strong>{userLimit.max_users > 0 ? ` / ${userLimit.max_users}` : ' (sin límite)'}
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
           <Shield size={14} className="text-indigo-500" /> Accesos por rol
@@ -271,6 +326,17 @@ export default function SystemConfig() {
           Activa o desactiva funciones específicas para Técnico, Ventas y Cliente. El Administrador siempre tiene acceso total.
         </p>
         <RoleFeaturesPanel />
+      </div>
+
+      {/* Auditoría del sistema */}
+      <div>
+        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <ScrollText size={14} className="text-violet-500" /> Auditoría del sistema
+        </h2>
+        <p className="text-xs text-gray-400 mb-3">
+          Registro de inicios de sesión (exitosos y fallidos), creación/edición/eliminación de registros y otros cambios importantes.
+        </p>
+        <AuditPanel />
       </div>
     </div>
   )

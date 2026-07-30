@@ -1803,7 +1803,7 @@ function SlaPanel() {
 }
 
 // ── Audit Panel ────────────────────────────────────────────────────────────
-function AuditPanel() {
+export function AuditPanel() {
   const [rows, setRows]       = React.useState([])
   const [total, setTotal]     = React.useState(0)
   const [loading, setLoading] = React.useState(true)

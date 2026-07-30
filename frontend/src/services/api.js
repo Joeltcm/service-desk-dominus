@@ -441,6 +441,10 @@ export const permanentDelete = (entityType, id) => api.delete(`/papelera/${entit
 // Audit Log
 export const getAuditLog = (params) => api.get('/audit', { params })
 
+// Límite de usuarios (staff)
+export const getMaxUsers = () => api.get('/system/max-users')
+export const setMaxUsers = (max_users) => api.put('/system/max-users', { max_users })
+
 // Authenticated file download (avoids 401 on direct <a href> links)
 export async function downloadWithAuth(relUrl, filename) {
   const token = localStorage.getItem('token') || sessionStorage.getItem('token')
