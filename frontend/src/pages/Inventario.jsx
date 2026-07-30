@@ -736,7 +736,7 @@ export default function Inventario() {
                     ${((parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0)).toFixed(2)}
                   </td>
                   <td className="px-2 py-3">
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-1 justify-end">
                       <button onClick={() => openHistory(it)} className="p-1.5 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
                         <History size={14} />
                       </button>
