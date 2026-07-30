@@ -26,6 +26,82 @@ router = APIRouter(prefix="/api/despachos", tags=["despachos"])
 
 
 
+# ── Inventario: resta/reposición automática por estado del pedido ──────────────
+
+def _iter_dispatch_coded_items(d: models.Dispatch):
+    """Devuelve (code, qty) de los items del pedido que tienen código de inventario."""
+    try:
+        items = json.loads(d.items or "[]")
+    except Exception:
+        return
+    for it in items:
+        code = (it.get("code") or "").strip()
+        if not code:
+            continue
+        try:
+            qty = float(it.get("qty") or 0)
+        except (ValueError, TypeError):
+            qty = 0
+        if qty > 0:
+            yield code, qty
+
+
+def _apply_inventory_from_dispatch(d: models.Dispatch, db: Session):
+    if d.inventory_applied:
+        return
+    for code, qty in _iter_dispatch_coded_items(d):
+        inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+        if not inv:
+            continue
+        try:
+            current = float(inv.quantity or "0")
+        except (ValueError, TypeError):
+            current = 0.0
+        new_qty = max(0.0, current - qty)
+        delta = current - new_qty
+        inv.quantity = f"{new_qty:.4f}".rstrip("0").rstrip(".") or "0"
+        db.add(models.InventoryTransaction(
+            item_code=code, qty_delta=f"-{delta:.4f}".rstrip("0").rstrip("."),
+            source_type="dispatch", source_id=d.id,
+            notes=f"Pedido {d.dispatch_number or d.id} · {d.status}",
+        ))
+    d.inventory_applied = True
+
+
+def _revert_inventory_from_dispatch(d: models.Dispatch, db: Session):
+    if not d.inventory_applied:
+        return
+    for code, qty in _iter_dispatch_coded_items(d):
+        inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+        if not inv:
+            continue
+        try:
+            current = float(inv.quantity or "0")
+        except (ValueError, TypeError):
+            current = 0.0
+        inv.quantity = f"{current + qty:.4f}".rstrip("0").rstrip(".") or "0"
+        db.add(models.InventoryTransaction(
+            item_code=code, qty_delta=f"+{qty:.4f}".rstrip("0").rstrip("."),
+            source_type="dispatch_revert", source_id=d.id,
+            notes=f"Reposición pedido {d.dispatch_number or d.id} · {d.status}",
+        ))
+    d.inventory_applied = False
+
+
+def _sync_dispatch_inventory(d: models.Dispatch, db: Session, items_changed: bool = False):
+    """Resta el stock cuando el pedido está en un estado distinto a Borrador/Cancelado;
+    lo repone al volver a esos estados. Si cambian los items estando ya aplicado, resincroniza."""
+    deduct = d.status not in ("Borrador", "Cancelado") and d.deleted_at is None
+    if deduct:
+        if d.inventory_applied and items_changed:
+            _revert_inventory_from_dispatch(d, db)
+        if not d.inventory_applied:
+            _apply_inventory_from_dispatch(d, db)
+    else:
+        if d.inventory_applied:
+            _revert_inventory_from_dispatch(d, db)
+
+
 def _sync_order_status(order: models.Order, db: Session) -> None:
     """Derive order.status from the aggregate state of all its active dispatches."""
     dispatches = db.query(models.Dispatch).filter(
@@ -90,6 +166,8 @@ def create_dispatch(
     db.add(dispatch)
     db.commit()
     db.refresh(dispatch)
+    _sync_dispatch_inventory(dispatch, db)
+    db.commit()
     if dispatch.order_id:
         order = db.query(models.Order).filter(models.Order.id == dispatch.order_id).first()
         if order:
@@ -130,6 +208,7 @@ def update_dispatch(
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(d, field, value)
+    _sync_dispatch_inventory(d, db, items_changed="items" in updates)
     db.commit()
     db.refresh(d)
     if d.order_id and "status" in updates:
@@ -153,6 +232,7 @@ def delete_dispatch(
     if not d:
         raise HTTPException(status_code=404, detail="Despacho no encontrado")
     order_id = d.order_id
+    _revert_inventory_from_dispatch(d, db)  # repone stock si estaba aplicado
     d.deleted_at = datetime.now(timezone.utc)
     db.commit()
     if order_id:

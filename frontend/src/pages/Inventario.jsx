@@ -48,7 +48,8 @@ function fmtQty(q) {
 
 const SOURCE_LABEL = {
   manual:           'Ajuste manual',
-  dispatch:         'Despacho',
+  dispatch:         'Salida por pedido',
+  dispatch_revert:  'Reposición de pedido',
   invoice:          'Factura',
   order:            'Pedido',
   consumo_interno:  'Consumo interno',
@@ -233,6 +234,23 @@ export default function Inventario() {
     URL.revokeObjectURL(url)
   }
 
+  const exportCSV = () => {
+    if (filtered.length === 0) { toast.error('No hay artículos para exportar'); return }
+    const headers = ['codigo', 'nombre', 'categoria', 'descripcion', 'unidad', 'precio_venta', 'costo', 'stock', 'proveedor', 'bodega', 'condicion', 'estado', 'ubicacion']
+    const supplierName = (id) => suppliers.find(s => s.id === id)?.name || ''
+    const esc = (v) => { const s = String(v ?? ''); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const lines = filtered.map(it => [
+      it.code, it.name, it.category || '', it.description || '', it.unit || '', it.unit_price || '', it.cost_price || '', it.quantity || '',
+      supplierName(it.supplier_id), WAREHOUSE_LABEL[it.warehouse] || it.warehouse || '', it.condition || '', it.item_status || '', it.location || '',
+    ].map(esc).join(','))
+    const csv = headers.join(',') + '\n' + lines.join('\n') + '\n'
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `inventario_${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const exportPDF = () => {
     if (filtered.length === 0) { toast.error('No hay artículos para exportar'); return }
     const co = getCompanyCache()
@@ -401,6 +419,9 @@ export default function Inventario() {
             </button>
             <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-60">
               <Upload size={14} /> {importing ? 'Importando…' : 'Importar CSV'}
+            </button>
+            <button onClick={exportCSV} title="Exportar a CSV lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
+              <Download size={14} /> <span className="hidden sm:inline">Exportar CSV</span>
             </button>
             <button onClick={exportPDF} title="Exportar a PDF lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
               <FileText size={14} /> <span className="hidden sm:inline">Exportar PDF</span>
