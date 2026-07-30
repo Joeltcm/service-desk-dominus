@@ -278,20 +278,17 @@ def delete_user(
     if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    # Bloquea la desactivación si el usuario tiene tickets activos (asignados o como
+    # cliente). Los pedidos van siempre ligados a un ticket, así que quedan cubiertos.
     ticket_count = db.query(func.count(models.Ticket.id)).filter(
         models.Ticket.deleted_at.is_(None),
         (models.Ticket.assigned_to_id == user_id) | (models.Ticket.client_id == user_id),
     ).scalar() or 0
 
-    order_count = db.query(func.count(models.Order.id)).filter(
-        models.Order.deleted_at.is_(None),
-        models.Order.client_id == user_id,
-    ).scalar() or 0
-
-    if ticket_count > 0 or order_count > 0:
+    if ticket_count > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"No se puede eliminar: {ticket_count} ticket(s) y {order_count} pedido(s) activos vinculados. Reasígnalos primero.",
+            detail=f"No se puede desactivar: {ticket_count} ticket(s) activo(s) vinculado(s). Reasígnalos primero.",
         )
 
     user.is_active = False
