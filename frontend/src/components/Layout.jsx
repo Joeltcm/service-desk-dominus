@@ -8,8 +8,9 @@ import { getDashboard, getTrialStatus } from '../services/api'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
-  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock
+  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode
 } from 'lucide-react'
+import TicketScanner from './TicketScanner'
 import { ROLE_MAP } from '../pages/Settings'
 import { useRoleFeatures } from '../context/RoleFeaturesContext'
 import { useInstall } from '../context/InstallContext'
@@ -102,6 +103,7 @@ function NavItem({ item, collapsed, onNavigate, badge }) {
 }
 
 const FAB_ITEMS = [
+  { label: 'Escanear ticket',  action: 'scan',               Icon: QrCode,        bg: 'bg-slate-700',  roles: ['admin','supervisor','agent','superadmin'],          moduleKey: 'tickets' },
   { label: 'Nuevo Ticket',     to: '/tickets/new',           Icon: Ticket,        bg: 'bg-orange-500', roles: ['admin','supervisor','agent','client','superadmin'], moduleKey: 'tickets' },
   { label: 'Nueva Cotización', to: '/quotes?action=new',     Icon: ClipboardList, bg: 'bg-indigo-500', roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'cotizaciones' },
   { label: 'Nueva Factura',    to: '/facturas?action=new',   Icon: Receipt,       bg: 'bg-rose-500',   roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'facturas' },
@@ -120,6 +122,7 @@ export default function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [fabOpen, setFabOpen] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
   const [openTickets, setOpenTickets] = useState(0)
   const [trial, setTrial] = useState({ active: false, expired: false, days_remaining: null })
   const [trialLoading, setTrialLoading] = useState(true)
@@ -457,10 +460,10 @@ export default function Layout({ children }) {
             <>
               <div className="fixed inset-0" onClick={() => setFabOpen(false)} />
               <div className="absolute bottom-16 right-0 flex flex-col-reverse gap-2.5 items-end pb-1">
-                {FAB_ITEMS.filter(i => i.roles.includes(user?.role) && (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false))).map(({ label, to, Icon, bg }) => (
+                {FAB_ITEMS.filter(i => i.roles.includes(user?.role) && (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false))).map(({ label, to, action, Icon, bg }) => (
                   <button
-                    key={to}
-                    onClick={() => { navigate(to); setFabOpen(false) }}
+                    key={to || action}
+                    onClick={() => { if (action === 'scan') setShowScanner(true); else navigate(to); setFabOpen(false) }}
                     className="relative flex items-center gap-2.5 group"
                   >
                     <span className="bg-gray-900 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-md font-medium">
@@ -482,6 +485,8 @@ export default function Layout({ children }) {
           </button>
         </div>
       )}
+
+      {showScanner && <TicketScanner onClose={() => setShowScanner(false)} />}
     </div>
   )
 }
