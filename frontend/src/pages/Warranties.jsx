@@ -4,7 +4,7 @@ import { companyLogoSrc } from '../utils/branding'
 import { useSearchParams, useNavigate, useParams, useLocation } from 'react-router-dom'
 import { openPdfWindow, sharePdfFromHtml } from '../utils/pdfViewer'
 import ClientAutocomplete from '../components/ClientAutocomplete'
-import { Plus, Trash2, Printer, ShieldCheck, Save, FileCheck, Search, Edit2, Calendar, Download, AlertTriangle, Receipt, X, UserPlus, Upload, Check, PenLine, Share2 } from 'lucide-react'
+import { Plus, Trash2, Printer, ShieldCheck, ShieldOff, Save, FileCheck, Search, Edit2, Calendar, Download, AlertTriangle, Receipt, X, UserPlus, Upload, Check, PenLine, Share2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getWarranties, getNextWarrantyNumber, createWarranty, updateWarranty, deleteWarranty, getInvoices, getContacts, getCompanies, createContact, getAgents, uploadMySignature, deleteMySignature } from '../services/api'
 import { useFormGuard } from '../context/UnsavedChangesContext'
@@ -170,6 +170,28 @@ function calcWarrantyEnd(dateStr, period) {
   else if (period === '1 año') d.setFullYear(d.getFullYear() + 1)
   else if (period === '2 años') d.setFullYear(d.getFullYear() + 2)
   return fmtD(d.toISOString().slice(0, 10))
+}
+
+// Recalcula la fecha real de fin (Date) desde issue_date (ISO) + periodo, para poder
+// comparar con hoy. warranty_end guardado es un string ya formateado (no parseable).
+function warrantyEndDate(issueDate, period) {
+  if (!issueDate) return null
+  const d = new Date(String(issueDate).slice(0, 10) + 'T23:59:59')
+  if (isNaN(d)) return null
+  if (period === '30 días') d.setDate(d.getDate() + 30)
+  else if (period === '3 meses') d.setMonth(d.getMonth() + 3)
+  else if (period === '6 meses') d.setMonth(d.getMonth() + 6)
+  else if (period === '1 año') d.setFullYear(d.getFullYear() + 1)
+  else if (period === '2 años') d.setFullYear(d.getFullYear() + 2)
+  else return null
+  return d
+}
+
+// true = vigente, false = expirada, null = no se puede determinar (periodo desconocido)
+function warrantyIsActive(w) {
+  const end = warrantyEndDate(w.issue_date, w.warranty_period)
+  if (!end) return null
+  return end.getTime() >= Date.now()
 }
 
 // Generates a self-contained HTML string for the certificate (used for saved-cert printing)
@@ -873,7 +895,9 @@ export default function Warranties() {
               </div>
             ) : (
               <div className="space-y-3">
-                {searchResults.map((w) => (
+                {searchResults.map((w) => {
+                  const active = warrantyIsActive(w)
+                  return (
                   <div key={w.id} className="bg-white rounded-xl border border-gray-200 p-3 md:p-4 hover:border-blue-200 hover:shadow-sm transition-all">
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                       {/* Info */}
@@ -883,8 +907,13 @@ export default function Warranties() {
                           {w.warranty_period && (
                             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{w.warranty_period}</span>
                           )}
+                          {active !== null && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold inline-flex items-center gap-1 ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                              {active ? <ShieldCheck size={11} /> : <ShieldOff size={11} />} {active ? 'Vigente' : 'Expirada'}
+                            </span>
+                          )}
                           {w.warranty_end && (
-                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                            <span className={`text-xs flex items-center gap-1 font-semibold ${active === false ? 'text-red-600' : active ? 'text-emerald-700' : 'text-gray-500'}`}>
                               <Calendar size={11} /> Válido hasta {w.warranty_end}
                             </span>
                           )}
@@ -942,7 +971,8 @@ export default function Warranties() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
