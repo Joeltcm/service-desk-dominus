@@ -422,6 +422,7 @@ class Warranty(Base):
 
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
     invoice_ref = Column(String(100), nullable=True)  # N° de factura como texto libre (factura externa)
+    dispatch_id = Column(Integer, ForeignKey("dispatches.id"), nullable=True, index=True)  # pedido origen (it_support)
 
     created_by = relationship("User", foreign_keys=[created_by_id])
     invoice = relationship("Invoice", foreign_keys=[invoice_id])

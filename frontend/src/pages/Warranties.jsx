@@ -155,6 +155,7 @@ function blankForm() {
     notes: '',
     invoice_id: null,
     invoice_ref: '',
+    dispatch_id: null,
   }
 }
 
@@ -224,6 +225,13 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
     f.invoiceNumber ? infoBox('N° Factura', f.invoiceNumber) : '',
   ].join('')
 
+  const incomplete = itMode && items.some((it) => !String(it.serial || '').trim())
+  const incompleteBanner = incomplete
+    ? `<div style="margin:0 0 14px;padding:8px 12px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:6px;color:#991b1b;font-size:9pt;font-weight:bold">
+        ⚠ CERTIFICADO INCOMPLETO — faltan N° de serie de uno o más equipos. Este certificado no es válido hasta completarse.
+      </div>`
+    : ''
+
   const rows = items.map((it, i) =>
     `<tr style="background:${i % 2 === 0 ? '#f8f9fb' : '#fff'}">
       <td style="padding:6px 8px;border:1px solid #d1d5db;vertical-align:top">${i + 1}</td>
@@ -290,6 +298,7 @@ function buildCertHTML(f, items, wEnd, origin, signatureUrl = null, companyName 
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">${infoBoxes}</div>
+    ${incompleteBanner}
     <div style="margin-bottom:24px">
       <div style="font-size:11pt;font-weight:bold;color:#1e3a5f;border-bottom:2px solid #1e3a5f;padding-bottom:4px;margin-bottom:8px">
         EQUIPOS CUBIERTOS POR LA GARANTÍA
@@ -433,10 +442,11 @@ export default function Warranties() {
         address: fd.client_address || prev.address,
         ruc: fd.client_ruc || prev.ruc,
         invoice_ref: fd.dispatch_number || prev.invoice_ref,
+        dispatch_id: fd.dispatch_id || prev.dispatch_id,
       }))
       setSnapshot((s) => (s ? {
         ...s,
-        form: { ...s.form, client: fd.client_name || '', address: fd.client_address || '', ruc: fd.client_ruc || '', invoice_ref: fd.dispatch_number || '' },
+        form: { ...s.form, client: fd.client_name || '', address: fd.client_address || '', ruc: fd.client_ruc || '', invoice_ref: fd.dispatch_number || '', dispatch_id: fd.dispatch_id || null },
         items: newItems.map((x) => ({ ...x })),
       } : s))
       setActiveTab('editor')
@@ -467,6 +477,7 @@ export default function Warranties() {
       notes: w.notes || '',
       invoice_id: w.invoice_id || null,
       invoice_ref: w.invoice_ref || '',
+      dispatch_id: w.dispatch_id || null,
     }
     setInvoiceSearch(w.invoice ? (w.invoice.invoice_number || '') : '')
     const newItems = w.items && w.items.length > 0
@@ -584,10 +595,9 @@ export default function Warranties() {
 
   const handleSave = async () => {
     if (!form.client.trim()) { toast.error('El nombre del cliente es requerido'); return false }
-    if (itMode && items.some((it) => !it.serial?.trim())) {
-      toast.error('El N° de serie es obligatorio para todos los equipos')
-      return false
-    }
+    // En it_support la serie es obligatoria para "completar" la garantía, pero se permite
+    // guardar incompleta: se avisa y el pedido no podrá entregarse hasta completarla.
+    const missingSerials = itMode && items.some((it) => !it.serial?.trim())
     setSaving(true)
     try {
       const payload = {
@@ -602,6 +612,7 @@ export default function Warranties() {
         notes: form.notes,
         invoice_id: itMode ? null : (form.invoice_id || null),
         invoice_ref: itMode ? (form.invoice_ref || null) : null,
+        dispatch_id: form.dispatch_id || null,
         items: items.map((it, i) => ({ ...it, sort_order: i })),
       }
       if (selectedId) {
@@ -610,6 +621,9 @@ export default function Warranties() {
       } else {
         await createWarranty(payload)
         toast.success('Certificado guardado ✓')
+      }
+      if (missingSerials) {
+        toast('Garantía incompleta: faltan N° de serie. El pedido no podrá entregarse hasta completarla.', { icon: '⚠️', duration: 5000 })
       }
       await loadList()
       // Limpia el formulario automáticamente y prepara el siguiente certificado.
@@ -1605,6 +1619,13 @@ export default function Warranties() {
                   <InfoBox label="Válido hasta" value={warrantyEnd()} highlight />
                   {form.technician && <InfoBox label="Técnico responsable" value={form.technician} />}
                 </div>
+
+                {/* Aviso de certificado incompleto (it_support: faltan series) */}
+                {itMode && items.some((it) => !String(it.serial || '').trim()) && (
+                  <div style={{ marginBottom: '14px', padding: '8px 12px', background: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: '6px', color: '#991b1b', fontSize: '9pt', fontWeight: 'bold' }}>
+                    ⚠ CERTIFICADO INCOMPLETO — faltan N° de serie de uno o más equipos. Este certificado no es válido hasta completarse.
+                  </div>
+                )}
 
                 {/* Equipment table */}
                 <div style={{ marginBottom: '24px' }}>

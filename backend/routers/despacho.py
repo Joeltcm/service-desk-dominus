@@ -25,6 +25,45 @@ ALLOWED_TYPES = {
 router = APIRouter(prefix="/api/despachos", tags=["despachos"])
 
 
+def _is_it_support() -> bool:
+    return os.getenv("PRODUCT_VERTICAL", "mps") == "it_support"
+
+
+def _warranty_completeness(w) -> str:
+    """'complete' si la garantía tiene items y todos con N° de serie; 'incomplete' si no."""
+    if not w:
+        return "none"
+    items = list(w.items or [])
+    if not items:
+        return "incomplete"
+    if any(not (it.serial or "").strip() for it in items):
+        return "incomplete"
+    return "complete"
+
+
+def _warranty_for_dispatch(d: "models.Dispatch", db: Session):
+    """Garantía vinculada a un pedido: por dispatch_id, o (legacy) por invoice_ref == n° de pedido."""
+    w = (
+        db.query(models.Warranty)
+        .filter(models.Warranty.dispatch_id == d.id)
+        .first()
+    )
+    if not w and d.dispatch_number:
+        w = (
+            db.query(models.Warranty)
+            .filter(models.Warranty.invoice_ref == d.dispatch_number)
+            .first()
+        )
+    return w
+
+
+def _attach_warranty_status(dispatches, db: Session):
+    """Adjunta d.warranty_status a cada pedido (solo it_support; en mps queda None)."""
+    if not _is_it_support():
+        return
+    for d in dispatches:
+        d.warranty_status = _warranty_completeness(_warranty_for_dispatch(d, db))
+
 
 # ── Inventario: resta/reposición automática por estado del pedido ──────────────
 
@@ -153,7 +192,9 @@ def list_dispatches(
             models.Dispatch.items.ilike(like) |
             models.Dispatch.notes.ilike(like)
         )
-    return q.order_by(models.Dispatch.created_at.desc()).all()
+    rows = q.order_by(models.Dispatch.created_at.desc()).all()
+    _attach_warranty_status(rows, db)
+    return rows
 
 
 @router.post("", response_model=schemas.DispatchOut)
@@ -173,6 +214,7 @@ def create_dispatch(
         if order:
             _sync_order_status(order, db)
             db.commit()
+    _attach_warranty_status([dispatch], db)
     return dispatch
 
 
@@ -188,6 +230,7 @@ def get_dispatch(
     ).first()
     if not d:
         raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    _attach_warranty_status([d], db)
     return d
 
 
@@ -206,6 +249,16 @@ def update_dispatch(
         raise HTTPException(status_code=404, detail="Despacho no encontrado")
     old_status = d.status
     updates = data.model_dump(exclude_unset=True)
+    # Bloqueo de entrega (it_support): no se puede pasar a "Entregado" sin una garantía
+    # vinculada que tenga los N° de serie de todos los equipos del pedido.
+    if (_is_it_support()
+            and updates.get("status") == "Entregado"
+            and old_status != "Entregado"):
+        if _warranty_completeness(_warranty_for_dispatch(d, db)) != "complete":
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede marcar como Entregado: falta el certificado de garantía con el N° de serie de todos los equipos.",
+            )
     for field, value in updates.items():
         setattr(d, field, value)
     _sync_dispatch_inventory(d, db, items_changed="items" in updates)
@@ -216,6 +269,7 @@ def update_dispatch(
         if order and order.status not in ("Inventariado",):
             _sync_order_status(order, db)
             db.commit()
+    _attach_warranty_status([d], db)
     return d
 
 

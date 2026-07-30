@@ -804,6 +804,8 @@ class DispatchOut(BaseModel):
     inventory_applied: bool = False
     invoice: Optional[InvoiceMini] = None
     attachments: List[DispatchAttachmentOut] = []
+    # Estado de la garantía vinculada (solo it_support): 'none' | 'incomplete' | 'complete'
+    warranty_status: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
@@ -847,6 +849,7 @@ class WarrantyCreate(BaseModel):
     notes: str = ""
     invoice_id: Optional[int] = None
     invoice_ref: Optional[str] = None
+    dispatch_id: Optional[int] = None
     items: List[WarrantyItemCreate] = []
 
 
@@ -877,6 +880,7 @@ class WarrantyOut(BaseModel):
     notes: Optional[str] = None
     invoice_id: Optional[int] = None
     invoice_ref: Optional[str] = None
+    dispatch_id: Optional[int] = None
     invoice: Optional[InvoiceRef] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

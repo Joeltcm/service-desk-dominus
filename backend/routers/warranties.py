@@ -117,6 +117,7 @@ def create_warranty(
         notes=data.notes or None,
         invoice_id=data.invoice_id,
         invoice_ref=invoice_ref,
+        dispatch_id=data.dispatch_id,
         created_by_id=current_user.id,
     )
     db.add(w)
@@ -174,6 +175,8 @@ def update_warranty(
     w.notes = data.notes or None
     w.invoice_id = data.invoice_id
     w.invoice_ref = invoice_ref
+    if data.dispatch_id is not None:
+        w.dispatch_id = data.dispatch_id
 
     db.query(models.WarrantyItem).filter(models.WarrantyItem.warranty_id == wid).delete()
     for i, item in enumerate(data.items):

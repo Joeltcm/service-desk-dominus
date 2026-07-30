@@ -15,7 +15,7 @@ import {
   PackageCheck, FileText, X, CheckCircle2, Clock, Send,
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
   Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
-  Tag, ShieldCheck,
+  Tag, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -803,6 +803,10 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
     if (!itMode && val !== 'Borrador' && val !== 'Cancelado' && !d.quote_id) {
       return toast.error(`Se requiere una cotización vinculada para cambiar el estado del ${noun}`)
     }
+    // it_support: no se puede entregar sin garantía completa (con todas las series).
+    if (itMode && val === 'Entregado' && d.warranty_status !== 'complete') {
+      return toast.error('No se puede entregar: falta el certificado de garantía con el N° de serie de todos los equipos.')
+    }
     setChangingStatus(true)
     await onStatusChange(val)
     setChangingStatus(false)
@@ -859,6 +863,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
             {d.status !== 'Borrador' && d.status !== 'Cancelado' && (
               <button
                 onClick={() => navigate('/warranties', { state: { fromDispatch: {
+                  dispatch_id: d.id,
                   client_name: d.client_name || '',
                   client_ruc: d.client_ruc || '',
                   client_address: d.client_address || '',
@@ -881,6 +886,22 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
         </div>
       </div>
 
+      {/* Aviso de flujo incompleto: falta la garantía con las series (it_support) */}
+      {itMode && d.status !== 'Borrador' && d.status !== 'Cancelado' && d.warranty_status !== 'complete' && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
+          <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold">Proceso incompleto</p>
+            <p className="text-xs mt-0.5">
+              {d.warranty_status === 'incomplete'
+                ? 'El certificado de garantía está incompleto: faltan los N° de serie de los equipos.'
+                : 'Este pedido aún no tiene certificado de garantía.'}
+              {' '}No podrá marcarse como <span className="font-medium">Entregado</span> hasta completarlo con "Garantía".
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Ticket relacionado (desde el pedido vinculado) */}
       {d.order?.ticket && (
         <div className="card">
@@ -897,8 +918,10 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
         </div>
       )}
 
-      {/* Factura vinculada del sistema */}
+      {/* Factura vinculada del sistema (solo con facturación: no it_support) */}
+      {(!itMode || d.inventory_applied) && (
       <div className="card">
+        {!itMode && (<>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
           <Receipt size={13} className="text-blue-500" /> Factura del sistema
         </h3>
@@ -932,12 +955,14 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
             {creatingInvoice ? 'Creando...' : 'Crear factura'}
           </button>
         )}
+        </>)}
         {d.inventory_applied && (
           <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
             <CheckCircle2 size={11} /> Inventario descontado
           </p>
         )}
       </div>
+      )}
 
       {/* Client info + dates */}
       {(d.client_name || d.client_ruc || d.client_address || d.date || true) && (
@@ -1338,6 +1363,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
       </button>
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-gray-900">{isEdit ? `Editar ${noun}` : `Nuevo ${noun}`}</h2>
+        {!itMode && (
         <button
           type="button"
           onClick={() => setShowQuoteSelect(true)}
@@ -1345,6 +1371,7 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
         >
           <FileText size={13} /> Seleccionar cotización
         </button>
+        )}
       </div>
 
       <form id="dispatch-form" onSubmit={onSave} className="space-y-4 sticky-footer-form">
