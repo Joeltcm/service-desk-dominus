@@ -177,9 +177,15 @@ def update_trial_config(
     db: Session = Depends(get_db),
     _: models.User = Depends(require_superadmin),
 ):
+    enabled = bool(data.get("enabled", False))
+    start_date = data.get("start_date") or None
+    # Si se activa el trial sin fecha de inicio, arranca hoy automáticamente
+    # (evita que el contador quede inactivo por olvidar la fecha).
+    if enabled and not start_date:
+        start_date = date.today().isoformat()
     trial = {
-        "enabled": bool(data.get("enabled", False)),
-        "start_date": data.get("start_date") or None,
+        "enabled": enabled,
+        "start_date": start_date,
         "days": max(1, int(data.get("days", 14))),
     }
     row = db.query(models.AppSetting).filter(models.AppSetting.key == "trial").first()

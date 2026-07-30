@@ -51,10 +51,11 @@ def _sync_order_status(order: models.Order, db: Session) -> None:
 
 @router.get("/next-number")
 def next_dispatch_number(db: Session = Depends(get_db), _=Depends(require_staff)):
-    rows = db.query(models.Dispatch.dispatch_number).filter(models.Dispatch.dispatch_number.like("DSP-%"), models.Dispatch.deleted_at.is_(None)).all()
+    prefix = "PED" if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support" else "DSP"
+    rows = db.query(models.Dispatch.dispatch_number).filter(models.Dispatch.dispatch_number.like(f"{prefix}-%"), models.Dispatch.deleted_at.is_(None)).all()
     nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
     n = (max(nums) + 1) if nums else 1
-    return {"number": f"DSP-{n:04d}"}
+    return {"number": f"{prefix}-{n:04d}"}
 
 
 @router.get("", response_model=List[schemas.DispatchOut])
