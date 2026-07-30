@@ -29,6 +29,11 @@ function timePat() { return _TIME_12 ? 'hh:mm aa' : 'HH:mm' }
 // - Datetime sin offset: se interpreta como hora local en la zona configurada
 export function toUTC(value) {
   if (!value) return null
+  // Un objeto Date (o timestamp numérico) ya es un instante absoluto: usarlo tal cual.
+  // Pasarlo por String() rompía el instante (su toString incluye "T" de "GMT/Time" y
+  // caía en la rama de fechas del backend, restando el offset de la zona → hora -5h).
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value
+  if (typeof value === 'number') { const d = new Date(value); return isNaN(d.getTime()) ? null : d }
   const s = String(value)
   if (s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s)
   if (!s.includes('T')) return new Date(s + 'T12:00:00Z')
