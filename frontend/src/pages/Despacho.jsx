@@ -3,7 +3,7 @@ import { openPdfWindow, sharePdfFromHtml } from '../utils/pdfViewer'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
-  getDispatches, createDispatch, updateDispatch, deleteDispatch, getNextDispatchNumber,
+  getDispatches, createDispatch, updateDispatch, deleteDispatch, cancelDispatch, getNextDispatchNumber,
   getOrders, getQuotes, getContacts, getCompanies,
   uploadDispatchAttachment, deleteDispatchAttachment, dispatchAttachmentDownloadUrl,
   downloadWithAuth,
@@ -392,8 +392,24 @@ export default function Despacho() {
       const res = await updateDispatch(selected.id, { status: newStatus })
       setSelected(res.data)
       load()
-    } catch {
-      toast.error('Error actualizando estado')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error actualizando estado', { duration: 6000 })
+    }
+  }
+
+  const handleCancelDispatch = async () => {
+    if (!selected) return
+    const ok = window.confirm(
+      '¿Cancelar este pedido?\n\nSe eliminará el certificado de garantía vinculado (si existe) y los artículos se devolverán al inventario. Esta acción no se puede deshacer.'
+    )
+    if (!ok) return
+    try {
+      const res = await cancelDispatch(selected.id)
+      setSelected(res.data)
+      load()
+      toast.success('Pedido cancelado: inventario devuelto y garantía eliminada')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error cancelando el pedido')
     }
   }
 
@@ -579,6 +595,7 @@ export default function Despacho() {
             onAttachmentChange={() => refreshSelected(selected.id)}
             onViewOrder={(orderId) => navigate('/orders', { state: { selectOrderId: orderId } })}
             onStatusChange={handleStatusChange}
+            onCancel={handleCancelDispatch}
             onDeliveryDateChange={handleDeliveryDateChange}
             onCalendarChange={() => refreshSelected(selected.id)}
           />
@@ -677,7 +694,7 @@ function StatusSelector({ status, onChange, loading }) {
 }
 
 // ── Detail ─────────────────────────────────────────────
-function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onDeliveryDateChange, onCalendarChange }) {
+function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onCancel, onDeliveryDateChange, onCalendarChange }) {
   const navigate = useNavigate()
   const { vertical } = useCompany()
   const itMode = vertical === 'it_support'
@@ -874,6 +891,15 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
                 className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors"
               >
                 <ShieldCheck size={13} /> <span className="hidden sm:inline">Garantía</span>
+              </button>
+            )}
+            {itMode && d.status !== 'Cancelado' && (
+              <button
+                onClick={onCancel}
+                title="Cancelar pedido: elimina la garantía y devuelve los artículos al inventario"
+                className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800 transition-colors"
+              >
+                <XCircle size={13} /> <span className="hidden sm:inline">Cancelar</span>
               </button>
             )}
             <button onClick={onEdit} className="btn-secondary flex items-center gap-1.5 text-sm">

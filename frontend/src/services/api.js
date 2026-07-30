@@ -179,6 +179,7 @@ export const getDispatches = (params) => api.get('/despachos', { params })
 export const createDispatch = (data) => api.post('/despachos', data)
 export const updateDispatch = (id, data) => api.put(`/despachos/${id}`, data)
 export const deleteDispatch = (id) => api.delete(`/despachos/${id}`)
+export const cancelDispatch = (id) => api.post(`/despachos/${id}/cancel`)
 export const uploadDispatchAttachment = (dispatchId, file, docType) => {
   const form = new FormData()
   form.append('file', file)

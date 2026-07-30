@@ -273,6 +273,43 @@ def update_dispatch(
     return d
 
 
+@router.post("/{dispatch_id}/cancel", response_model=schemas.DispatchOut)
+def cancel_dispatch(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    """Cancela un pedido: elimina el certificado de garantía vinculado (si existe) y
+    devuelve al inventario los artículos que había descontado."""
+    d = db.query(models.Dispatch).filter(
+        models.Dispatch.id == dispatch_id,
+        models.Dispatch.deleted_at.is_(None),
+    ).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    if d.status == "Cancelado":
+        raise HTTPException(status_code=400, detail="El pedido ya está cancelado")
+
+    # 1) Elimina la garantía vinculada (por dispatch_id o, legacy, por n° de pedido).
+    w = _warranty_for_dispatch(d, db)
+    if w:
+        db.delete(w)
+
+    # 2) Cambia a Cancelado → _sync_dispatch_inventory repone el stock descontado.
+    d.status = "Cancelado"
+    _sync_dispatch_inventory(d, db)
+    db.commit()
+    db.refresh(d)
+
+    if d.order_id:
+        order = db.query(models.Order).filter(models.Order.id == d.order_id).first()
+        if order and order.status not in ("Inventariado",):
+            _sync_order_status(order, db)
+            db.commit()
+    _attach_warranty_status([d], db)
+    return d
+
+
 @router.delete("/{dispatch_id}")
 def delete_dispatch(
     dispatch_id: int,
