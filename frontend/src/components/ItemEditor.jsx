@@ -5,9 +5,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Search } from 'lucide-react'
 import { searchInventory } from '../services/api'
+import { getCompanyCache } from '../context/CompanyContext'
 import toast from 'react-hot-toast'
 
 const LOW_STOCK_THRESHOLD = 5
+// En it_support no se declara precio en el inventario: el monto lo indica el pedido.
+const IT_MODE = () => getCompanyCache().vertical === 'it_support'
 
 // Aviso al seleccionar un artículo del inventario: alerta restrictiva si no hay
 // stock, o aviso si está bajo. (El campo quantity viene en la respuesta del buscador.)
@@ -111,7 +114,8 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
     onChange(idx, 'category', inv.category || '')
-    onChange(idx, 'unit_price', inv.unit_price || '')
+    // it_support: no heredar el precio del inventario; el monto se indica en el pedido.
+    if (!IT_MODE()) onChange(idx, 'unit_price', inv.unit_price || '')
     alertStockOnSelect(inv)
     setCodeInvResults([])
     setShowCodeSugg(false)
@@ -122,7 +126,7 @@ function ItemRow({ item, idx, onChange, onRemove, canRemove, descSuggestions, it
     onChange(idx, 'code', inv.code)
     onChange(idx, 'description', inv.name)
     onChange(idx, 'category', inv.category || '')
-    onChange(idx, 'unit_price', inv.unit_price || '')
+    if (!IT_MODE()) onChange(idx, 'unit_price', inv.unit_price || '')
     alertStockOnSelect(inv)
     setDescInvResults([])
     setShowDescSugg(false)
