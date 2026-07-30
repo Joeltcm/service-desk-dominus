@@ -75,8 +75,8 @@ def require_admin_or_ventas(current_user: models.User = Depends(get_current_user
 
 
 def require_supplies_or_above(current_user: models.User = Depends(get_current_user)) -> models.User:
-    """admin + agent + supplies — for suministros, inventario and printer reads."""
-    if current_user.role not in [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.agent, models.UserRole.supplies]:
+    """admin + supervisor + agent + supplies — for suministros, inventario and printer reads."""
+    if current_user.role not in [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.supervisor, models.UserRole.agent, models.UserRole.supplies]:
         raise HTTPException(status_code=403, detail="Se requiere rol de suministros, agente o administrador")
     return current_user
 
