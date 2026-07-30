@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   ShoppingCart, PackageCheck, Clock, DollarSign,
-  BarChart2, ArrowLeft, RefreshCw,
+  BarChart2, ArrowLeft, RefreshCw, XCircle,
 } from 'lucide-react'
 import { getDespachoDashboard } from '../services/api'
 import { useCompany } from '../context/CompanyContext'
@@ -208,7 +208,7 @@ export default function PedidosDashboard() {
         ) : data ? (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <KpiCard
                 label={`Total ${nounPl}`}
                 value={data.total_orders}
@@ -230,11 +230,16 @@ export default function PedidosDashboard() {
                 sub={`${pendientes} borrador · ${enProceso} activos`}
               />
               <KpiCard
-                label="Entregados / Cancelados"
+                label="Entregados"
                 value={entregados}
                 icon={PackageCheck}
                 bg="bg-violet-100" color="text-violet-500"
-                sub={cancelados > 0 ? `${cancelados} cancelado${cancelados !== 1 ? 's' : ''}` : 'Sin cancelados'}
+              />
+              <KpiCard
+                label="Cancelados"
+                value={cancelados}
+                icon={XCircle}
+                bg="bg-rose-100" color="text-rose-500"
               />
             </div>
 
