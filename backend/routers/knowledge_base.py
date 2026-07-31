@@ -56,11 +56,13 @@ def _audience_allowed(article: models.KBArticle, user: models.User) -> bool:
     audience = getattr(article, 'audience', 'all') or 'all'
     if audience == 'all':
         return True
+    # superadmin y admin ven todo (audiencia 'agents' o 'admin').
+    if role in (models.UserRole.superadmin, models.UserRole.admin):
+        return True
     if audience == 'agents':
-        return role in (models.UserRole.admin, models.UserRole.supervisor, models.UserRole.agent, models.UserRole.ventas)
-    if audience == 'admin':
-        return role == models.UserRole.admin
-    return True
+        return role in (models.UserRole.supervisor, models.UserRole.agent, models.UserRole.ventas, models.UserRole.supplies)
+    # audience == 'admin' → solo admin/superadmin (ya cubiertos arriba)
+    return False
 
 
 def _audience_filter(q, user: models.User):
@@ -68,9 +70,9 @@ def _audience_filter(q, user: models.User):
     role = user.role
     if role == models.UserRole.client:
         q = q.filter(models.KBArticle.audience == 'all')
-    elif role in (models.UserRole.agent, models.UserRole.supervisor, models.UserRole.ventas):
+    elif role in (models.UserRole.agent, models.UserRole.supervisor, models.UserRole.ventas, models.UserRole.supplies):
         q = q.filter(models.KBArticle.audience.in_(['all', 'agents']))
-    # admin sees everything
+    # superadmin y admin ven todo
     return q
 
 
