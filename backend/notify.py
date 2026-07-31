@@ -1,4 +1,5 @@
 """Notificaciones de la app: crea el registro in-app y (best-effort) manda push."""
+import os
 import models
 
 
@@ -29,3 +30,15 @@ def notify_roles(db, roles, title, body="", url="/", kind=None, exclude_user_id=
         .all()
     )
     notify_users(db, [u[0] for u in users], title, body, url, kind, exclude_user_id=exclude_user_id)
+
+
+def notify_admins(db, title, body="", url="/", kind=None, exclude_user_id=None, include_agents=False):
+    """Aviso (campana + push) a superadmin/admin/supervisor. Solo en it_support.
+    include_agents=True suma también a los agentes (usado en tickets nuevos).
+    No hace commit: el llamador debe confirmar."""
+    if os.getenv("PRODUCT_VERTICAL", "mps") != "it_support":
+        return
+    roles = [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.supervisor]
+    if include_agents:
+        roles.append(models.UserRole.agent)
+    notify_roles(db, roles, title, body, url, kind, exclude_user_id=exclude_user_id)

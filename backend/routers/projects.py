@@ -56,12 +56,22 @@ def list_projects(
 def create_project(
     data: schemas.ProjectCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_agent_or_admin),
+    current_user: models.User = Depends(require_agent_or_admin),
 ):
     project = models.Project(**data.model_dump())
     db.add(project)
     db.commit()
     db.refresh(project)
+    # Aviso a admin/supervisor (campana + push) de proyecto nuevo — solo it_support.
+    try:
+        from notify import notify_admins
+        notify_admins(
+            db, "🗂️ Nuevo proyecto", project.name or "",
+            url="/projects", kind="proyecto", exclude_user_id=current_user.id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
     return _enrich(project, db)
 
 

@@ -291,11 +291,20 @@ def create_ticket(
     background_tasks.add_task(try_send_new_ticket_to_agents, ticket.id)
 
     def _push_new_ticket(ticket_id: int, client_name: str, title: str, creator_id: int):
+        import os
         from database import SessionLocal
-        from push_helper import notify_agents
         _db = SessionLocal()
         try:
-            notify_agents(_db, f"🎫 Nuevo ticket de {client_name}", title, f"/tickets/{ticket_id}", exclude_user_id=creator_id)
+            if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support":
+                # Campana in-app + push a superadmin/admin/supervisor/agente.
+                from notify import notify_admins
+                notify_admins(_db, f"🎫 Nuevo ticket de {client_name}", title,
+                              url=f"/tickets/{ticket_id}", kind="ticket",
+                              exclude_user_id=creator_id, include_agents=True)
+                _db.commit()
+            else:
+                from push_helper import notify_agents
+                notify_agents(_db, f"🎫 Nuevo ticket de {client_name}", title, f"/tickets/{ticket_id}", exclude_user_id=creator_id)
         finally:
             _db.close()
     background_tasks.add_task(_push_new_ticket, ticket.id, ticket.client.name if ticket.client else "Cliente", ticket.title, current_user.id)

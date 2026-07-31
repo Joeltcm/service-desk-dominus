@@ -225,7 +225,7 @@ def list_dispatches(
 def create_dispatch(
     data: schemas.DispatchCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_staff),
+    current_user: models.User = Depends(require_staff),
 ):
     dispatch = models.Dispatch(**data.model_dump())
     db.add(dispatch)
@@ -238,6 +238,17 @@ def create_dispatch(
         if order:
             _sync_order_status(order, db)
             db.commit()
+    # Aviso a admin/supervisor (campana + push) de pedido nuevo — solo it_support.
+    try:
+        from notify import notify_admins
+        notify_admins(
+            db, "📦 Nuevo pedido",
+            f"{dispatch.dispatch_number or '#' + str(dispatch.id)} · {dispatch.client_name or 'sin cliente'}",
+            url="/pedidos", kind="pedido", exclude_user_id=current_user.id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
     _attach_warranty_status([dispatch], db)
     return dispatch
 
