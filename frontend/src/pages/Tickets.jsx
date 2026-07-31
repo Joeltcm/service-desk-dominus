@@ -75,7 +75,9 @@ export default function Tickets() {
     const clientId   = searchParams.get('client_id')       || ''
     const agent      = searchParams.get('agent')           || ''
     const tag        = searchParams.get('tag')             || ''
-    const apiStatusId = status === '__open__' ? undefined : (status || undefined)
+    // '__open__' (por defecto) y '__all__' no filtran por estado en el backend;
+    // '__open__' además oculta los cerrados del lado del cliente (abajo).
+    const apiStatusId = (status === '__open__' || status === '__all__') ? undefined : (status || undefined)
     Promise.all([
       getTickets({
         search: debouncedSearch,
@@ -254,7 +256,7 @@ export default function Tickets() {
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <select className="input w-auto text-sm" value={filterStatus} onChange={(e) => setFilter('status', e.target.value)}>
-            <option value="">Todos</option>
+            <option value="__all__">Todos</option>
             <option value="__open__">En proceso</option>
             {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -373,7 +375,7 @@ export default function Tickets() {
           />
         </div>
         <select className="input w-full sm:w-auto text-sm" value={filterStatus} onChange={(e) => setFilter('status', e.target.value)}>
-          <option value="">Todos los estados</option>
+          <option value="__all__">Todos los estados</option>
           <option value="__open__">No resueltos</option>
           {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
