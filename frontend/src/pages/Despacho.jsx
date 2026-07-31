@@ -24,6 +24,7 @@ import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
 import { getCompanyCache, useCompany } from '../context/CompanyContext'
 import { useModuleAccess } from '../context/RoleFeaturesContext'
+import { useModules } from '../context/ModulesContext'
 
 const STATUSES = ['Borrador', 'Emitido', 'Despacho Programado', 'Entregado', 'Cancelado']
 
@@ -259,6 +260,7 @@ export default function Despacho() {
   const NounPl = itMode ? 'Pedidos' : 'Despachos'
   const { canWrite } = useModuleAccess()
   const canEditPedidos = canWrite('pedidos')
+  const { modules } = useModules()
   const [dispatches, setDispatches] = useState([])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -288,8 +290,17 @@ export default function Despacho() {
   useEffect(() => { load() }, [load])
   useEffect(() => {
     getOrders().then((r) => setOrders(r.data)).catch(() => {})
-    getQuotes().then((r) => { setQuotes(r.data); setQuotesLoaded(true) }).catch(() => setQuotesLoaded(true))
   }, [])
+  // Cotizaciones: solo se cargan si el módulo está habilitado (respeta el toggle del
+  // sysadmin). Si está apagado, se omite la llamada para no generar 403 innecesarios.
+  useEffect(() => {
+    if (modules === null) return
+    if (modules.cotizaciones !== false) {
+      getQuotes().then((r) => { setQuotes(r.data); setQuotesLoaded(true) }).catch(() => setQuotesLoaded(true))
+    } else {
+      setQuotes([]); setQuotesLoaded(true)
+    }
+  }, [modules])
 
   // Handle navigation from Orders page ("Ver despacho")
   useEffect(() => {

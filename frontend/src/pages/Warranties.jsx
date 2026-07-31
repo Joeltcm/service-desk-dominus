@@ -10,6 +10,7 @@ import { getWarranties, getNextWarrantyNumber, createWarranty, updateWarranty, d
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import { useAuth } from '../context/AuthContext'
 import { useCompany, getCompanyCache } from '../context/CompanyContext'
+import { useModules } from '../context/ModulesContext'
 import { useModuleAccess } from '../context/RoleFeaturesContext'
 import { fmtD } from '../utils/fmt'
 
@@ -365,6 +366,7 @@ export default function Warranties() {
   const itMode = vertical === 'it_support'
   const { canWrite } = useModuleAccess()
   const canEditWarr = canWrite('warranties')
+  const { modules } = useModules()
   const coName = company_name || 'Service Desk'
   const coAddress = company_address || 'Panamá, Punta Pacífica, PH Pacific Wind'
   const coRuc = company_ruc || '4-754-575 DV 85'
@@ -393,8 +395,10 @@ export default function Warranties() {
   const [sigUploading, setSigUploading] = useState(false)
   const sigFileRef = useRef()
 
+  // Facturas: solo se cargan si el módulo está habilitado (respeta el toggle del
+  // sysadmin). En it_support la garantía usa "factura vinculada" como texto libre.
   useEffect(() => {
-    loadList()
+    if (modules === null || modules.facturas === false) return
     getInvoices({}).then((r) => {
       setInvoices(r.data)
       // Pre-select invoice if navigated from Facturas
@@ -407,6 +411,10 @@ export default function Warranties() {
         navigate(location.pathname, { replace: true, state: {} })
       }
     }).catch(() => {})
+  }, [modules])
+
+  useEffect(() => {
+    loadList()
     Promise.allSettled([getContacts(), getCompanies(), getAgents()])
       .then(([cr, comr, ar]) => {
         if (cr.status === 'fulfilled') setContacts(cr.value.data)

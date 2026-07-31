@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from typing import List, Optional
 from datetime import datetime, timezone
 import os, uuid, json, re
@@ -58,11 +59,34 @@ def _warranty_for_dispatch(d: "models.Dispatch", db: Session):
 
 
 def _attach_warranty_status(dispatches, db: Session):
-    """Adjunta d.warranty_status a cada pedido (solo it_support; en mps queda None)."""
+    """Adjunta d.warranty_status a cada pedido (solo it_support; en mps queda None).
+    Una sola consulta (con items precargados) para toda la lista, en vez de N por pedido."""
     if not _is_it_support():
         return
+    ids = [d.id for d in dispatches]
+    nums = [d.dispatch_number for d in dispatches if d.dispatch_number]
+    if not ids and not nums:
+        return
+    conds = []
+    if ids:
+        conds.append(models.Warranty.dispatch_id.in_(ids))
+    if nums:
+        conds.append(models.Warranty.invoice_ref.in_(nums))
+    warrs = (
+        db.query(models.Warranty)
+        .options(joinedload(models.Warranty.items))
+        .filter(or_(*conds))
+        .all()
+    )
+    by_disp, by_ref = {}, {}
+    for w in warrs:
+        if w.dispatch_id and w.dispatch_id not in by_disp:
+            by_disp[w.dispatch_id] = w
+        if w.invoice_ref and w.invoice_ref not in by_ref:
+            by_ref[w.invoice_ref] = w
     for d in dispatches:
-        d.warranty_status = _warranty_completeness(_warranty_for_dispatch(d, db))
+        w = by_disp.get(d.id) or (by_ref.get(d.dispatch_number) if d.dispatch_number else None)
+        d.warranty_status = _warranty_completeness(w)
 
 
 # ── Inventario: resta/reposición automática por estado del pedido ──────────────

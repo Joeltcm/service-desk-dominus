@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
 from database import get_db
 from auth import require_agent_or_admin, get_current_user
@@ -96,6 +97,58 @@ def _purge_ticket_dependents(db: Session, ticket_id: int):
     db.query(models.Ticket).filter(models.Ticket.parent_id == ticket_id).update({"parent_id": None}, synchronize_session=False)
 
 
+def _purge_order_dependents(db: Session, oid: int):
+    db.query(models.OrderAttachment).filter(models.OrderAttachment.order_id == oid).delete(synchronize_session=False)
+    db.query(models.Dispatch).filter(models.Dispatch.order_id == oid).update({"order_id": None}, synchronize_session=False)
+    db.query(models.Quote).filter(models.Quote.order_id == oid).update({"order_id": None}, synchronize_session=False)
+    db.query(models.Expense).filter(models.Expense.order_id == oid).update({"order_id": None}, synchronize_session=False)
+
+
+def _purge_invoice_dependents(db: Session, iid: int):
+    db.query(models.InvoiceAttachment).filter(models.InvoiceAttachment.invoice_id == iid).delete(synchronize_session=False)
+    db.query(models.InvoicePayment).filter(models.InvoicePayment.invoice_id == iid).delete(synchronize_session=False)
+    db.query(models.InvoiceQuoteLink).filter(models.InvoiceQuoteLink.invoice_id == iid).delete(synchronize_session=False)
+    db.query(models.Order).filter(models.Order.invoice_id == iid).update({"invoice_id": None}, synchronize_session=False)
+    db.query(models.Warranty).filter(models.Warranty.invoice_id == iid).update({"invoice_id": None}, synchronize_session=False)
+    db.query(models.Expense).filter(models.Expense.invoice_id == iid).update({"invoice_id": None}, synchronize_session=False)
+    db.query(models.SupplyDelivery).filter(models.SupplyDelivery.invoice_id == iid).update({"invoice_id": None}, synchronize_session=False)
+
+
+def _purge_quote_dependents(db: Session, qid: int):
+    db.query(models.InvoiceQuoteLink).filter(models.InvoiceQuoteLink.quote_id == qid).delete(synchronize_session=False)
+    db.query(models.Project).filter(models.Project.quote_id == qid).update({"quote_id": None}, synchronize_session=False)
+    db.query(models.Order).filter(models.Order.quote_id == qid).update({"quote_id": None}, synchronize_session=False)
+    db.query(models.Dispatch).filter(models.Dispatch.quote_id == qid).update({"quote_id": None}, synchronize_session=False)
+    db.query(models.Invoice).filter(models.Invoice.quote_id == qid).update({"quote_id": None}, synchronize_session=False)
+    db.query(models.Opportunity).filter(models.Opportunity.quote_id == qid).update({"quote_id": None}, synchronize_session=False)
+
+
+def _purge_expense_dependents(db: Session, eid: int):
+    db.query(models.ExpenseAttachment).filter(models.ExpenseAttachment.expense_id == eid).delete(synchronize_session=False)
+
+
+def _purge_contact_dependents(db: Session, cid: int):
+    db.query(models.Ticket).filter(models.Ticket.contact_id == cid).update({"contact_id": None}, synchronize_session=False)
+
+
+def _purge_contract_dependents(db: Session, cid: int):
+    db.query(models.Printer).filter(models.Printer.contract_id == cid).update({"contract_id": None}, synchronize_session=False)
+    db.query(models.SupplyDelivery).filter(models.SupplyDelivery.contract_id == cid).update({"contract_id": None}, synchronize_session=False)
+
+
+# entity_type → función de limpieza de dependientes (evita 500 por FK NOT NULL).
+# 'empresa' no aparece: ninguna tabla referencia companies.id.
+_PURGE = {
+    "ticket":     _purge_ticket_dependents,
+    "pedido":     _purge_order_dependents,
+    "factura":    _purge_invoice_dependents,
+    "cotizacion": _purge_quote_dependents,
+    "gasto":      _purge_expense_dependents,
+    "contacto":   _purge_contact_dependents,
+    "contrato":   _purge_contract_dependents,
+}
+
+
 @router.delete("/{entity_type}/{item_id}")
 def permanent_delete(
     entity_type: str,
@@ -116,8 +169,17 @@ def permanent_delete(
 
     name = _entity_name(obj, name_field)
     log_action(db, current_user, "permanent_delete", entity_type, obj.id, name)
-    if entity_type == "ticket":
-        _purge_ticket_dependents(db, obj.id)
-    db.delete(obj)
-    db.commit()
+    purge = _PURGE.get(entity_type)
+    if purge:
+        purge(db, obj.id)
+    try:
+        db.delete(obj)
+        db.commit()
+    except IntegrityError:
+        # Red de seguridad: si quedó algún vínculo no contemplado, no reventamos con 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se puede eliminar: '{display_name}' tiene elementos vinculados.",
+        )
     return {"ok": True, "message": f"{display_name} eliminado permanentemente"}
