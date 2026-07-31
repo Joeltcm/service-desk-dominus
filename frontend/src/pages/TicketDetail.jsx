@@ -431,7 +431,8 @@ export default function TicketDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, isAgentOrAdmin } = useAuth()
-  const { company_name } = useCompany()
+  const { company_name, vertical } = useCompany()
+  const itMode = vertical === 'it_support'
   const coName = company_name || 'Service Desk'
   const fileRef = useRef()
   const editorRef = useRef()
@@ -1992,7 +1993,7 @@ export default function TicketDetail() {
           </div>
 
           {/* Tiempo trabajado */}
-          {isAgentOrAdmin && (
+          {isAgentOrAdmin && !itMode && (
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -2131,7 +2132,7 @@ export default function TicketDetail() {
           )}
 
           {/* Cotizaciones y Facturas */}
-          {isAgentOrAdmin && (
+          {isAgentOrAdmin && !itMode && (
             <div className="card">
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <FileText size={14} className="text-gray-400" />
