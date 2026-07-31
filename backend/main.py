@@ -1118,6 +1118,9 @@ def _patch_categories():
 _patch_categories()
 
 def _patch_statuses():
+    # En it_support no se usa el estado 'Programado' (se elimina más abajo); evitar re-crearlo.
+    if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support":
+        return
     from sqlalchemy import text
     with engine.connect() as conn:
         try:
@@ -1134,6 +1137,47 @@ def _patch_statuses():
             pass
 
 _patch_statuses()
+
+
+def _patch_statuses_it_support():
+    """Solo it_support: renombra 'En Progreso'→'En Proceso' y elimina estados no usados.
+    Reasigna cualquier ticket de esos estados a 'Abierto' antes de borrarlos (idempotente)."""
+    if os.getenv("PRODUCT_VERTICAL", "mps") != "it_support":
+        return
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("UPDATE ticket_statuses SET name = 'En Proceso' WHERE name = 'En Progreso'"))
+            fallback = conn.execute(text(
+                "SELECT id FROM ticket_statuses WHERE name = 'Abierto' ORDER BY id LIMIT 1"
+            )).fetchone()
+            for name in ('Esperando Detalles', 'Por Coordinar', 'Programado'):
+                row = conn.execute(text("SELECT id FROM ticket_statuses WHERE name = :n"), {"n": name}).fetchone()
+                if not row:
+                    continue
+                sid = row[0]
+                if fallback and fallback[0] != sid:
+                    conn.execute(text("UPDATE tickets SET status_id = :fb WHERE status_id = :sid"),
+                                 {"fb": fallback[0], "sid": sid})
+                conn.execute(text("DELETE FROM ticket_statuses WHERE id = :sid"), {"sid": sid})
+            conn.commit()
+        except Exception:
+            pass
+
+_patch_statuses_it_support()
+
+
+def _patch_charger_len():
+    """Amplía tickets.charger a 30 para admitir 'Con cargador genérico'."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE tickets ALTER COLUMN charger TYPE VARCHAR(30)"))
+            conn.commit()
+        except Exception:
+            pass
+
+_patch_charger_len()
 
 def _patch_status_colors():
     from sqlalchemy import text

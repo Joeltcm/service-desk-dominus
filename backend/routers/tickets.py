@@ -251,10 +251,13 @@ def create_ticket(
     if not status:
         raise HTTPException(status_code=400, detail="Estado no válido")
 
-    # Vertical it_support: el campo 'Cargador' es obligatorio.
+    # Vertical it_support: 'Cargador' y 'Categoría' son obligatorios.
     import os
-    if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support" and not (data.charger and data.charger.strip()):
-        raise HTTPException(status_code=422, detail="El campo 'Cargador' es obligatorio")
+    if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support":
+        if not (data.charger and data.charger.strip()):
+            raise HTTPException(status_code=422, detail="El campo 'Cargador' es obligatorio")
+        if not (data.category and data.category.strip()):
+            raise HTTPException(status_code=422, detail="El campo 'Categoría' es obligatorio")
 
     ticket_data = data.model_dump()
     if not ticket_data.get("location"):

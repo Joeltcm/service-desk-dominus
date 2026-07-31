@@ -138,7 +138,7 @@ class TicketCreate(BaseModel):
     assigned_to_id: Optional[int] = None
     category: Optional[str] = None
     location: Optional[str] = None
-    charger: Optional[str] = Field(None, max_length=20)
+    charger: Optional[str] = Field(None, max_length=30)
     subject: Optional[str] = Field(None, max_length=500)
     cc_email: Optional[str] = None
     scheduled_at: Optional[datetime] = None
@@ -155,7 +155,7 @@ class TicketUpdate(BaseModel):
     assigned_to_id: Optional[int] = None
     category: Optional[str] = None
     location: Optional[str] = None
-    charger: Optional[str] = Field(None, max_length=20)
+    charger: Optional[str] = Field(None, max_length=30)
     subject: Optional[str] = Field(None, max_length=500)
     cc_email: Optional[str] = None
     scheduled_at: Optional[datetime] = None

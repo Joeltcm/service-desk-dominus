@@ -275,6 +275,10 @@ export default function TicketForm() {
       toast.error('Selecciona la opción de Cargador')
       return
     }
+    if (itMode && !form.category) {
+      toast.error('Selecciona la categoría')
+      return
+    }
     setLoading(true)
     try {
       const payload = {
@@ -599,9 +603,9 @@ export default function TicketForm() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Categoría</label>
-              <select name="category" className="input" style={{fontSize:'16px'}} value={form.category} onChange={handleChange}>
-                <option value="">Sin categoría</option>
+              <label className="label">Categoría{itMode ? ' *' : ''}</label>
+              <select name="category" className="input" style={{fontSize:'16px'}} value={form.category} onChange={handleChange} required={itMode}>
+                <option value="">{itMode ? 'Seleccionar categoría…' : 'Sin categoría'}</option>
                 {categories.map((c) => (
                   <option key={c.id} value={c.name}>{c.name}</option>
                 ))}
@@ -635,6 +639,7 @@ export default function TicketForm() {
               <select name="charger" className="input" style={{fontSize:'16px'}} value={form.charger} onChange={handleChange} required>
                 <option value="">Seleccionar…</option>
                 <option value="Con cargador">Con cargador</option>
+                <option value="Con cargador genérico">Con cargador genérico</option>
                 <option value="Sin cargador">Sin cargador</option>
               </select>
             </div>
