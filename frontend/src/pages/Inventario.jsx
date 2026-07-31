@@ -618,9 +618,9 @@ export default function Inventario() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <div className="relative flex-1 min-w-48">
+      {/* Filters: buscador en una fila + filtros en grilla compacta */}
+      <div className="mb-4 flex flex-col gap-2">
+        <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="input pl-9 py-2 text-sm w-full"
@@ -629,38 +629,32 @@ export default function Inventario() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        {categories.length > 0 && (
-          <select
-            className="input py-2 text-sm"
-            value={filterCategory}
-            onChange={e => setFilterCategory(e.target.value)}
-          >
-            <option value="">Todas las categorías</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2">
+          {categories.length > 0 && (
+            <select className="input py-2 text-sm w-full" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+              <option value="">Todas las categorías</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          <select className="input py-2 text-sm w-full" value={filterWarehouse} onChange={e => setFilterWarehouse(e.target.value)}>
+            <option value="">Todas las bodegas</option>
+            {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
           </select>
-        )}
-        <select
-          className="input py-2 text-sm"
-          value={filterWarehouse}
-          onChange={e => setFilterWarehouse(e.target.value)}
-        >
-          <option value="">Todas las bodegas</option>
-          {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
-        </select>
-        <select className="input py-2 text-sm" value={filterCondition} onChange={e => setFilterCondition(e.target.value)}>
-          <option value="">Toda condición</option>
-          {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
-        </select>
-        <select className="input py-2 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">Todo estado</option>
-          {ITEM_STATUSES.map(s => <option key={s} value={s}>{ITEM_STATUS_LABEL[s]}</option>)}
-        </select>
-        {locations.length > 0 && (
-          <select className="input py-2 text-sm" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
-            <option value="">Toda ubicación</option>
-            {locations.map(l => <option key={l} value={l}>{l}</option>)}
+          <select className="input py-2 text-sm w-full" value={filterCondition} onChange={e => setFilterCondition(e.target.value)}>
+            <option value="">Toda condición</option>
+            {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABEL[c]}</option>)}
           </select>
-        )}
+          <select className="input py-2 text-sm w-full" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+            <option value="">Todo estado</option>
+            {ITEM_STATUSES.map(s => <option key={s} value={s}>{ITEM_STATUS_LABEL[s]}</option>)}
+          </select>
+          {locations.length > 0 && (
+            <select className="input py-2 text-sm w-full" value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+              <option value="">Toda ubicación</option>
+              {locations.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Table */}
