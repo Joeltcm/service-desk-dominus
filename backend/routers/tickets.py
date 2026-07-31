@@ -286,6 +286,20 @@ def create_ticket(
     db.commit()
     db.refresh(ticket)
 
+    # Aviso al agente asignado al crear (campana + push), salvo autoasignación.
+    if ticket.assigned_to_id and ticket.assigned_to_id != current_user.id:
+        try:
+            from notify import create_notification
+            create_notification(
+                db, ticket.assigned_to_id,
+                f"🎯 Te asignaron el ticket #{ticket.id}",
+                ticket.title or "",
+                url=f"/tickets/{ticket.id}", kind="ticket_assigned",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
     from routers.settings import try_send_ticket_open_email, try_send_new_ticket_to_agents
     background_tasks.add_task(try_send_ticket_open_email, ticket.id)
     background_tasks.add_task(try_send_new_ticket_to_agents, ticket.id)
@@ -446,6 +460,18 @@ def update_ticket(
             entry_type="assignment",
         )
         db.add(entry)
+        # Aviso al agente asignado (campana + push), salvo autoasignación.
+        if data.assigned_to_id != current_user.id:
+            try:
+                from notify import create_notification
+                create_notification(
+                    db, data.assigned_to_id,
+                    f"🎯 Te asignaron el ticket #{ticket.id}",
+                    ticket.title or "",
+                    url=f"/tickets/{ticket.id}", kind="ticket_assigned",
+                )
+            except Exception:
+                pass
 
     db.commit()
     db.refresh(ticket)
