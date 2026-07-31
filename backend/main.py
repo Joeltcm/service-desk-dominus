@@ -1951,6 +1951,14 @@ def _seed_supply_lots():
 if not is_sqlite:
     _seed_supply_lots()
 
+# Guías de uso en la Base de Conocimientos (solo it_support, idempotente).
+try:
+    from kb_seed import seed_kb_guides
+    seed_kb_guides()
+except Exception as _e:
+    import logging as _logging
+    _logging.warning("seed_kb_guides no ejecutado: %s", _e)
+
 
 def _start_imap_poller():
     import threading, time

@@ -8,7 +8,7 @@ import { getDashboard, getTrialStatus } from '../services/api'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
-  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes
+  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle
 } from 'lucide-react'
 import TicketScanner from './TicketScanner'
 import NotificationBell from './NotificationBell'
@@ -468,6 +468,19 @@ export default function Layout({ children }) {
           </div>
         )}
       </main>
+
+      {/* Botón de ayuda (arriba a la derecha) → Base de Conocimientos */}
+      {user && modules?.knowledge_base !== false && (
+        <button
+          onClick={() => navigate('/knowledge-base')}
+          title="Ayuda · Guías de uso"
+          aria-label="Ayuda"
+          className="fixed top-3 right-3 z-30 flex items-center gap-1.5 pl-2.5 pr-3 h-9 rounded-full bg-white/95 backdrop-blur shadow-md border border-gray-200 text-blue-600 hover:bg-blue-50 hover:shadow-lg active:scale-95 transition-all text-sm font-semibold"
+        >
+          <HelpCircle size={17} />
+          <span className="hidden lg:inline">Ayuda</span>
+        </button>
+      )}
 
       {/* FAB Speed Dial */}
       {FAB_ITEMS.some(fabAllowed) && (
