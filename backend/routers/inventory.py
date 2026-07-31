@@ -13,6 +13,8 @@ _WAREHOUSE_ALIASES = {
     "partes": "partes", "bodega de partes": "partes",
     "suministros_mps": "suministros_mps", "suministros mps": "suministros_mps",
     "impresoras_mps": "impresoras_mps", "bodega de impresoras mps": "impresoras_mps",
+    "herramientas_microsoldadura": "herramientas_microsoldadura",
+    "herramientas microsoldadura": "herramientas_microsoldadura",
 }
 
 _CONDITION_ALIASES = {

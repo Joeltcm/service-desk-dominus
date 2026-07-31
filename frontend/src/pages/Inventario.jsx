@@ -18,11 +18,12 @@ const EMPTY_FORM = {
 
 const UNITS = ['unidad', 'caja', 'metro', 'rollo', 'par', 'juego', 'litro', 'kg', 'hora']
 
-const WAREHOUSES = ['principal', 'partes', 'impresoras_mps']
+const WAREHOUSES = ['principal', 'partes', 'impresoras_mps', 'herramientas_microsoldadura']
 const WAREHOUSE_LABEL = {
-  principal:       'Principal',
-  partes:          'Bodega de Partes',
-  impresoras_mps:  'Bodega de Impresoras MPS',
+  principal:                    'Principal',
+  partes:                       'Bodega de Partes',
+  impresoras_mps:               'Bodega de Impresoras MPS',
+  herramientas_microsoldadura:  'Herramientas Microsoldadura',
 }
 
 const CONDITIONS = ['nuevo', 'funcional', 'dañado', 'incompleto']
@@ -100,7 +101,9 @@ export default function Inventario() {
   const { canWrite } = useModuleAccess()
   const canEdit = canWrite('inventario')  // false = solo lectura
   // En it_support se oculta la bodega de impresoras MPS.
-  const warehouses = itMode ? WAREHOUSES.filter(w => w !== 'impresoras_mps') : WAREHOUSES
+  const warehouses = itMode
+    ? WAREHOUSES.filter(w => w !== 'impresoras_mps')
+    : WAREHOUSES.filter(w => w !== 'herramientas_microsoldadura')
   const fileInputRef = React.useRef(null)
   const [suppliers, setSuppliers] = useState([])
   const [importing, setImporting] = useState(false)
