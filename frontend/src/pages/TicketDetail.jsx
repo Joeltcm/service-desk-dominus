@@ -23,7 +23,7 @@ import PartRequestPanel from '../components/PartRequestPanel'
 import {
   ArrowLeft, Edit, Paperclip, Send, Lock, Unlock,
   Calendar, ExternalLink, Trash2, Download, X, Printer, AlertTriangle,
-  Link2, Unlink, Search, GitBranch, ChevronDown, ChevronUp, MessageCircle, Mail, Eye, EyeOff,
+  Link2, Unlink, Search, GitBranch, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Mail, Eye, EyeOff,
   FileText, Plus, RefreshCw, XCircle, Share2, CheckCircle, Zap, Clock, Star,
   FilePlus, Receipt,
 } from 'lucide-react'
@@ -444,7 +444,7 @@ export default function TicketDetail() {
   const [timeline, setTimeline] = useState([])
   const [attachments, setAttachments] = useState([])
   const [attImgMap, setAttImgMap] = useState({})   // miniaturas (base64) de adjuntos imagen
-  const [lightboxImg, setLightboxImg] = useState(null)  // visor de imagen en grande
+  const [lightbox, setLightbox] = useState(null)  // visor: { list: [{id,name}], idx }
   const [statuses, setStatuses] = useState([])
   const [agents, setAgents] = useState([])
   const [categories, setCategories] = useState([])
@@ -568,6 +568,18 @@ export default function TicketDetail() {
       if (b64) setAttImgMap((prev) => ({ ...prev, [att.id]: b64 }))
     })
   }, [attachments])
+
+  // Visor: navegación con teclado (← →) y cierre con Escape.
+  useEffect(() => {
+    if (!lightbox) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setLightbox(null)
+      else if (e.key === 'ArrowLeft') setLightbox((l) => l && { ...l, idx: (l.idx - 1 + l.list.length) % l.list.length })
+      else if (e.key === 'ArrowRight') setLightbox((l) => l && { ...l, idx: (l.idx + 1) % l.list.length })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [!!lightbox])
 
   useEffect(() => {
     if (isAgentOrAdmin) getCannedResponses().then((r) => setCannedResponses(r.data)).catch(() => {})
@@ -1738,6 +1750,7 @@ export default function TicketDetail() {
                   .flatMap(e => [...(e.content || '').matchAll(/\[img:(\d+)\]/g)].map(m => parseInt(m[1])))
               )
               const standaloneAtts = attachments.filter(a => !embeddedIds.has(a.id))
+              const imgAtts = standaloneAtts.filter(a => a.content_type?.startsWith('image/'))
               return (<>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900">Archivos Adjuntos ({standaloneAtts.length})</h3>
@@ -1763,7 +1776,7 @@ export default function TicketDetail() {
                     {isImage && thumbSrc ? (
                       <button
                         type="button"
-                        onClick={() => setLightboxImg({ src: thumbSrc, name: att.original_name, downloadUrl: `/api/tickets/${id}/attachments/${att.id}/download` })}
+                        onClick={() => setLightbox({ list: imgAtts.map(a => ({ id: a.id, name: a.original_name })), idx: imgAtts.findIndex(a => a.id === att.id) })}
                         className="flex-shrink-0"
                       >
                         <img src={thumbSrc} alt={att.original_name} className="w-10 h-10 rounded object-cover border border-gray-200" />
@@ -2837,38 +2850,67 @@ export default function TicketDetail() {
       )}
 
       {/* Visor de imagen adjunta (sin descargar) */}
-      {lightboxImg && (
+      {lightbox && (() => {
+        const n = lightbox.list.length
+        const cur = lightbox.list[lightbox.idx] || lightbox.list[0]
+        const src = attImgMap[cur.id]
+        const go = (delta) => setLightbox((l) => l && { ...l, idx: (l.idx + delta + n) % n })
+        return (
         <div
           className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
-          onClick={() => setLightboxImg(null)}
+          onClick={() => setLightbox(null)}
         >
-          <div className="absolute top-4 right-4 flex items-center gap-2">
+          {n > 1 && (
             <button
-              onClick={(e) => { e.stopPropagation(); downloadWithAuth(lightboxImg.downloadUrl, lightboxImg.name) }}
+              onClick={(e) => { e.stopPropagation(); go(-1) }}
+              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 hover:bg-white/25 rounded-full text-white z-10"
+              title="Anterior (←)"
+            >
+              <ChevronLeft size={28} />
+            </button>
+          )}
+          {n > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); go(1) }}
+              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 bg-white/10 hover:bg-white/25 rounded-full text-white z-10"
+              title="Siguiente (→)"
+            >
+              <ChevronRight size={28} />
+            </button>
+          )}
+          <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+            <button
+              onClick={(e) => { e.stopPropagation(); downloadWithAuth(`/api/tickets/${id}/attachments/${cur.id}/download`, cur.name) }}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white"
               title="Descargar"
             >
               <Download size={20} />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); setLightboxImg(null) }}
+              onClick={(e) => { e.stopPropagation(); setLightbox(null) }}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white"
-              title="Cerrar"
+              title="Cerrar (Esc)"
             >
               <X size={20} />
             </button>
           </div>
-          <img
-            src={lightboxImg.src}
-            alt={lightboxImg.name}
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-full max-h-[85vh] object-contain rounded-lg"
-          />
-          <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm truncate max-w-[90%]">
-            {lightboxImg.name}
+          {src ? (
+            <img
+              src={src}
+              alt={cur.name}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-full max-h-[85vh] object-contain rounded-lg"
+            />
+          ) : (
+            <div className="text-white/70 text-sm">Cargando imagen…</div>
+          )}
+          <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm text-center max-w-[90%]">
+            <span className="truncate inline-block max-w-full align-bottom">{cur.name}</span>
+            {n > 1 && <span className="ml-2 text-white/60">· {lightbox.idx + 1} / {n}</span>}
           </p>
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
