@@ -30,6 +30,7 @@ import {
 import { getSLAInfo, fmtSlaRemaining } from '../utils/sla'
 import { fmtDT, fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
+import { compressImage } from '../utils/imageCompress'
 import toast from 'react-hot-toast'
 
 const PRIORITY_LABELS = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' }
@@ -442,6 +443,8 @@ export default function TicketDetail() {
   const [ticket, setTicket] = useState(null)
   const [timeline, setTimeline] = useState([])
   const [attachments, setAttachments] = useState([])
+  const [attImgMap, setAttImgMap] = useState({})   // miniaturas (base64) de adjuntos imagen
+  const [lightboxImg, setLightboxImg] = useState(null)  // visor de imagen en grande
   const [statuses, setStatuses] = useState([])
   const [agents, setAgents] = useState([])
   const [categories, setCategories] = useState([])
@@ -555,6 +558,16 @@ export default function TicketDetail() {
     fetchAll()
     fetchLinkedDocs()
   }, [id])
+
+  // Miniaturas de adjuntos que son imagen: se piden con auth (el endpoint de
+  // descarga exige Bearer token) y se cachean por id para no repetir el fetch.
+  useEffect(() => {
+    const pending = attachments.filter((a) => a.content_type?.startsWith('image/') && !attImgMap[a.id])
+    pending.forEach(async (att) => {
+      const b64 = await fetchAsBase64(`/api/tickets/${id}/attachments/${att.id}/download`)
+      if (b64) setAttImgMap((prev) => ({ ...prev, [att.id]: b64 }))
+    })
+  }, [attachments])
 
   useEffect(() => {
     if (isAgentOrAdmin) getCannedResponses().then((r) => setCannedResponses(r.data)).catch(() => {})
@@ -773,7 +786,7 @@ export default function TicketDetail() {
         const named = new File([file], `captura-${Date.now()}.${ext}`, { type: file.type })
         setPendingUploads((n) => n + 1)
         try {
-          const res = await uploadAttachment(id, named)
+          const res = await uploadAttachment(id, await compressImage(named))
           img.dataset.attId = String(res.data.id)
           URL.revokeObjectURL(previewUrl)
           fetchAll()
@@ -910,7 +923,7 @@ export default function TicketDetail() {
     if (!file) return
     setUploading(true)
     try {
-      const res = await uploadAttachment(id, file)
+      const res = await uploadAttachment(id, await compressImage(file))
       setPendingAttIds(prev => [...prev, res.data.id])
       fetchAll()
       toast.success('Archivo adjuntado')
@@ -1742,9 +1755,22 @@ export default function TicketDetail() {
               <p className="text-gray-400 text-sm text-center py-4">Sin archivos adjuntos</p>
             ) : (
               <div className="space-y-2">
-                {standaloneAtts.map((att) => (
+                {standaloneAtts.map((att) => {
+                  const isImage = att.content_type?.startsWith('image/')
+                  const thumbSrc = attImgMap[att.id]
+                  return (
                   <div key={att.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                    <Paperclip size={14} className="text-gray-400 flex-shrink-0" />
+                    {isImage && thumbSrc ? (
+                      <button
+                        type="button"
+                        onClick={() => setLightboxImg({ src: thumbSrc, name: att.original_name, downloadUrl: `/api/tickets/${id}/attachments/${att.id}/download` })}
+                        className="flex-shrink-0"
+                      >
+                        <img src={thumbSrc} alt={att.original_name} className="w-10 h-10 rounded object-cover border border-gray-200" />
+                      </button>
+                    ) : (
+                      <Paperclip size={14} className="text-gray-400 flex-shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{att.original_name}</p>
                       <p className="text-xs text-gray-400">
@@ -1765,7 +1791,8 @@ export default function TicketDetail() {
                       <Trash2 size={14} />
                     </button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
             </>)
@@ -2806,6 +2833,40 @@ export default function TicketDetail() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Visor de imagen adjunta (sin descargar) */}
+      {lightboxImg && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={() => setLightboxImg(null)}
+        >
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); downloadWithAuth(lightboxImg.downloadUrl, lightboxImg.name) }}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white"
+              title="Descargar"
+            >
+              <Download size={20} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setLightboxImg(null) }}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white"
+              title="Cerrar"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <img
+            src={lightboxImg.src}
+            alt={lightboxImg.name}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-full max-h-[85vh] object-contain rounded-lg"
+          />
+          <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm truncate max-w-[90%]">
+            {lightboxImg.name}
+          </p>
         </div>
       )}
     </div>

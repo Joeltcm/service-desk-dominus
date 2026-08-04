@@ -10,6 +10,7 @@ import { useCompany } from '../context/CompanyContext'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import { ArrowLeft, UserPlus, X, Mail, Phone, Building2, MapPin, Save, Calendar, Clock, Paperclip, FileText, AlertTriangle } from 'lucide-react'
 import { toUTC, getFmtTz } from '../utils/fmt'
+import { compressImage } from '../utils/imageCompress'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 
@@ -299,7 +300,7 @@ export default function TicketForm() {
         const res = await createTicket(payload)
         const newId = res.data.id
         if (pendingFiles.length > 0) {
-          const results = await Promise.allSettled(pendingFiles.map(({ file }) => uploadAttachment(newId, file)))
+          const results = await Promise.allSettled(pendingFiles.map(async ({ file }) => uploadAttachment(newId, await compressImage(file))))
           pendingFiles.forEach(({ preview }) => preview && URL.revokeObjectURL(preview))
           const failed = results.filter((r) => r.status === 'rejected').length
           if (failed > 0) toast.error(`${failed} archivo(s) no se pudieron subir`)
