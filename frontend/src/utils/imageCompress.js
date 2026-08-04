@@ -12,7 +12,11 @@ export async function compressImage(file) {
     return file
   }
   try {
-    const bitmap = await createImageBitmap(file)
+    // imageOrientation: 'from-image' aplica la rotación EXIF antes de dibujar al
+    // canvas. Sin esto, las fotos verticales de celular (que guardan la rotación
+    // como flag EXIF) quedarían de costado tras recomprimir — el default varía
+    // entre navegadores y en varios ignora el flag.
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
     const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
     const w = Math.round(bitmap.width * scale)
     const h = Math.round(bitmap.height * scale)
