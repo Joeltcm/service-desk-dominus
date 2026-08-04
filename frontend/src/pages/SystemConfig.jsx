@@ -64,6 +64,12 @@ const MODULE_GROUPS = [
       { key: 'cartas', label: 'Cartas', desc: 'Generación de cartas y documentos formales' },
     ],
   },
+  {
+    group: 'Integraciones',
+    items: [
+      { key: 'google_calendar', label: 'Google Calendar', desc: 'Conexión y sincronización con Google Calendar. Si se desactiva, la agenda sigue funcionando de forma interna (sin crear eventos en Google).' },
+    ],
+  },
 ]
 
 export default function SystemConfig() {

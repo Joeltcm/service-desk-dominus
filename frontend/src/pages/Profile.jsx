@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useFormGuard } from '../context/UnsavedChangesContext'
+import { useModules } from '../context/ModulesContext'
 import { isPushSupported, subscribeToPush, unsubscribeFromPush, getPushSubscription } from '../utils/pushNotifications'
 
 const ROLE_LABELS = { admin: 'Administrador', supervisor: 'Supervisor', agent: 'Agente', client: 'Cliente' }
@@ -38,6 +39,7 @@ function AvatarLetters({ name, size = 'lg' }) {
 
 export default function Profile() {
   const { user, login } = useAuth()
+  const { modules } = useModules()
   const photoInputRef = useRef(null)
   const [photoUploading, setPhotoUploading] = useState(false)
   const [calStatus, setCalStatus] = useState(null)
@@ -387,8 +389,8 @@ export default function Profile() {
           )}
         </div>
 
-        {/* ── Google Calendar — solo admin y agente ── */}
-        {(user.role === 'admin' || user.role === 'supervisor' || user.role === 'agent') && (
+        {/* ── Google Calendar — solo admin y agente, y si la integración está habilitada ── */}
+        {modules?.google_calendar !== false && (user.role === 'admin' || user.role === 'supervisor' || user.role === 'agent') && (
           <div className="card shadow-lg space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center shadow-sm flex-shrink-0">

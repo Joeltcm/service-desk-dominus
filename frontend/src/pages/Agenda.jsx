@@ -13,6 +13,7 @@ import { es } from 'date-fns/locale'
 import { formatInTimeZone } from 'date-fns-tz'
 import toast from 'react-hot-toast'
 import { fmtTime, fmtHourLabel, getFmtTz, toUTC } from '../utils/fmt'
+import { useModules } from '../context/ModulesContext'
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 7) // 7:00 → 21:00
@@ -67,6 +68,8 @@ function fmtHour(h) { return fmtHourLabel(h) }
 
 export default function Agenda() {
   const navigate = useNavigate()
+  const { modules } = useModules()
+  const gcalEnabled = modules?.google_calendar !== false
   const [currentDate, setCurrentDate] = useState(new Date())
   const [view, setView] = useState('month') // month | week | day | list
   const [events, setEvents] = useState([])
@@ -286,7 +289,7 @@ export default function Agenda() {
             ))}
           </div>
           <button onClick={goToday} className="btn-secondary text-sm">Hoy</button>
-          {calConnected && (
+          {gcalEnabled && calConnected && (
             <button onClick={handleSync} disabled={syncing} title="Sincronizar con Google Calendar" className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
               <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
               <span className="hidden sm:inline">{syncing ? 'Sincronizando...' : 'Sync'}</span>

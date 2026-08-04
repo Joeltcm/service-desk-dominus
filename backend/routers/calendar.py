@@ -56,6 +56,77 @@ def _build_event_title(ticket_id: int, location: str, subject: str, client_name:
     return " - ".join(parts)
 
 
+def _gcal_enabled(db) -> bool:
+    """True si la integración de Google Calendar está habilitada en esta instalación."""
+    try:
+        from routers.system import _get_modules
+        return _get_modules(db).get("google_calendar", True) is not False
+    except Exception:
+        return True
+
+
+def _schedule_ticket_internal(data, db, current_user, background_tasks):
+    """Agenda interna del ticket (sin Google): guarda fecha/hora y lo registra."""
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == data.ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    is_reschedule = bool(ticket.scheduled_at)
+    subject = data.subject or ticket.subject or ticket.title
+    if data.location:
+        ticket.location = data.location
+    if data.subject:
+        ticket.subject = data.subject
+    start_dt = data.scheduled_at
+    ticket.scheduled_at = start_dt
+    ticket.duration_minutes = data.duration_minutes
+    ticket.calendar_event_id = None
+    ticket.calendar_event_link = None
+    action_label = "reagendado" if is_reschedule else "agendado"
+    PANAMA = timezone(timedelta(hours=-5))
+    local_dt = start_dt.astimezone(PANAMA) if start_dt.tzinfo else start_dt.replace(tzinfo=timezone.utc).astimezone(PANAMA)
+    db.add(models.TicketTimeline(
+        ticket_id=ticket.id, user_id=current_user.id,
+        content=f"Visita {action_label} para {local_dt.strftime('%d/%m/%Y %I:%M %p')}",
+        entry_type="calendar",
+    ))
+    db.commit()
+    db.refresh(ticket)
+    try:
+        from routers.settings import try_send_reschedule_email
+        background_tasks.add_task(
+            try_send_reschedule_email, ticket.id, scheduled_at=start_dt,
+            duration_minutes=data.duration_minutes, location=(data.location or ticket.location or ""),
+            subject_text=subject, agent_name=current_user.name,
+            bcc_email=data.bcc_email, is_reschedule=is_reschedule,
+        )
+    except Exception:
+        pass
+    return {"event_id": None, "event_link": None, "event_title": subject, "scheduled_at": start_dt.isoformat()}
+
+
+def _schedule_dispatch_internal(data, db, current_user):
+    """Agenda interna del pedido (sin Google)."""
+    dispatch = db.query(models.Dispatch).filter(models.Dispatch.id == data.dispatch_id).first()
+    if not dispatch:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    start_dt = data.scheduled_at
+    dispatch.scheduled_at = start_dt
+    dispatch.duration_minutes = data.duration_minutes
+    dispatch.calendar_event_id = None
+    dispatch.calendar_event_link = None
+    dispatch.status = "Pedido Programado"
+    if dispatch.order_id:
+        order = db.query(models.Order).filter(models.Order.id == dispatch.order_id).first()
+        if order and order.status in ("Pendiente", "Borrador", None):
+            order.status = "En proceso"
+    db.commit()
+    return {
+        "event_id": None, "event_link": None,
+        "event_title": _build_dispatch_event_title(dispatch.id, dispatch.title, dispatch.client_name or ""),
+        "scheduled_at": start_dt.isoformat(),
+    }
+
+
 @router.get("/status")
 def get_calendar_status(current_user: models.User = Depends(get_current_user)):
     """Retorna el estado de conexión de Google Calendar del usuario actual."""
@@ -81,7 +152,9 @@ def disconnect_calendar(
 
 
 @router.get("/auth-url")
-def get_auth_url(current_user: models.User = Depends(get_current_user)):
+def get_auth_url(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if not _gcal_enabled(db):
+        raise HTTPException(status_code=403, detail="La integración de Google Calendar está desactivada")
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(
             status_code=400,
@@ -154,6 +227,9 @@ def create_calendar_event(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_agent_or_admin),
 ):
+    # Integración Google desactivada → agenda interna (sin evento en Google).
+    if not _gcal_enabled(db):
+        return _schedule_ticket_internal(data, db, current_user, background_tasks)
     if not current_user.google_token:
         raise HTTPException(
             status_code=400,
@@ -753,6 +829,9 @@ def create_dispatch_calendar_event(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_agent_or_admin),
 ):
+    # Integración Google desactivada → agenda interna (sin evento en Google).
+    if not _gcal_enabled(db):
+        return _schedule_dispatch_internal(data, db, current_user)
     if not current_user.google_token:
         raise HTTPException(status_code=400, detail="Debes conectar tu cuenta de Google Calendar primero")
 

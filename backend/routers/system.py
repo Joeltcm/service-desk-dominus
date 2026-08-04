@@ -84,6 +84,8 @@ ALL_MODULES = [
     "garantias", "licencias", "dashboard_ventas",
     "contratos", "impresoras", "suministros",
     "cartas",
+    # Integraciones (no son ítems de navegación; se togglean como feature).
+    "google_calendar",
 ]
 
 DEFAULT_MODULES = {k: True for k in ALL_MODULES}
