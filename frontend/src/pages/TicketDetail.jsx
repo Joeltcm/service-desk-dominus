@@ -1167,6 +1167,11 @@ export default function TicketDetail() {
   }
 
   const swipeBack = useTouchSwipe({ onSwipeRight: () => navigate(-1) })
+  // Swipe dentro del visor: navega entre imágenes (si hay más de una).
+  const lightboxSwipe = useTouchSwipe({
+    onSwipeLeft:  () => setLightbox((l) => (l && l.list.length > 1 ? { ...l, idx: (l.idx + 1) % l.list.length } : l)),
+    onSwipeRight: () => setLightbox((l) => (l && l.list.length > 1 ? { ...l, idx: (l.idx - 1 + l.list.length) % l.list.length } : l)),
+  })
 
   const handlePrint = async (autoprint = true) => {
     // Pre-open window synchronously for iOS (blocked after await)
@@ -1310,7 +1315,7 @@ export default function TicketDetail() {
   if (!ticket) return null
 
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto" {...swipeBack}>
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto" {...(lightbox ? {} : swipeBack)}>
       {/* Header */}
       <div className="flex items-start gap-3 mb-6">
         <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-900 mt-1 flex-shrink-0">
@@ -2859,6 +2864,7 @@ export default function TicketDetail() {
         <div
           className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
           onClick={() => setLightbox(null)}
+          {...lightboxSwipe}
         >
           {n > 1 && (
             <button
