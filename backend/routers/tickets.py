@@ -81,7 +81,7 @@ def _resume_sla_from_trash(ticket: models.Ticket, db: Session) -> None:
 def list_categories(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return db.query(models.TicketCategory).filter(
         models.TicketCategory.is_active == True
-    ).order_by(models.TicketCategory.order, models.TicketCategory.name).all()
+    ).order_by(models.TicketCategory.name).all()
 
 
 @router.post("/categories", response_model=schemas.CategoryOut)

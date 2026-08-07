@@ -1117,6 +1117,22 @@ def _patch_categories():
 
 _patch_categories()
 
+def _patch_add_garantia_category():
+    """Agrega la categoría de ticket 'Garantía' si no existe (idempotente)."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "INSERT INTO ticket_categories (name, \"order\", is_active) "
+                "SELECT 'Garantía', COALESCE(MAX(\"order\"),0)+1, true FROM ticket_categories "
+                "ON CONFLICT (name) DO NOTHING"
+            ))
+            conn.commit()
+        except Exception:
+            pass
+
+_patch_add_garantia_category()
+
 def _patch_statuses():
     # En it_support no se usa el estado 'Programado' (se elimina más abajo); evitar re-crearlo.
     if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support":
