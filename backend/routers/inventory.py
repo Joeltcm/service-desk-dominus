@@ -472,20 +472,32 @@ def adjust_inventory_item(
 @router.delete("/{item_id}")
 def delete_inventory_item(
     item_id: int,
+    data: schemas.InventoryDelete,
     db: Session = Depends(get_db),
     _=Depends(require_supplies_or_above),
 ):
+    """Baja de un artículo. Requiere justificación obligatoria. Si aún tiene stock,
+    registra la salida de lo restante para conservar la trazabilidad. Nunca hace hard-delete:
+    el artículo se desactiva para preservar el historial y el motivo de la baja."""
     item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Artículo no encontrado")
-    has_history = db.query(models.InventoryTransaction).filter(
-        models.InventoryTransaction.item_code == item.code
-    ).first() is not None
-    if has_history:
-        # Mantiene el registro para no huerfanar las transacciones históricas (referenciadas por code, no FK)
-        item.is_active = False
-        db.commit()
-        return {"ok": True, "message": "Artículo desactivado (tiene movimientos históricos)"}
-    db.delete(item)
+    justif = (data.justification or "").strip()
+    if not justif:
+        raise HTTPException(status_code=400, detail="La justificación de la baja es obligatoria")
+    try:
+        current = float(item.quantity or 0)
+    except (ValueError, TypeError):
+        current = 0.0
+    if current > 0:
+        # Registra el egreso del stock restante para que la baja quede trazada
+        _log_inventory_txn(db, item.code, -current, source_type="baja",
+                           notes=f"Baja de inventario (stock {current:g} retirado) · {justif}"[:300])
+        item.quantity = "0"
+    else:
+        # Sin stock: igual deja el registro de baja con su motivo
+        _log_inventory_txn(db, item.code, 0, source_type="baja",
+                           notes=f"Baja de inventario · {justif}"[:300])
+    item.is_active = False
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "message": "Artículo dado de baja"}

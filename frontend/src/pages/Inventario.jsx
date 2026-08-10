@@ -1,4 +1,3 @@
-import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
@@ -61,6 +60,7 @@ const SOURCE_LABEL = {
   recepcion:           'Recepción de proveedor',
   ajuste:              'Ajuste de inventario',
   inventario_inicial:  'Inventario inicial',
+  baja:                'Baja de inventario',
 }
 
 const SOURCE_COLOR = {
@@ -72,6 +72,7 @@ const SOURCE_COLOR = {
   recepcion:       'bg-emerald-100 text-emerald-700',
   ajuste:          'bg-sky-100 text-sky-700',
   inventario_inicial: 'bg-gray-100 text-gray-600',
+  baja:            'bg-red-100 text-red-700',
 }
 
 const MOTIVOS = ['Consumo interno', 'Uso en taller', 'Compra para empresa', 'Dañado/descarte', 'Pérdida', 'Otro']
@@ -155,6 +156,9 @@ export default function Inventario() {
   const [adjustItem, setAdjustItem] = useState(null)
   const [adjustForm, setAdjustForm] = useState({ new_qty: '', justification: '' })
   const [adjustSaving, setAdjustSaving] = useState(false)
+  const [deleteItem, setDeleteItem] = useState(null)
+  const [deleteJustif, setDeleteJustif] = useState('')
+  const [deleteSaving, setDeleteSaving] = useState(false)
   const [receiveItem, setReceiveItem] = useState(null)
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
@@ -358,15 +362,26 @@ export default function Inventario() {
     }
   }
 
-  const handleDelete = async (item) => {
-    if (!await showConfirm(`¿Eliminar "${item.name}"?`)) return
+  const openDelete = (item) => {
+    setDeleteJustif('')
+    setDeleteItem(item)
+  }
+
+  const confirmDelete = async () => {
+    const justif = deleteJustif.trim()
+    if (!justif) return toast.error('La justificación de la baja es obligatoria')
+    setDeleteSaving(true)
     try {
-      const r = await deleteInventoryItem(item.id)
-      toast.success(r.data?.message || 'Artículo eliminado')
-      if (selected?.id === item.id) setShowForm(false)
+      const r = await deleteInventoryItem(deleteItem.id, justif)
+      toast.success(r.data?.message || 'Artículo dado de baja')
+      if (selected?.id === deleteItem.id) setShowForm(false)
+      setDeleteItem(null)
       load()
-    } catch {
-      toast.error('Error eliminando artículo')
+      if (allTxns.length > 0) loadAllTxns()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error al dar de baja el artículo')
+    } finally {
+      setDeleteSaving(false)
     }
   }
 
@@ -904,7 +919,7 @@ export default function Inventario() {
                           <button onClick={() => openEdit(it)} className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" data-tip="Editar" aria-label="Editar">
                             <Edit size={14} />
                           </button>
-                          <button onClick={() => handleDelete(it)} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" data-tip="Eliminar" aria-label="Eliminar">
+                          <button onClick={() => openDelete(it)} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" data-tip="Dar de baja" aria-label="Dar de baja">
                             <Trash2 size={14} />
                           </button>
                         </>
@@ -1180,6 +1195,47 @@ export default function Inventario() {
                 className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg font-medium hover:bg-sky-700 disabled:opacity-60 transition-colors text-sm">
                 <Scale size={15} />
                 {adjustSaving ? 'Registrando...' : 'Registrar ajuste'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-semibold text-gray-900">Dar de baja artículo</h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{deleteItem.code} · {deleteItem.name}</p>
+              </div>
+              <button onClick={() => setDeleteItem(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {parseFloat(deleteItem.quantity || 0) > 0 ? (
+                <div className="bg-red-50 border border-red-100 rounded-lg px-4 py-2.5 text-sm text-red-700">
+                  Este artículo aún tiene <b>{fmtQty(deleteItem.quantity)} {deleteItem.unit || 'unidad'}</b> en stock. Al darlo de baja se registrará la salida de esa cantidad en el historial.
+                </div>
+              ) : (
+                <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 text-sm text-gray-600">
+                  El artículo se desactivará y quedará registrado en el historial con su motivo (no se elimina permanentemente).
+                </div>
+              )}
+              <div>
+                <label className="label">Justificación de la baja *</label>
+                <textarea className="input h-16 resize-none" placeholder="Obsoleto, dañado, error de registro, ya no se maneja…"
+                  value={deleteJustif}
+                  onChange={e => setDeleteJustif(e.target.value)}
+                  style={{ fontSize: '16px' }} autoFocus />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t">
+              <button onClick={() => setDeleteItem(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={confirmDelete}
+                disabled={deleteSaving || !deleteJustif.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-60 transition-colors text-sm">
+                <Trash2 size={15} />
+                {deleteSaving ? 'Dando de baja...' : 'Dar de baja'}
               </button>
             </div>
           </div>

@@ -364,7 +364,7 @@ export const searchInventory = (q) => api.get('/inventory/search', { params: { q
 export const getInventoryItem = (id) => api.get(`/inventory/${id}`)
 export const createInventoryItem = (data) => api.post('/inventory', data)
 export const updateInventoryItem = (id, data) => api.put(`/inventory/${id}`, data)
-export const deleteInventoryItem = (id) => api.delete(`/inventory/${id}`)
+export const deleteInventoryItem = (id, justification) => api.delete(`/inventory/${id}`, { data: { justification } })
 export const getInventoryTransactions = (id, limit = 50) => api.get(`/inventory/${id}/transactions`, { params: { limit } })
 export const withdrawInventoryItem = (id, data) => api.post(`/inventory/${id}/withdraw`, data)
 export const receiveInventoryItem = (id, data) => api.post(`/inventory/${id}/receive`, data)

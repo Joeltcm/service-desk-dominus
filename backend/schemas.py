@@ -1331,6 +1331,10 @@ class InventoryAdjust(BaseModel):
     justification: str
 
 
+class InventoryDelete(BaseModel):
+    justification: str
+
+
 # ── Canned Responses ──────────────────────────────────
 class CannedResponseCreate(BaseModel):
     title: str
