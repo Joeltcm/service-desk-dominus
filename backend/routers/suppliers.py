@@ -38,7 +38,7 @@ def list_suppliers(
 def create_supplier(
     data: schemas.SupplierCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin_or_ventas),
+    _=Depends(require_staff),  # todo el personal (incluye roles de inventario) puede dar de alta proveedores; editar/eliminar sigue restringido a admin/ventas
 ):
     supplier = models.Supplier(**data.model_dump())
     db.add(supplier)

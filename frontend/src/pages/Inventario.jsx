@@ -1,7 +1,7 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, getAllInventoryTransactions, getSuppliers, importInventoryCSV } from '../services/api'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, getAllInventoryTransactions, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
 import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -138,6 +138,9 @@ export default function Inventario() {
   const [receiveItem, setReceiveItem] = useState(null)
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
+  const [showNewSupplier, setShowNewSupplier] = useState(false)
+  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '' })
+  const [newSupplierSaving, setNewSupplierSaving] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -440,6 +443,24 @@ export default function Inventario() {
       toast.error(err.response?.data?.detail || 'Error al registrar la recepción')
     } finally {
       setReceiveSaving(false)
+    }
+  }
+
+  const handleCreateSupplier = async () => {
+    const name = newSupplier.name.trim()
+    if (!name) return toast.error('Ingresa el nombre del proveedor')
+    setNewSupplierSaving(true)
+    try {
+      const r = await createSupplier({ name, phone: newSupplier.phone?.trim() || null })
+      setSuppliers(prev => [...prev, r.data].sort((a, b) => a.name.localeCompare(b.name)))
+      setForm(f => ({ ...f, supplier_id: String(r.data.id) }))
+      setShowNewSupplier(false)
+      setNewSupplier({ name: '', phone: '' })
+      toast.success('Proveedor creado ✓')
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error al crear el proveedor')
+    } finally {
+      setNewSupplierSaving(false)
     }
   }
 
@@ -1071,11 +1092,35 @@ export default function Inventario() {
                 </select>
               </div>
               <div>
-                <label className="label">Proveedor</label>
-                <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
-                  <option value="">— Sin proveedor —</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <div className="flex items-center justify-between">
+                  <label className="label">Proveedor</label>
+                  {!showNewSupplier && (
+                    <button type="button" onClick={() => { setNewSupplier({ name: '', phone: '' }); setShowNewSupplier(true) }}
+                      className="text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center gap-1">
+                      <Plus size={12} /> Nuevo proveedor
+                    </button>
+                  )}
+                </div>
+                {showNewSupplier ? (
+                  <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 space-y-2">
+                    <input className="input" placeholder="Nombre del proveedor *" value={newSupplier.name}
+                      onChange={e => setNewSupplier(s => ({ ...s, name: e.target.value }))} style={{ fontSize: '16px' }} autoFocus />
+                    <input className="input" placeholder="Teléfono (opcional)" value={newSupplier.phone}
+                      onChange={e => setNewSupplier(s => ({ ...s, phone: e.target.value }))} style={{ fontSize: '16px' }} />
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button type="button" onClick={() => setShowNewSupplier(false)} className="btn-secondary text-xs py-1.5">Cancelar</button>
+                      <button type="button" onClick={handleCreateSupplier} disabled={newSupplierSaving || !newSupplier.name.trim()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-60">
+                        {newSupplierSaving ? 'Creando...' : 'Crear y seleccionar'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                    <option value="">— Sin proveedor —</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
