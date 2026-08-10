@@ -370,6 +370,7 @@ export const withdrawInventoryItem = (id, data) => api.post(`/inventory/${id}/wi
 export const receiveInventoryItem = (id, data) => api.post(`/inventory/${id}/receive`, data)
 export const adjustInventoryItem = (id, data) => api.post(`/inventory/${id}/adjust`, data)
 export const getAllInventoryTransactions = (params) => api.get('/inventory/transactions/all', { params })
+export const getInventoryReportPdf = (params) => api.get('/inventory/reports/movements/pdf', { params, responseType: 'blob' })
 export const importInventoryCSV = (file) => {
   const form = new FormData()
   form.append('file', file)

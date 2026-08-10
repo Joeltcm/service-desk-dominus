@@ -681,6 +681,7 @@ class InventoryTransaction(Base):
     source_id = Column(Integer, nullable=True, index=True)
     notes = Column(String(300), nullable=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)  # proveedor de la recepción (entradas)
+    unit_cost = Column(String(50), nullable=True)  # costo unitario al momento del movimiento (para valorizar reportes)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     supplier = relationship("Supplier")

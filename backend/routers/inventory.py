@@ -1,11 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
+from datetime import datetime, date, timedelta
 import csv, io
 import models, schemas
 from database import get_db
 from auth import require_staff, require_agent_or_admin, require_supplies_or_above
+
+
+def _parse_date(s: Optional[str]) -> Optional[date]:
+    """Parsea 'YYYY-MM-DD' a date; devuelve None si viene vacío o inválido."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 # Mapea etiquetas/claves de bodega del CSV a la clave interna del enum.
 _WAREHOUSE_ALIASES = {
@@ -30,7 +42,17 @@ _STATUS_ALIASES = {
 }
 
 
-def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None, supplier_id: int = None):
+def _fmt_num(v) -> Optional[str]:
+    """Formatea un número como string compacto (sin ceros de más) o None si no aplica."""
+    try:
+        if v is None or v == "":
+            return None
+        return f"{float(v):.4f}".rstrip("0").rstrip(".") or "0"
+    except (ValueError, TypeError):
+        return None
+
+
+def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None, supplier_id: int = None, unit_cost=None):
     delta_str = f"{qty_delta:.4f}".rstrip("0").rstrip(".")
     db.add(models.InventoryTransaction(
         item_code=item_code,
@@ -39,6 +61,7 @@ def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_typ
         source_id=source_id,
         notes=notes,
         supplier_id=supplier_id,
+        unit_cost=_fmt_num(unit_cost),
     ))
 
 
@@ -96,7 +119,10 @@ def search_inventory(
 def get_all_transactions(
     item_code: Optional[str] = Query(default=None),
     source_type: Optional[str] = Query(default=None),
-    limit: int = Query(default=200, le=1000),
+    supplier_id: Optional[int] = Query(default=None),
+    date_from: Optional[str] = Query(default=None),  # YYYY-MM-DD (inclusive)
+    date_to: Optional[str] = Query(default=None),    # YYYY-MM-DD (inclusive)
+    limit: int = Query(default=200, le=2000),
     db: Session = Depends(get_db),
     _=Depends(require_staff),
 ):
@@ -105,14 +131,24 @@ def get_all_transactions(
         q = q.filter(models.InventoryTransaction.item_code == item_code)
     if source_type:
         q = q.filter(models.InventoryTransaction.source_type == source_type)
+    if supplier_id:
+        q = q.filter(models.InventoryTransaction.supplier_id == supplier_id)
+    _df = _parse_date(date_from)
+    _dt = _parse_date(date_to)
+    if _df:
+        q = q.filter(models.InventoryTransaction.created_at >= _df)
+    if _dt:
+        q = q.filter(models.InventoryTransaction.created_at < _dt + timedelta(days=1))
     txns = q.order_by(models.InventoryTransaction.created_at.desc()).limit(limit).all()
 
-    # Item names
+    # Item names + costo (para valorizar y como fallback de unit_cost)
     codes = list({t.item_code for t in txns})
     items_by_code = {}
+    item_cost_by_code = {}
     if codes:
-        for it in db.query(models.InventoryItem.code, models.InventoryItem.name).filter(models.InventoryItem.code.in_(codes)).all():
+        for it in db.query(models.InventoryItem.code, models.InventoryItem.name, models.InventoryItem.cost_price).filter(models.InventoryItem.code.in_(codes)).all():
             items_by_code[it.code] = it.name
+            item_cost_by_code[it.code] = it.cost_price
 
     # Nombres de proveedor (para recepciones)
     sup_ids = list({t.supplier_id for t in txns if t.supplier_id})
@@ -193,8 +229,215 @@ def get_all_transactions(
             "ticket_id": ticket_id,
             "supplier_id": t.supplier_id,
             "supplier_name": suppliers_by_id.get(t.supplier_id) if t.supplier_id else None,
+            "unit_cost": t.unit_cost if t.unit_cost not in (None, "") else item_cost_by_code.get(t.item_code),
         })
     return results
+
+
+_SOURCE_LABEL_ES = {
+    "manual": "Ajuste manual",
+    "dispatch": "Salida por pedido",
+    "dispatch_revert": "Reposición de pedido",
+    "ticket_part": "Salida por ticket",
+    "ticket_part_return": "Devolución de parte (ticket)",
+    "invoice": "Factura",
+    "order": "Pedido",
+    "consumo_interno": "Salida manual",
+    "recepcion": "Recepción de proveedor",
+    "ajuste": "Ajuste de inventario",
+    "inventario_inicial": "Inventario inicial",
+    "baja": "Baja de inventario",
+}
+
+
+def _report_rows(db: Session, date_from, date_to, direction, supplier_id, category):
+    """Devuelve los movimientos valorizados (con costo unitario y valor) según los filtros."""
+    df = _parse_date(date_from)
+    dt = _parse_date(date_to)
+    q = db.query(models.InventoryTransaction)
+    if supplier_id:
+        q = q.filter(models.InventoryTransaction.supplier_id == supplier_id)
+    if df:
+        q = q.filter(models.InventoryTransaction.created_at >= df)
+    if dt:
+        q = q.filter(models.InventoryTransaction.created_at < dt + timedelta(days=1))
+    txns = q.order_by(models.InventoryTransaction.created_at.desc()).limit(5000).all()
+
+    codes = list({t.item_code for t in txns})
+    name_by, cost_by, cat_by = {}, {}, {}
+    if codes:
+        for it in db.query(models.InventoryItem.code, models.InventoryItem.name, models.InventoryItem.cost_price, models.InventoryItem.category).filter(models.InventoryItem.code.in_(codes)).all():
+            name_by[it.code] = it.name
+            cost_by[it.code] = it.cost_price
+            cat_by[it.code] = it.category
+    sup_ids = list({t.supplier_id for t in txns if t.supplier_id})
+    sup_by = {}
+    if sup_ids:
+        for s in db.query(models.Supplier.id, models.Supplier.name).filter(models.Supplier.id.in_(sup_ids)).all():
+            sup_by[s.id] = s.name
+
+    rows = []
+    for t in txns:
+        try:
+            qty = float(t.qty_delta or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if direction == "entradas" and qty <= 0:
+            continue
+        if direction == "salidas" and qty >= 0:
+            continue
+        if category and (cat_by.get(t.item_code) or "") != category:
+            continue
+        try:
+            cost = float(t.unit_cost) if t.unit_cost not in (None, "") else float(cost_by.get(t.item_code) or 0)
+        except (ValueError, TypeError):
+            cost = 0.0
+        rows.append({
+            "created_at": t.created_at,
+            "item_code": t.item_code,
+            "item_name": name_by.get(t.item_code) or t.item_code,
+            "source_type": t.source_type,
+            "label": _SOURCE_LABEL_ES.get(t.source_type, t.source_type),
+            "supplier_name": sup_by.get(t.supplier_id) if t.supplier_id else None,
+            "qty": qty,
+            "cost": cost,
+            "value": abs(qty) * cost,
+            "notes": t.notes,
+        })
+    return rows
+
+
+@router.get("/reports/movements/pdf")
+def report_movements_pdf(
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    direction: str = Query(default="all"),   # entradas | salidas | all
+    supplier_id: Optional[int] = Query(default=None),
+    category: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    """Reporte PDF de entradas/salidas valorizado, con los mismos filtros de la pantalla."""
+    from html import escape
+    rows = _report_rows(db, date_from, date_to, direction, supplier_id, category)
+
+    def money(v):
+        return f"${v:,.2f}"
+
+    from datetime import timezone
+    _BOGOTA = timezone(timedelta(hours=-5))
+
+    def fmt_dt(d):
+        if not d:
+            return ""
+        try:
+            if d.tzinfo is not None:
+                d = d.astimezone(_BOGOTA)  # UTC-5 (Bogotá)
+        except Exception:
+            pass
+        return d.strftime("%d/%m/%Y %H:%M")
+
+    generated_at = datetime.now(timezone.utc).astimezone(_BOGOTA).strftime("%d/%m/%Y %H:%M")
+
+    ent = [r for r in rows if r["qty"] > 0]
+    sal = [r for r in rows if r["qty"] < 0]
+    ent_qty = sum(r["qty"] for r in ent)
+    ent_val = sum(r["value"] for r in ent)
+    sal_qty = sum(-r["qty"] for r in sal)
+    sal_val = sum(r["value"] for r in sal)
+
+    # Agrupado de entradas por proveedor
+    by_sup = {}
+    for r in ent:
+        k = r["supplier_name"] or "Sin proveedor"
+        g = by_sup.setdefault(k, {"qty": 0.0, "val": 0.0})
+        g["qty"] += r["qty"]
+        g["val"] += r["value"]
+
+    supplier_name = None
+    if supplier_id:
+        s = db.query(models.Supplier.name).filter(models.Supplier.id == supplier_id).first()
+        supplier_name = s[0] if s else None
+
+    dir_label = {"entradas": "Solo entradas", "salidas": "Solo salidas"}.get(direction, "Entradas y salidas")
+    rango = f"{date_from or '—'} a {date_to or '—'}"
+
+    try:
+        from routers.settings import _html_to_pdf, _logo_b64_tag, _wrap_html
+        logo = _logo_b64_tag() or ""
+    except Exception:
+        _html_to_pdf = None
+        logo = ""
+
+    th = "border:1px solid #d1d5db;padding:5px 7px;background:#f3f4f6;font-size:8.5pt;text-align:left"
+    tdc = "border:1px solid #e5e7eb;padding:4px 7px;font-size:8.5pt"
+    tdr = tdc + ";text-align:right"
+
+    detail = "".join(
+        f"<tr>"
+        f"<td style=\"{tdc}\">{fmt_dt(r['created_at'])}</td>"
+        f"<td style=\"{tdc}\"><b>{escape(r['item_code'])}</b><br><span style='color:#6b7280'>{escape(r['item_name'] or '')}</span></td>"
+        f"<td style=\"{tdc}\">{escape(r['label'])}</td>"
+        f"<td style=\"{tdc}\">{escape(r['supplier_name'] or '—')}</td>"
+        f"<td style=\"{tdr};color:{'#047857' if r['qty']>0 else '#dc2626'}\">{'+' if r['qty']>0 else ''}{r['qty']:g}</td>"
+        f"<td style=\"{tdr}\">{money(r['cost'])}</td>"
+        f"<td style=\"{tdr}\">{money(r['value'])}</td>"
+        f"</tr>"
+        for r in rows
+    ) or f"<tr><td colspan='7' style='{tdc};text-align:center;color:#9ca3af'>Sin movimientos en el rango seleccionado</td></tr>"
+
+    sup_rows = "".join(
+        f"<tr><td style=\"{tdc}\">{escape(k)}</td><td style=\"{tdr}\">{g['qty']:g}</td><td style=\"{tdr}\">{money(g['val'])}</td></tr>"
+        for k, g in sorted(by_sup.items(), key=lambda kv: -kv[1]['val'])
+    )
+
+    body = f"""
+    <div style="font-family:Arial,sans-serif;color:#111">
+      <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
+        <tr>
+          <td style="width:60px;vertical-align:middle">{logo}</td>
+          <td style="vertical-align:middle">
+            <div style="font-size:15pt;font-weight:bold">Reporte de movimientos de inventario</div>
+            <div style="font-size:9pt;color:#6b7280">Rango: {escape(rango)} · {dir_label}{(' · Proveedor: ' + escape(supplier_name)) if supplier_name else ''}{(' · Categoría: ' + escape(category)) if category else ''}</div>
+            <div style="font-size:8pt;color:#9ca3af">Generado: {generated_at}</div>
+          </td>
+        </tr>
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+        <tr>
+          <th style="{th}">Concepto</th><th style="{th};text-align:right">Cantidad</th><th style="{th};text-align:right">Valor</th>
+        </tr>
+        <tr><td style="{tdc};color:#047857"><b>Entradas</b></td><td style="{tdr}">{ent_qty:g}</td><td style="{tdr}"><b>{money(ent_val)}</b></td></tr>
+        <tr><td style="{tdc};color:#dc2626"><b>Salidas</b></td><td style="{tdr}">{sal_qty:g}</td><td style="{tdr}"><b>{money(sal_val)}</b></td></tr>
+        <tr><td style="{tdc}"><b>Neto (entradas − salidas)</b></td><td style="{tdr}">{(ent_qty - sal_qty):g}</td><td style="{tdr}"><b>{money(ent_val - sal_val)}</b></td></tr>
+      </table>
+
+      {('<div style="font-size:10pt;font-weight:bold;margin:8px 0 4px">Entradas por proveedor</div>'
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:12px">'
+        f'<tr><th style="{th}">Proveedor</th><th style="{th};text-align:right">Cantidad</th><th style="{th};text-align:right">Valor</th></tr>'
+        f'{sup_rows}</table>') if by_sup else ''}
+
+      <div style="font-size:10pt;font-weight:bold;margin:8px 0 4px">Detalle ({len(rows)} movimiento(s))</div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <th style="{th}">Fecha</th><th style="{th}">Artículo</th><th style="{th}">Tipo</th>
+          <th style="{th}">Proveedor</th><th style="{th};text-align:right">Cant.</th>
+          <th style="{th};text-align:right">Costo u.</th><th style="{th};text-align:right">Valor</th>
+        </tr>
+        {detail}
+      </table>
+    </div>
+    """
+
+    if not _html_to_pdf:
+        raise HTTPException(status_code=500, detail="Motor de PDF no disponible")
+    pdf = _html_to_pdf(_wrap_html(body))
+    if not pdf:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+    fname = f"reporte-movimientos-{(date_from or 'inicio')}_{(date_to or 'hoy')}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
 
 @router.get("/{item_id}", response_model=schemas.InventoryItemOut)
@@ -244,7 +487,7 @@ def create_inventory_item(
     try:
         qty0 = float(item.quantity or 0)
         if qty0 > 0:
-            _log_inventory_txn(db, item.code, qty0, source_type="inventario_inicial", notes="Stock inicial al crear el artículo")
+            _log_inventory_txn(db, item.code, qty0, source_type="inventario_inicial", notes="Stock inicial al crear el artículo", unit_cost=item.cost_price)
             db.commit()
     except (ValueError, TypeError):
         pass
@@ -382,7 +625,7 @@ def withdraw_inventory_item(
         raise HTTPException(status_code=400, detail="La justificación es obligatoria cuando el motivo es 'Otro'")
     note = f"{motivo} · {justif}" if justif else motivo
     item.quantity = str(round(current - qty, 4))
-    _log_inventory_txn(db, item.code, -qty, source_type="consumo_interno", notes=note[:300])
+    _log_inventory_txn(db, item.code, -qty, source_type="consumo_interno", notes=note[:300], unit_cost=item.cost_price)
     db.commit()
     db.refresh(item)
     return item
@@ -431,7 +674,7 @@ def receive_inventory_item(
     if data.notes and data.notes.strip():
         note += f" · {data.notes.strip()}"
     _log_inventory_txn(db, item.code, data.qty, source_type="recepcion",
-                       supplier_id=data.supplier_id, notes=note[:300])
+                       supplier_id=data.supplier_id, notes=note[:300], unit_cost=data.cost)
     db.commit()
     db.refresh(item)
     return item
@@ -463,7 +706,7 @@ def adjust_inventory_item(
         raise HTTPException(status_code=400, detail="La cantidad no cambió respecto al stock actual")
     item.quantity = f"{data.new_qty:.4f}".rstrip("0").rstrip(".") or "0"
     note = f"Ajuste: {current:g} → {data.new_qty:g} · {justif}"
-    _log_inventory_txn(db, item.code, delta, source_type="ajuste", notes=note[:300])
+    _log_inventory_txn(db, item.code, delta, source_type="ajuste", notes=note[:300], unit_cost=item.cost_price)
     db.commit()
     db.refresh(item)
     return item
@@ -492,7 +735,7 @@ def delete_inventory_item(
     if current > 0:
         # Registra el egreso del stock restante para que la baja quede trazada
         _log_inventory_txn(db, item.code, -current, source_type="baja",
-                           notes=f"Baja de inventario (stock {current:g} retirado) · {justif}"[:300])
+                           notes=f"Baja de inventario (stock {current:g} retirado) · {justif}"[:300], unit_cost=item.cost_price)
         item.quantity = "0"
     else:
         # Sin stock: igual deja el registro de baja con su motivo

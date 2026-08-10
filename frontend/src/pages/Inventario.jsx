@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, getAllInventoryTransactions, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
 import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -143,6 +143,17 @@ export default function Inventario() {
   const [allTxnsLoading, setAllTxnsLoading] = useState(false)
   const [txnFilter, setTxnFilter] = useState('all')
   const [txnSearch, setTxnSearch] = useState('')
+  const [txnFrom, setTxnFrom] = useState('')
+  const [txnTo, setTxnTo] = useState('')
+  // Reportes
+  const [reportFrom, setReportFrom] = useState('')
+  const [reportTo, setReportTo] = useState('')
+  const [reportDir, setReportDir] = useState('all')       // all | entradas | salidas
+  const [reportSup, setReportSup] = useState('')          // supplier_id
+  const [reportTxns, setReportTxns] = useState([])
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportRan, setReportRan] = useState(false)
+  const [reportPdfLoading, setReportPdfLoading] = useState(false)
   const [historyItem, setHistoryItem] = useState(null)
   const [historyTxns, setHistoryTxns] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -399,13 +410,19 @@ export default function Inventario() {
     }
   }
 
-  const loadAllTxns = useCallback(() => {
+  const loadAllTxns = useCallback((opts = {}) => {
     setAllTxnsLoading(true)
-    getAllInventoryTransactions({ limit: 500 })
+    getAllInventoryTransactions({ limit: 1000, ...opts })
       .then(r => setAllTxns(r.data))
       .catch(() => toast.error('Error cargando movimientos'))
       .finally(() => setAllTxnsLoading(false))
   }, [])
+
+  // Recarga Movimientos desde el backend cuando cambian las fechas (para traer datos fuera del set reciente)
+  const applyTxnDates = (from, to) => {
+    setTxnFrom(from); setTxnTo(to)
+    loadAllTxns({ date_from: from || undefined, date_to: to || undefined })
+  }
 
   const handleTabChange = (t) => {
     setTab(t)
@@ -430,6 +447,95 @@ export default function Inventario() {
       return true
     })
   }, [allTxns, txnFilter, txnSearch])
+
+  // ── Reportes ─────────────────────────────────────
+  const runReport = () => {
+    setReportLoading(true)
+    setReportRan(true)
+    getAllInventoryTransactions({
+      date_from: reportFrom || undefined,
+      date_to: reportTo || undefined,
+      supplier_id: reportSup || undefined,
+      limit: 2000,
+    })
+      .then(r => setReportTxns(r.data))
+      .catch(() => toast.error('Error generando el reporte'))
+      .finally(() => setReportLoading(false))
+  }
+
+  const reportData = useMemo(() => {
+    const rows = reportTxns
+      .map(t => {
+        const qty = parseFloat(t.qty_delta || '0') || 0
+        const cost = parseFloat(t.unit_cost || '0') || 0
+        return { ...t, _qty: qty, _cost: cost, _value: Math.abs(qty) * cost }
+      })
+      .filter(r => {
+        if (reportDir === 'entradas' && r._qty <= 0) return false
+        if (reportDir === 'salidas'  && r._qty >= 0) return false
+        return true
+      })
+    const ent = rows.filter(r => r._qty > 0)
+    const sal = rows.filter(r => r._qty < 0)
+    const sum = (arr, k) => arr.reduce((s, r) => s + r[k], 0)
+    const bySupplier = {}
+    ent.forEach(r => {
+      const k = r.supplier_name || 'Sin proveedor'
+      if (!bySupplier[k]) bySupplier[k] = { qty: 0, val: 0 }
+      bySupplier[k].qty += r._qty
+      bySupplier[k].val += r._value
+    })
+    return {
+      rows,
+      entQty: sum(ent, '_qty'), entVal: sum(ent, '_value'),
+      salQty: sum(sal, '_qty') * -1, salVal: sum(sal, '_value'),
+      bySupplier: Object.entries(bySupplier).sort((a, b) => b[1].val - a[1].val),
+    }
+  }, [reportTxns, reportDir])
+
+  const money = (v) => `$${(v || 0).toLocaleString('es-PA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  const exportReportCSV = () => {
+    const headers = ['fecha', 'codigo', 'articulo', 'tipo', 'proveedor', 'cantidad', 'costo_unitario', 'valor', 'notas']
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const lines = [headers.join(',')]
+    reportData.rows.forEach(r => {
+      lines.push([
+        esc(format(new Date(r.created_at), 'yyyy-MM-dd HH:mm')),
+        esc(r.item_code), esc(r.item_name || ''),
+        esc(SOURCE_LABEL[r.source_type] || r.source_type),
+        esc(r.supplier_name || ''),
+        esc(r._qty), esc(r._cost.toFixed(2)), esc(r._value.toFixed(2)),
+        esc(r.notes || ''),
+      ].join(','))
+    })
+    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `reporte-movimientos-${reportFrom || 'inicio'}_${reportTo || 'hoy'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadReportPDF = async () => {
+    setReportPdfLoading(true)
+    try {
+      const r = await getInventoryReportPdf({
+        date_from: reportFrom || undefined,
+        date_to: reportTo || undefined,
+        direction: reportDir,
+        supplier_id: reportSup || undefined,
+      })
+      const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }))
+      window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch {
+      toast.error('No se pudo generar el PDF')
+    } finally {
+      setReportPdfLoading(false)
+    }
+  }
 
   const resetWithdraw = () => { setWithdrawItem(null); setManualExit(false); setWithdrawQty(''); setWithdrawMotivo(MOTIVOS[0]); setWithdrawJustif(''); setExitSearch('') }
 
@@ -617,6 +723,12 @@ export default function Inventario() {
         >
           <span className="flex items-center gap-1.5"><List size={14} /> Movimientos</span>
         </button>
+        <button
+          onClick={() => handleTabChange('reportes')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'reportes' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          <span className="flex items-center gap-1.5"><FileText size={14} /> Reportes</span>
+        </button>
       </div>
 
       {/* ── Movimientos tab ─────────────────────────── */}
@@ -637,6 +749,14 @@ export default function Inventario() {
               <option value="entradas">Solo entradas (+)</option>
               <option value="salidas">Solo salidas (−)</option>
             </select>
+            <div className="flex items-center gap-1.5">
+              <input type="date" className="input py-2 text-sm" value={txnFrom} onChange={e => applyTxnDates(e.target.value, txnTo)} title="Desde" />
+              <span className="text-gray-400 text-sm">–</span>
+              <input type="date" className="input py-2 text-sm" value={txnTo} onChange={e => applyTxnDates(txnFrom, e.target.value)} title="Hasta" />
+              {(txnFrom || txnTo) && (
+                <button onClick={() => applyTxnDates('', '')} className="text-xs text-gray-500 hover:text-gray-700 px-2" title="Limpiar fechas">Limpiar</button>
+              )}
+            </div>
           </div>
 
           <div className="card overflow-hidden p-0">
@@ -751,6 +871,147 @@ export default function Inventario() {
               <span className="text-emerald-600">{filteredTxns.filter(t => parseFloat(t.qty_delta) > 0).length} entradas</span>
               <span className="text-red-500">{filteredTxns.filter(t => parseFloat(t.qty_delta) < 0).length} salidas</span>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Reportes tab ─────────────────────────── */}
+      {tab === 'reportes' && (
+        <div>
+          {/* Filtros */}
+          <div className="card p-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="label">Desde</label>
+                <input type="date" className="input" value={reportFrom} onChange={e => setReportFrom(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Hasta</label>
+                <input type="date" className="input" value={reportTo} onChange={e => setReportTo(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Tipo</label>
+                <select className="input" value={reportDir} onChange={e => setReportDir(e.target.value)}>
+                  <option value="all">Entradas y salidas</option>
+                  <option value="entradas">Solo entradas</option>
+                  <option value="salidas">Solo salidas</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Proveedor</label>
+                <select className="input" value={reportSup} onChange={e => setReportSup(e.target.value)}>
+                  <option value="">Todos</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button onClick={runReport} disabled={reportLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-60 text-sm">
+                <FileText size={15} /> {reportLoading ? 'Generando...' : 'Generar reporte'}
+              </button>
+              <button onClick={exportReportCSV} disabled={!reportData.rows.length}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 text-sm">
+                <Download size={15} /> Exportar CSV
+              </button>
+              <button onClick={downloadReportPDF} disabled={!reportData.rows.length || reportPdfLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 text-sm">
+                <FileText size={15} /> {reportPdfLoading ? 'Generando PDF...' : 'Descargar PDF'}
+              </button>
+            </div>
+          </div>
+
+          {reportLoading && <div className="py-10 text-center text-gray-400">Generando reporte...</div>}
+
+          {!reportLoading && reportRan && (
+            <>
+              {/* Resumen */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <div className="card p-4">
+                  <div className="text-xs text-gray-500 mb-1">Entradas</div>
+                  <div className="text-2xl font-bold text-emerald-600">{money(reportData.entVal)}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{reportData.entQty.toLocaleString('es-PA')} unidades</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-xs text-gray-500 mb-1">Salidas</div>
+                  <div className="text-2xl font-bold text-red-500">{money(reportData.salVal)}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{reportData.salQty.toLocaleString('es-PA')} unidades</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-xs text-gray-500 mb-1">Neto (entradas − salidas)</div>
+                  <div className={`text-2xl font-bold ${reportData.entVal - reportData.salVal >= 0 ? 'text-gray-900' : 'text-red-500'}`}>{money(reportData.entVal - reportData.salVal)}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{(reportData.entQty - reportData.salQty).toLocaleString('es-PA')} unidades</div>
+                </div>
+              </div>
+
+              {/* Entradas por proveedor */}
+              {reportData.bySupplier.length > 0 && reportDir !== 'salidas' && (
+                <div className="card overflow-hidden p-0 mb-4">
+                  <div className="px-4 py-2.5 border-b border-gray-100 text-sm font-semibold text-gray-700">Entradas por proveedor</div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Proveedor</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-gray-600">Cantidad</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-gray-600">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.bySupplier.map(([name, g]) => (
+                          <tr key={name} className="border-b border-gray-50 last:border-0">
+                            <td className="px-4 py-2.5 text-gray-800">{name}</td>
+                            <td className="px-4 py-2.5 text-right text-gray-600">{g.qty.toLocaleString('es-PA')}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">{money(g.val)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Detalle */}
+              <div className="card overflow-hidden p-0">
+                <div className="px-4 py-2.5 border-b border-gray-100 text-sm font-semibold text-gray-700">Detalle ({reportData.rows.length} movimiento(s))</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Fecha</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Artículo</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Tipo</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600 hidden sm:table-cell">Proveedor</th>
+                        <th className="px-4 py-2.5 text-right font-semibold text-gray-600">Cant.</th>
+                        <th className="px-4 py-2.5 text-right font-semibold text-gray-600 hidden sm:table-cell">Costo u.</th>
+                        <th className="px-4 py-2.5 text-right font-semibold text-gray-600">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.rows.length === 0 && (
+                        <tr><td colSpan={7} className="py-10 text-center text-gray-400">Sin movimientos en el rango seleccionado</td></tr>
+                      )}
+                      {reportData.rows.map(r => (
+                        <tr key={r.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{format(new Date(r.created_at), 'd MMM yyyy, HH:mm', { locale: es })}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="font-mono text-xs font-semibold text-gray-800">{r.item_code}</div>
+                            <div className="text-xs text-gray-400 truncate max-w-[160px]">{r.item_name}</div>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${SOURCE_COLOR[r.source_type] || 'bg-gray-100 text-gray-600'}`}>{SOURCE_LABEL[r.source_type] || r.source_type}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600 text-xs hidden sm:table-cell">{r.supplier_name || '—'}</td>
+                          <td className={`px-4 py-2.5 text-right font-semibold ${r._qty > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{r._qty > 0 ? '+' : ''}{r._qty % 1 === 0 ? r._qty : r._qty.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-600 hidden sm:table-cell">{money(r._cost)}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{money(r._value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

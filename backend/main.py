@@ -526,6 +526,11 @@ def _migrate_pg():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS unit_cost VARCHAR(50)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS invoice_payments (
                     id SERIAL PRIMARY KEY,

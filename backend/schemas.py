@@ -1314,6 +1314,7 @@ class InventoryTransactionOut(BaseModel):
     ticket_id: Optional[int] = None
     supplier_id: Optional[int] = None
     supplier_name: Optional[str] = None
+    unit_cost: Optional[str] = None
 
     class Config:
         from_attributes = True
