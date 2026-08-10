@@ -93,7 +93,7 @@ function TxnRow({ txn }) {
             {isPos ? '+' : ''}{delta % 1 === 0 ? Math.round(delta) : delta.toFixed(2)}
           </span>
         </div>
-        {txn.notes && <p className="text-xs text-gray-400 truncate mt-0.5">{txn.notes}</p>}
+        {txn.notes && <p className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap break-words">{txn.notes}</p>}
         <p className="text-xs text-gray-300 mt-0.5">
           {format(new Date(txn.created_at), "d MMM yyyy, HH:mm", { locale: es })}
         </p>
@@ -699,6 +699,10 @@ export default function Inventario() {
                           {t.source_label && (
                             <div className="md:hidden mt-1 text-[11px] font-mono text-gray-400 truncate max-w-[110px]">{t.source_label}</div>
                           )}
+                          {/* Justificación/notas visible en móvil/tablet (la columna Notas está oculta bajo lg) */}
+                          {t.notes && (
+                            <div className="lg:hidden mt-1 text-[11px] text-gray-500 break-words max-w-[160px] whitespace-pre-wrap">{t.notes}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 hidden sm:table-cell">
                           {(t.client_company || t.client_name) ? (
@@ -727,7 +731,7 @@ export default function Inventario() {
                             ? <span className="text-xs font-mono bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{t.source_label}</span>
                             : <span className="text-xs text-gray-300">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 hidden lg:table-cell max-w-xs truncate">{t.notes || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500 hidden lg:table-cell max-w-xs break-words whitespace-pre-wrap" title={t.notes || ''}>{t.notes || '—'}</td>
                         <td className="px-4 py-3 text-right">
                           <span className={`font-bold text-base flex items-center justify-end gap-1 ${isPos ? 'text-emerald-600' : 'text-red-500'}`}>
                             {isPos ? <ArrowUpCircle size={14} /> : <ArrowDownCircle size={14} />}
