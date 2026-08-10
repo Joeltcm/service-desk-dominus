@@ -603,7 +603,7 @@ export default function Inventario() {
 
       {/* Stats */}
       {!loading && items.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
           <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
             <p className="text-xs text-gray-400 mb-1">Total artículos</p>
             <p className="text-2xl font-bold text-gray-900">{items.length}</p>
@@ -612,6 +612,12 @@ export default function Inventario() {
             <p className="text-xs text-emerald-600 font-medium mb-1">Valor en bodega</p>
             <p className="text-2xl font-bold text-emerald-700">
               ${items.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 shadow-sm col-span-1">
+            <p className="text-xs text-blue-600 font-medium mb-1">Valor de venta</p>
+            <p className="text-2xl font-bold text-blue-700">
+              ${items.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.unit_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className={`rounded-xl p-4 shadow-sm border ${items.filter(lowStock).length > 0 ? 'bg-orange-50 border-orange-100' : 'bg-white border-gray-100'}`}>
