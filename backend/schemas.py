@@ -1326,6 +1326,11 @@ class InventoryReceive(BaseModel):
     notes: Optional[str] = None
 
 
+class InventoryAdjust(BaseModel):
+    new_qty: float
+    justification: str
+
+
 # ── Canned Responses ──────────────────────────────────
 class CannedResponseCreate(BaseModel):
     title: str

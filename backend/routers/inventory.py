@@ -240,6 +240,14 @@ def create_inventory_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    # Registrar el stock inicial como movimiento para trazabilidad.
+    try:
+        qty0 = float(item.quantity or 0)
+        if qty0 > 0:
+            _log_inventory_txn(db, item.code, qty0, source_type="inventario_inicial", notes="Stock inicial al crear el artículo")
+            db.commit()
+    except (ValueError, TypeError):
+        pass
     return item
 
 
@@ -340,18 +348,12 @@ def update_inventory_item(
         if conflict:
             raise HTTPException(status_code=400, detail=f"El código '{data.code}' ya existe en el inventario")
 
-    old_qty = item.quantity
-    for field, value in data.model_dump(exclude_unset=True).items():
+    # La cantidad NO se edita aquí: solo cambia por Recepción, Salida o Ajuste (trazable
+    # y justificado). Se ignora cualquier 'quantity' enviado desde el formulario de edición.
+    updates = data.model_dump(exclude_unset=True)
+    updates.pop("quantity", None)
+    for field, value in updates.items():
         setattr(item, field, value)
-
-    if data.quantity is not None and data.quantity != old_qty:
-        try:
-            old_val = float(old_qty or 0)
-            new_val = float(data.quantity or 0)
-            delta = new_val - old_val
-            _log_inventory_txn(db, item.code, delta, source_type="manual", notes=f"Ajuste manual: {old_qty} → {data.quantity}")
-        except (ValueError, TypeError):
-            pass
 
     db.commit()
     db.refresh(item)
@@ -430,6 +432,38 @@ def receive_inventory_item(
         note += f" · {data.notes.strip()}"
     _log_inventory_txn(db, item.code, data.qty, source_type="recepcion",
                        supplier_id=data.supplier_id, notes=note[:300])
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/{item_id}/adjust", response_model=schemas.InventoryItemOut)
+def adjust_inventory_item(
+    item_id: int,
+    data: schemas.InventoryAdjust,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    """Ajuste de inventario (corrección de conteo, merma, error): fija la cantidad real y
+    registra el movimiento (+/-) con una justificación obligatoria."""
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    justif = (data.justification or "").strip()
+    if not justif:
+        raise HTTPException(status_code=400, detail="La justificación del ajuste es obligatoria")
+    if data.new_qty < 0:
+        raise HTTPException(status_code=400, detail="La cantidad no puede ser negativa")
+    try:
+        current = float(item.quantity or 0)
+    except (ValueError, TypeError):
+        current = 0.0
+    delta = round(data.new_qty - current, 4)
+    if abs(delta) < 1e-9:
+        raise HTTPException(status_code=400, detail="La cantidad no cambió respecto al stock actual")
+    item.quantity = f"{data.new_qty:.4f}".rstrip("0").rstrip(".") or "0"
+    note = f"Ajuste: {current:g} → {data.new_qty:g} · {justif}"
+    _log_inventory_txn(db, item.code, delta, source_type="ajuste", notes=note[:300])
     db.commit()
     db.refresh(item)
     return item

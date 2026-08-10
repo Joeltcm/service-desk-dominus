@@ -1,8 +1,8 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, getAllInventoryTransactions, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus } from 'lucide-react'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, getAllInventoryTransactions, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -58,6 +58,8 @@ const SOURCE_LABEL = {
   order:               'Pedido',
   consumo_interno:     'Consumo interno',
   recepcion:           'Recepción de proveedor',
+  ajuste:              'Ajuste de inventario',
+  inventario_inicial:  'Inventario inicial',
 }
 
 const SOURCE_COLOR = {
@@ -67,6 +69,8 @@ const SOURCE_COLOR = {
   manual:          'bg-gray-100 text-gray-600',
   consumo_interno: 'bg-orange-100 text-orange-700',
   recepcion:       'bg-emerald-100 text-emerald-700',
+  ajuste:          'bg-sky-100 text-sky-700',
+  inventario_inicial: 'bg-gray-100 text-gray-600',
 }
 
 const MOTIVOS = ['Consumo interno', 'Uso en taller', 'Compra para empresa', 'Dañado/descarte', 'Pérdida', 'Otro']
@@ -138,6 +142,9 @@ export default function Inventario() {
   const [withdrawSaving, setWithdrawSaving] = useState(false)
   const [manualExit, setManualExit] = useState(false)  // salida manual desde el botón superior (elige artículo)
   const [exitSearch, setExitSearch] = useState('')     // buscador de artículo en la salida manual
+  const [adjustItem, setAdjustItem] = useState(null)
+  const [adjustForm, setAdjustForm] = useState({ new_qty: '', justification: '' })
+  const [adjustSaving, setAdjustSaving] = useState(false)
   const [receiveItem, setReceiveItem] = useState(null)
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
@@ -462,6 +469,29 @@ export default function Inventario() {
       toast.error(err.response?.data?.detail || 'Error al registrar la recepción')
     } finally {
       setReceiveSaving(false)
+    }
+  }
+
+  const openAdjust = (item) => {
+    setAdjustForm({ new_qty: fmtQty(item.quantity), justification: '' })
+    setAdjustItem(item)
+  }
+
+  const handleAdjust = async () => {
+    const newQty = parseFloat(adjustForm.new_qty)
+    if (isNaN(newQty) || newQty < 0) return toast.error('Ingresa la cantidad real (conteo)')
+    if (!adjustForm.justification.trim()) return toast.error('La justificación del ajuste es obligatoria')
+    setAdjustSaving(true)
+    try {
+      await adjustInventoryItem(adjustItem.id, { new_qty: newQty, justification: adjustForm.justification.trim() })
+      toast.success('Ajuste registrado ✓')
+      setAdjustItem(null)
+      load()
+      if (allTxns.length > 0) loadAllTxns()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error al registrar el ajuste')
+    } finally {
+      setAdjustSaving(false)
     }
   }
 
@@ -848,6 +878,9 @@ export default function Inventario() {
                           <button onClick={() => openWithdraw(it)} className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
                             <ArrowDownCircle size={14} />
                           </button>
+                          <button onClick={() => openAdjust(it)} className="p-1.5 rounded hover:bg-sky-50 text-gray-400 hover:text-sky-600" title="Ajuste de inventario (con justificación)">
+                            <Scale size={14} />
+                          </button>
                           <button onClick={() => openEdit(it)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
                             <Edit size={14} />
                           </button>
@@ -1082,6 +1115,57 @@ export default function Inventario() {
         </div>
       )}
 
+      {/* Ajuste de inventario (con justificación obligatoria) */}
+      {adjustItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-semibold text-gray-900">Ajuste de inventario</h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{adjustItem.code} · {adjustItem.name}</p>
+              </div>
+              <button onClick={() => setAdjustItem(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-sky-50 border border-sky-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+                <span className="text-xs text-sky-600 font-medium">Stock actual (sistema)</span>
+                <span className="text-lg font-bold text-sky-700">{fmtQty(adjustItem.quantity)} {adjustItem.unit || 'unidad'}</span>
+              </div>
+              <div>
+                <label className="label">Cantidad real (conteo) *</label>
+                <input type="number" min="0" step="0.01" className="input text-right text-lg font-semibold"
+                  placeholder="0" value={adjustForm.new_qty}
+                  onChange={e => setAdjustForm(f => ({ ...f, new_qty: e.target.value }))}
+                  style={{ fontSize: '16px' }} autoFocus />
+                {adjustForm.new_qty !== '' && !isNaN(parseFloat(adjustForm.new_qty)) && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Diferencia: <b className={parseFloat(adjustForm.new_qty) - parseFloat(adjustItem.quantity || 0) >= 0 ? 'text-emerald-600' : 'text-orange-600'}>
+                      {(parseFloat(adjustForm.new_qty) - parseFloat(adjustItem.quantity || 0) >= 0 ? '+' : '')}{(parseFloat(adjustForm.new_qty) - parseFloat(adjustItem.quantity || 0)).toFixed(2).replace(/\.00$/, '')}
+                    </b>
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="label">Justificación *</label>
+                <textarea className="input h-16 resize-none" placeholder="Conteo físico, merma, corrección de error…"
+                  value={adjustForm.justification}
+                  onChange={e => setAdjustForm(f => ({ ...f, justification: e.target.value }))}
+                  style={{ fontSize: '16px' }} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t">
+              <button onClick={() => setAdjustItem(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={handleAdjust}
+                disabled={adjustSaving || adjustForm.new_qty === '' || !adjustForm.justification.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-lg font-medium hover:bg-sky-700 disabled:opacity-60 transition-colors text-sm">
+                <Scale size={15} />
+                {adjustSaving ? 'Registrando...' : 'Registrar ajuste'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Nuevo proveedor (desde el formulario de artículo) — todos los campos */}
       {showNewSupplier && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
@@ -1216,9 +1300,19 @@ export default function Inventario() {
                     title="Costo de compra — se usa para calcular rentabilidad en facturas" />
                 </div>
                 <div>
-                  <label className="label">Stock</label>
-                  <input type="number" min="0" step="0.01" className="input text-right" value={form.quantity}
-                    onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} style={{ fontSize: '16px' }} />
+                  <label className="label">{selected ? 'Stock actual' : 'Stock inicial'}</label>
+                  {selected ? (
+                    <>
+                      <div className="input bg-gray-50 text-gray-500 flex items-center justify-between cursor-not-allowed">
+                        <span className="flex-1 text-right">{fmtQty(form.quantity)}</span>
+                        <Lock size={13} className="text-gray-400 ml-2 flex-shrink-0" />
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-1 leading-snug">Se ajusta con Recibir / Salida / Ajuste (queda trazado).</p>
+                    </>
+                  ) : (
+                    <input type="number" min="0" step="0.01" className="input text-right" value={form.quantity}
+                      onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} style={{ fontSize: '16px' }} />
+                  )}
                 </div>
               </div>
               <div>
