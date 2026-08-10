@@ -250,6 +250,29 @@ _SOURCE_LABEL_ES = {
 }
 
 
+def _brand_logo_tag(db: Session) -> str:
+    """<img> del logo de branding configurado (company_logo_b64 en BD); fallback al logo estático."""
+    try:
+        from routers.settings import _get_setting
+        import base64 as _b64
+        b64 = _get_setting(db, "company_logo_b64")
+        if b64:
+            data = _b64.b64decode(b64)
+            mime = "image/png"
+            if data[:2] == b"\xff\xd8":
+                mime = "image/jpeg"
+            elif len(data) > 11 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                mime = "image/webp"
+            return f'<img src="data:{mime};base64,{b64}" width="52" height="52" alt="Logo" style="border-radius:6px;display:block;object-fit:contain" />'
+    except Exception:
+        pass
+    try:
+        from routers.settings import _logo_b64_tag
+        return _logo_b64_tag() or ""
+    except Exception:
+        return ""
+
+
 def _report_rows(db: Session, date_from, date_to, direction, supplier_id, category):
     """Devuelve los movimientos valorizados (con costo unitario y valor) según los filtros."""
     df = _parse_date(date_from)
@@ -362,12 +385,11 @@ def report_movements_pdf(
     dir_label = {"entradas": "Solo entradas", "salidas": "Solo salidas"}.get(direction, "Entradas y salidas")
     rango = f"{date_from or '—'} a {date_to or '—'}"
 
+    logo = _brand_logo_tag(db)
     try:
-        from routers.settings import _html_to_pdf, _logo_b64_tag, _wrap_html
-        logo = _logo_b64_tag() or ""
+        from routers.settings import _html_to_pdf, _wrap_html
     except Exception:
         _html_to_pdf = None
-        logo = ""
 
     th = "border:1px solid #d1d5db;padding:5px 7px;background:#f3f4f6;font-size:8.5pt;text-align:left"
     tdc = "border:1px solid #e5e7eb;padding:4px 7px;font-size:8.5pt"
