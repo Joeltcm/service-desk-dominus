@@ -1,5 +1,6 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, getAllInventoryTransactions, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
 import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock } from 'lucide-react'
@@ -113,6 +114,15 @@ export default function Inventario() {
   const fileInputRef = React.useRef(null)
   const [suppliers, setSuppliers] = useState([])
   const [importing, setImporting] = useState(false)
+  // Tooltip flotante (portal) para los íconos de acción — evita que la tabla con overflow lo recorte
+  const [tip, setTip] = useState(null) // { text, x, y }
+  const showTip = useCallback((e) => {
+    const btn = e.target.closest('button[data-tip]')
+    if (!btn) return
+    const r = btn.getBoundingClientRect()
+    setTip({ text: btn.dataset.tip, x: r.left + r.width / 2, y: r.top })
+  }, [])
+  const hideTip = useCallback(() => setTip(null), [])
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -527,6 +537,16 @@ export default function Inventario() {
 
   return (
     <div className="p-4 sm:p-6 w-full max-w-7xl mx-auto">
+      {tip && createPortal(
+        <div
+          className="fixed z-[9999] pointer-events-none -translate-x-1/2 -translate-y-full px-2 py-1 rounded-md bg-gray-900 text-white text-xs font-medium whitespace-nowrap shadow-lg"
+          style={{ left: tip.x, top: tip.y - 6 }}
+        >
+          {tip.text}
+          <span className="absolute left-1/2 top-full -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900" />
+        </div>,
+        document.body
+      )}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Package size={22} className="text-emerald-600" />
@@ -866,25 +886,25 @@ export default function Inventario() {
                     ${((parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0)).toFixed(2)}
                   </td>
                   <td className="px-2 py-3 sticky right-0 bg-white group-hover:bg-gray-50 z-10 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.06)]">
-                    <div className="flex gap-0.5 justify-end">
-                      <button onClick={() => openHistory(it)} className="p-1 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
+                    <div className="flex gap-0.5 justify-end" onMouseOver={showTip} onMouseOut={hideTip}>
+                      <button onClick={() => openHistory(it)} className="p-1 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" data-tip="Historial" aria-label="Historial">
                         <History size={14} />
                       </button>
                       {canEdit && (
                         <>
-                          <button onClick={() => openReceive(it)} className="p-1 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" title="Recibir stock (de proveedor)">
+                          <button onClick={() => openReceive(it)} className="p-1 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" data-tip="Recibir stock (de proveedor)" aria-label="Recibir stock de proveedor">
                             <PackagePlus size={14} />
                           </button>
-                          <button onClick={() => openWithdraw(it)} className="p-1 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
+                          <button onClick={() => openWithdraw(it)} className="p-1 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" data-tip="Registrar salida" aria-label="Registrar salida">
                             <ArrowDownCircle size={14} />
                           </button>
-                          <button onClick={() => openAdjust(it)} className="p-1 rounded hover:bg-sky-50 text-gray-400 hover:text-sky-600" title="Ajuste de inventario (con justificación)">
+                          <button onClick={() => openAdjust(it)} className="p-1 rounded hover:bg-sky-50 text-gray-400 hover:text-sky-600" data-tip="Ajuste de inventario (con justificación)" aria-label="Ajuste de inventario">
                             <Scale size={14} />
                           </button>
-                          <button onClick={() => openEdit(it)} className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
+                          <button onClick={() => openEdit(it)} className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" data-tip="Editar" aria-label="Editar">
                             <Edit size={14} />
                           </button>
-                          <button onClick={() => handleDelete(it)} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Eliminar">
+                          <button onClick={() => handleDelete(it)} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" data-tip="Eliminar" aria-label="Eliminar">
                             <Trash2 size={14} />
                           </button>
                         </>
