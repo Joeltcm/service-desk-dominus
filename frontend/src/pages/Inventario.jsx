@@ -1,8 +1,8 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, getAllInventoryTransactions, getSuppliers, importInventoryCSV } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText } from 'lucide-react'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, getAllInventoryTransactions, getSuppliers, importInventoryCSV } from '../services/api'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -57,6 +57,7 @@ const SOURCE_LABEL = {
   invoice:             'Factura',
   order:               'Pedido',
   consumo_interno:     'Consumo interno',
+  recepcion:           'Recepción de proveedor',
 }
 
 const SOURCE_COLOR = {
@@ -65,6 +66,7 @@ const SOURCE_COLOR = {
   order:           'bg-amber-100 text-amber-700',
   manual:          'bg-gray-100 text-gray-600',
   consumo_interno: 'bg-orange-100 text-orange-700',
+  recepcion:       'bg-emerald-100 text-emerald-700',
 }
 
 const MOTIVOS = ['Consumo interno', 'Uso en taller', 'Compra para empresa', 'Dañado/descarte', 'Pérdida', 'Otro']
@@ -133,6 +135,9 @@ export default function Inventario() {
   const [withdrawQty, setWithdrawQty] = useState('')
   const [withdrawMotivo, setWithdrawMotivo] = useState(MOTIVOS[0])
   const [withdrawSaving, setWithdrawSaving] = useState(false)
+  const [receiveItem, setReceiveItem] = useState(null)
+  const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
+  const [receiveSaving, setReceiveSaving] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -407,6 +412,34 @@ export default function Inventario() {
       toast.error(err.response?.data?.detail || 'Error al registrar salida')
     } finally {
       setWithdrawSaving(false)
+    }
+  }
+
+  const openReceive = (item) => {
+    setReceiveForm({ supplier_id: item.supplier_id ? String(item.supplier_id) : '', qty: '', cost: '', notes: '' })
+    setReceiveItem(item)
+  }
+
+  const handleReceive = async () => {
+    const qty = parseFloat(receiveForm.qty)
+    const cost = parseFloat(receiveForm.cost)
+    if (!receiveForm.supplier_id) return toast.error('Selecciona el proveedor')
+    if (!qty || qty <= 0) return toast.error('Ingresa una cantidad válida')
+    if (receiveForm.cost === '' || isNaN(cost) || cost < 0) return toast.error('Ingresa el costo unitario')
+    setReceiveSaving(true)
+    try {
+      await receiveInventoryItem(receiveItem.id, {
+        supplier_id: Number(receiveForm.supplier_id), qty, cost,
+        notes: receiveForm.notes?.trim() || null,
+      })
+      toast.success(`Recepción registrada: +${qty} ${receiveItem.unit || 'unidad'}`)
+      setReceiveItem(null)
+      load()
+      if (allTxns.length > 0) loadAllTxns()
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Error al registrar la recepción')
+    } finally {
+      setReceiveSaving(false)
     }
   }
 
@@ -754,6 +787,9 @@ export default function Inventario() {
                       </button>
                       {canEdit && (
                         <>
+                          <button onClick={() => openReceive(it)} className="p-1.5 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" title="Recibir stock (de proveedor)">
+                            <PackagePlus size={14} />
+                          </button>
                           <button onClick={() => openWithdraw(it)} className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
                             <ArrowDownCircle size={14} />
                           </button>
@@ -868,6 +904,88 @@ export default function Inventario() {
               >
                 <ArrowDownCircle size={15} />
                 {withdrawSaving ? 'Registrando...' : 'Registrar salida'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recibir stock (de proveedor) */}
+      {receiveItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-semibold text-gray-900">Recibir stock</h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{receiveItem.code} · {receiveItem.name}</p>
+              </div>
+              <button onClick={() => setReceiveItem(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+                <span className="text-xs text-emerald-600 font-medium">Stock actual</span>
+                <span className="text-lg font-bold text-emerald-700">{fmtQty(receiveItem.quantity)} {receiveItem.unit || 'unidad'}</span>
+              </div>
+              <div>
+                <label className="label">Proveedor *</label>
+                <select
+                  className="input"
+                  value={receiveForm.supplier_id}
+                  onChange={e => setReceiveForm(f => ({ ...f, supplier_id: e.target.value }))}
+                  style={{ fontSize: '16px' }}
+                >
+                  <option value="">Seleccionar proveedor…</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Cantidad recibida *</label>
+                  <input
+                    type="number" min="0.01" step="0.01"
+                    className="input text-right text-lg font-semibold"
+                    placeholder="0"
+                    value={receiveForm.qty}
+                    onChange={e => setReceiveForm(f => ({ ...f, qty: e.target.value }))}
+                    style={{ fontSize: '16px' }}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="label">Costo unitario *</label>
+                  <input
+                    type="number" min="0" step="0.01"
+                    className="input text-right text-lg font-semibold"
+                    placeholder="0.00"
+                    value={receiveForm.cost}
+                    onChange={e => setReceiveForm(f => ({ ...f, cost: e.target.value }))}
+                    style={{ fontSize: '16px' }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Notas (opcional)</label>
+                <input
+                  className="input"
+                  placeholder="N° factura, remisión, observación…"
+                  value={receiveForm.notes}
+                  onChange={e => setReceiveForm(f => ({ ...f, notes: e.target.value }))}
+                  style={{ fontSize: '16px' }}
+                />
+              </div>
+              <p className="text-xs text-gray-400 leading-snug">
+                El costo del artículo se recalculará como <b>promedio ponderado</b>. Esta entrada queda registrada en <b>Movimientos</b> con su proveedor.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t">
+              <button onClick={() => setReceiveItem(null)} className="btn-secondary">Cancelar</button>
+              <button
+                onClick={handleReceive}
+                disabled={receiveSaving || !receiveForm.supplier_id || !receiveForm.qty || receiveForm.cost === ''}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors text-sm"
+              >
+                <PackagePlus size={15} />
+                {receiveSaving ? 'Registrando...' : 'Recibir stock'}
               </button>
             </div>
           </div>

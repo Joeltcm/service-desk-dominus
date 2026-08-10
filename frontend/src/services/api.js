@@ -367,6 +367,7 @@ export const updateInventoryItem = (id, data) => api.put(`/inventory/${id}`, dat
 export const deleteInventoryItem = (id) => api.delete(`/inventory/${id}`)
 export const getInventoryTransactions = (id, limit = 50) => api.get(`/inventory/${id}/transactions`, { params: { limit } })
 export const withdrawInventoryItem = (id, data) => api.post(`/inventory/${id}/withdraw`, data)
+export const receiveInventoryItem = (id, data) => api.post(`/inventory/${id}/receive`, data)
 export const getAllInventoryTransactions = (params) => api.get('/inventory/transactions/all', { params })
 export const importInventoryCSV = (file) => {
   const form = new FormData()

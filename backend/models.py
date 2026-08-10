@@ -677,10 +677,13 @@ class InventoryTransaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     item_code = Column(String(100), nullable=False, index=True)
     qty_delta = Column(String(50), nullable=False)  # negative = deduction, positive = addition
-    source_type = Column(String(30), nullable=False, index=True)  # dispatch, invoice, order, manual
+    source_type = Column(String(30), nullable=False, index=True)  # dispatch, invoice, order, manual, recepcion
     source_id = Column(Integer, nullable=True, index=True)
     notes = Column(String(300), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)  # proveedor de la recepción (entradas)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    supplier = relationship("Supplier")
 
 
 class PartRequest(Base):

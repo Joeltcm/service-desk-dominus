@@ -30,7 +30,7 @@ _STATUS_ALIASES = {
 }
 
 
-def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None):
+def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_type: str = "manual", source_id: int = None, notes: str = None, supplier_id: int = None):
     delta_str = f"{qty_delta:.4f}".rstrip("0").rstrip(".")
     db.add(models.InventoryTransaction(
         item_code=item_code,
@@ -38,6 +38,7 @@ def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_typ
         source_type=source_type,
         source_id=source_id,
         notes=notes,
+        supplier_id=supplier_id,
     ))
 
 
@@ -113,6 +114,13 @@ def get_all_transactions(
         for it in db.query(models.InventoryItem.code, models.InventoryItem.name).filter(models.InventoryItem.code.in_(codes)).all():
             items_by_code[it.code] = it.name
 
+    # Nombres de proveedor (para recepciones)
+    sup_ids = list({t.supplier_id for t in txns if t.supplier_id})
+    suppliers_by_id = {}
+    if sup_ids:
+        for s in db.query(models.Supplier.id, models.Supplier.name).filter(models.Supplier.id.in_(sup_ids)).all():
+            suppliers_by_id[s.id] = s.name
+
     # Source labels + client + ticket — grouped by source type
     inv_ids  = [t.source_id for t in txns if t.source_type == "invoice"  and t.source_id]
     disp_ids = [t.source_id for t in txns if t.source_type == "dispatch" and t.source_id]
@@ -183,6 +191,8 @@ def get_all_transactions(
             "client_name": client_name,
             "client_company": client_company,
             "ticket_id": ticket_id,
+            "supplier_id": t.supplier_id,
+            "supplier_name": suppliers_by_id.get(t.supplier_id) if t.supplier_id else None,
         })
     return results
 
@@ -205,13 +215,16 @@ def get_item_transactions(
     item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Artículo no encontrado")
-    return (
+    txns = (
         db.query(models.InventoryTransaction)
         .filter(models.InventoryTransaction.item_code == item.code)
         .order_by(models.InventoryTransaction.created_at.desc())
         .limit(limit)
         .all()
     )
+    for t in txns:
+        t.supplier_name = t.supplier.name if t.supplier else None
+    return txns
 
 
 @router.post("", response_model=schemas.InventoryItemOut)
@@ -364,6 +377,55 @@ def withdraw_inventory_item(
     motivo = str(data.get("motivo") or "Consumo interno").strip() or "Consumo interno"
     item.quantity = str(round(current - qty, 4))
     _log_inventory_txn(db, item.code, -qty, source_type="consumo_interno", notes=motivo)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/{item_id}/receive", response_model=schemas.InventoryItemOut)
+def receive_inventory_item(
+    item_id: int,
+    data: schemas.InventoryReceive,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    """Recibe stock de un proveedor: suma al stock, recalcula el costo como promedio
+    ponderado y deja el movimiento documentado (con proveedor, cantidad y costo)."""
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    if data.qty <= 0:
+        raise HTTPException(status_code=400, detail="La cantidad debe ser mayor a 0")
+    if data.cost < 0:
+        raise HTTPException(status_code=400, detail="El costo no puede ser negativo")
+    supplier = db.query(models.Supplier).filter(models.Supplier.id == data.supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+
+    try:
+        current_qty = float(item.quantity or 0)
+    except (ValueError, TypeError):
+        current_qty = 0.0
+    try:
+        current_cost = float(item.cost_price or 0)
+    except (ValueError, TypeError):
+        current_cost = 0.0
+
+    new_qty = current_qty + data.qty
+    # Promedio ponderado por cantidad. Si no había stock, el costo pasa a ser el recibido.
+    if new_qty > 0:
+        avg_cost = (current_qty * current_cost + data.qty * data.cost) / new_qty
+    else:
+        avg_cost = data.cost
+
+    item.quantity = str(round(new_qty, 4))
+    item.cost_price = f"{avg_cost:.2f}"
+
+    note = f"Recibido de {supplier.name} · costo unit. ${data.cost:.2f}"
+    if data.notes and data.notes.strip():
+        note += f" · {data.notes.strip()}"
+    _log_inventory_txn(db, item.code, data.qty, source_type="recepcion",
+                       supplier_id=data.supplier_id, notes=note[:300])
     db.commit()
     db.refresh(item)
     return item

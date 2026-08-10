@@ -1312,9 +1312,18 @@ class InventoryTransactionOut(BaseModel):
     client_name: Optional[str] = None
     client_company: Optional[str] = None
     ticket_id: Optional[int] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class InventoryReceive(BaseModel):
+    supplier_id: int
+    qty: float
+    cost: float
+    notes: Optional[str] = None
 
 
 # ── Canned Responses ──────────────────────────────────
