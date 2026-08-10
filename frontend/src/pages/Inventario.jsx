@@ -137,6 +137,7 @@ export default function Inventario() {
   const [withdrawJustif, setWithdrawJustif] = useState('')
   const [withdrawSaving, setWithdrawSaving] = useState(false)
   const [manualExit, setManualExit] = useState(false)  // salida manual desde el botón superior (elige artículo)
+  const [exitSearch, setExitSearch] = useState('')     // buscador de artículo en la salida manual
   const [receiveItem, setReceiveItem] = useState(null)
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
@@ -398,7 +399,7 @@ export default function Inventario() {
     })
   }, [allTxns, txnFilter, txnSearch])
 
-  const resetWithdraw = () => { setWithdrawItem(null); setManualExit(false); setWithdrawQty(''); setWithdrawMotivo(MOTIVOS[0]); setWithdrawJustif('') }
+  const resetWithdraw = () => { setWithdrawItem(null); setManualExit(false); setWithdrawQty(''); setWithdrawMotivo(MOTIVOS[0]); setWithdrawJustif(''); setExitSearch('') }
 
   const openWithdraw = (item) => {
     setManualExit(false)
@@ -413,6 +414,7 @@ export default function Inventario() {
     setWithdrawQty('')
     setWithdrawMotivo(MOTIVOS[0])
     setWithdrawJustif('')
+    setExitSearch('')
     setManualExit(true)
   }
 
@@ -926,13 +928,33 @@ export default function Inventario() {
               {manualExit && !withdrawItem ? (
                 <div>
                   <label className="label">Artículo *</label>
-                  <select className="input" value="" autoFocus style={{ fontSize: '16px' }}
-                    onChange={e => { const it = items.find(x => String(x.id) === e.target.value); if (it) setWithdrawItem(it) }}>
-                    <option value="">Selecciona un artículo…</option>
-                    {items.filter(x => x.is_active !== false).map(x => (
-                      <option key={x.id} value={x.id}>{x.code} · {x.name} (stock: {fmtQty(x.quantity)})</option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <input className="input pl-9" placeholder="Buscar por código o descripción…" value={exitSearch}
+                      onChange={e => setExitSearch(e.target.value)} style={{ fontSize: '16px' }} autoFocus />
+                  </div>
+                  {(() => {
+                    const q = exitSearch.trim().toLowerCase()
+                    const matches = items
+                      .filter(x => x.is_active !== false && (!q || `${x.code} ${x.name}`.toLowerCase().includes(q)))
+                      .slice(0, 40)
+                    return (
+                      <div className="mt-2 border border-gray-200 rounded-lg max-h-56 overflow-y-auto divide-y divide-gray-50">
+                        {matches.length === 0 ? (
+                          <p className="px-3 py-6 text-center text-xs text-gray-400">Sin coincidencias</p>
+                        ) : matches.map(x => (
+                          <button key={x.id} type="button" onClick={() => setWithdrawItem(x)}
+                            className="w-full text-left px-3 py-2 hover:bg-orange-50 transition-colors flex items-center justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="font-mono text-xs text-blue-700">{x.code}</span>
+                              <span className="block text-sm text-gray-800 truncate">{x.name}</span>
+                            </span>
+                            <span className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">stock: {fmtQty(x.quantity)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
               ) : (
                 <>
