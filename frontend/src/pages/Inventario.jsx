@@ -537,7 +537,7 @@ export default function Inventario() {
         notes: clean(newSupplier.notes),
       })
       setSuppliers(prev => [...prev, r.data].sort((a, b) => a.name.localeCompare(b.name)))
-      setForm(f => ({ ...f, supplier_id: String(r.data.id) }))
+      setReceiveForm(f => ({ ...f, supplier_id: String(r.data.id) }))
       setShowNewSupplier(false)
       setNewSupplier(EMPTY_NEW_SUPPLIER)
       toast.success('Proveedor creado ✓')
@@ -1089,7 +1089,13 @@ export default function Inventario() {
                 <span className="text-lg font-bold text-emerald-700">{fmtQty(receiveItem.quantity)} {receiveItem.unit || 'unidad'}</span>
               </div>
               <div>
-                <label className="label">Proveedor *</label>
+                <div className="flex items-center justify-between">
+                  <label className="label">Proveedor *</label>
+                  <button type="button" onClick={() => { setNewSupplier(EMPTY_NEW_SUPPLIER); setShowNewSupplier(true) }}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center gap-1">
+                    <Plus size={12} /> Nuevo proveedor
+                  </button>
+                </div>
                 <select
                   className="input"
                   value={receiveForm.supplier_id}
@@ -1399,19 +1405,6 @@ export default function Inventario() {
                 <label className="label">Bodega</label>
                 <select className="input" value={form.warehouse} onChange={e => setForm(f => ({ ...f, warehouse: e.target.value }))}>
                   {warehouses.map(w => <option key={w} value={w}>{WAREHOUSE_LABEL[w]}</option>)}
-                </select>
-              </div>
-              <div>
-                <div className="flex items-center justify-between">
-                  <label className="label">Proveedor</label>
-                  <button type="button" onClick={() => { setNewSupplier(EMPTY_NEW_SUPPLIER); setShowNewSupplier(true) }}
-                    className="text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center gap-1">
-                    <Plus size={12} /> Nuevo proveedor
-                  </button>
-                </div>
-                <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
-                  <option value="">— Sin proveedor —</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
