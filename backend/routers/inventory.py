@@ -375,8 +375,12 @@ def withdraw_inventory_item(
     if qty > current:
         raise HTTPException(status_code=400, detail=f"Stock insuficiente (disponible: {current})")
     motivo = str(data.get("motivo") or "Consumo interno").strip() or "Consumo interno"
+    justif = str(data.get("justificacion") or "").strip()
+    if motivo.lower() == "otro" and not justif:
+        raise HTTPException(status_code=400, detail="La justificación es obligatoria cuando el motivo es 'Otro'")
+    note = f"{motivo} · {justif}" if justif else motivo
     item.quantity = str(round(current - qty, 4))
-    _log_inventory_txn(db, item.code, -qty, source_type="consumo_interno", notes=motivo)
+    _log_inventory_txn(db, item.code, -qty, source_type="consumo_interno", notes=note[:300])
     db.commit()
     db.refresh(item)
     return item

@@ -134,7 +134,9 @@ export default function Inventario() {
   const [withdrawItem, setWithdrawItem] = useState(null)
   const [withdrawQty, setWithdrawQty] = useState('')
   const [withdrawMotivo, setWithdrawMotivo] = useState(MOTIVOS[0])
+  const [withdrawJustif, setWithdrawJustif] = useState('')
   const [withdrawSaving, setWithdrawSaving] = useState(false)
+  const [manualExit, setManualExit] = useState(false)  // salida manual desde el botón superior (elige artículo)
   const [receiveItem, setReceiveItem] = useState(null)
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
@@ -396,20 +398,34 @@ export default function Inventario() {
     })
   }, [allTxns, txnFilter, txnSearch])
 
+  const resetWithdraw = () => { setWithdrawItem(null); setManualExit(false); setWithdrawQty(''); setWithdrawMotivo(MOTIVOS[0]); setWithdrawJustif('') }
+
   const openWithdraw = (item) => {
+    setManualExit(false)
     setWithdrawItem(item)
     setWithdrawQty('')
     setWithdrawMotivo(MOTIVOS[0])
+    setWithdrawJustif('')
+  }
+
+  const openManualExit = () => {
+    setWithdrawItem(null)
+    setWithdrawQty('')
+    setWithdrawMotivo(MOTIVOS[0])
+    setWithdrawJustif('')
+    setManualExit(true)
   }
 
   const handleWithdraw = async () => {
+    if (!withdrawItem) return toast.error('Selecciona un artículo')
     const qty = parseFloat(withdrawQty)
     if (!qty || qty <= 0) return toast.error('Ingresa una cantidad válida')
+    if (withdrawMotivo === 'Otro' && !withdrawJustif.trim()) return toast.error('La justificación es obligatoria cuando el motivo es "Otro"')
     setWithdrawSaving(true)
     try {
-      await withdrawInventoryItem(withdrawItem.id, { qty, motivo: withdrawMotivo })
+      await withdrawInventoryItem(withdrawItem.id, { qty, motivo: withdrawMotivo, justificacion: withdrawJustif.trim() || null })
       toast.success(`Salida registrada: -${qty} ${withdrawItem.unit || 'unidad'}`)
-      setWithdrawItem(null)
+      resetWithdraw()
       load()
       if (allTxns.length > 0) loadAllTxns()
     } catch (err) {
@@ -501,6 +517,11 @@ export default function Inventario() {
             <button onClick={exportPDF} title="Exportar a PDF lo filtrado" className="btn-secondary flex items-center gap-2 text-sm">
               <FileText size={14} /> <span className="hidden sm:inline">Exportar PDF</span>
             </button>
+            {canEdit && (
+              <button onClick={openManualExit} title="Registrar una salida manual de inventario" className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors">
+                <ArrowDownCircle size={15} /> <span className="hidden sm:inline">Salida manual</span>
+              </button>
+            )}
             {canEdit && (
               <button onClick={openNew} className="btn-primary flex items-center gap-2">
                 <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
@@ -888,50 +909,65 @@ export default function Inventario() {
 
       </> /* end tab items */}
 
-      {/* Withdraw modal */}
-      {withdrawItem && (
+      {/* Salida manual / Registrar salida */}
+      {(withdrawItem || manualExit) && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
             <div className="flex items-center justify-between p-5 border-b">
               <div>
-                <h3 className="font-semibold text-gray-900">Registrar salida</h3>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono">{withdrawItem.code} · {withdrawItem.name}</p>
+                <h3 className="font-semibold text-gray-900">{manualExit ? 'Salida manual' : 'Registrar salida'}</h3>
+                {withdrawItem
+                  ? <p className="text-xs text-gray-400 mt-0.5 font-mono">{withdrawItem.code} · {withdrawItem.name}</p>
+                  : <p className="text-xs text-gray-400 mt-0.5">Elige el artículo y registra la salida</p>}
               </div>
-              <button onClick={() => setWithdrawItem(null)}><X size={18} className="text-gray-400" /></button>
+              <button onClick={resetWithdraw}><X size={18} className="text-gray-400" /></button>
             </div>
             <div className="p-5 space-y-4">
-              <div className="bg-orange-50 border border-orange-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
-                <span className="text-xs text-orange-600 font-medium">Stock disponible</span>
-                <span className="text-lg font-bold text-orange-700">{fmtQty(withdrawItem.quantity)} {withdrawItem.unit || 'unidad'}</span>
-              </div>
-              <div>
-                <label className="label">Cantidad a retirar *</label>
-                <input
-                  type="number" min="0.01" step="0.01"
-                  className="input text-right text-lg font-semibold"
-                  placeholder="0"
-                  value={withdrawQty}
-                  onChange={e => setWithdrawQty(e.target.value)}
-                  style={{ fontSize: '16px' }}
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="label">Motivo</label>
-                <select
-                  className="input"
-                  value={withdrawMotivo}
-                  onChange={e => setWithdrawMotivo(e.target.value)}
-                >
-                  {MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
+              {manualExit && !withdrawItem ? (
+                <div>
+                  <label className="label">Artículo *</label>
+                  <select className="input" value="" autoFocus style={{ fontSize: '16px' }}
+                    onChange={e => { const it = items.find(x => String(x.id) === e.target.value); if (it) setWithdrawItem(it) }}>
+                    <option value="">Selecciona un artículo…</option>
+                    {items.filter(x => x.is_active !== false).map(x => (
+                      <option key={x.id} value={x.id}>{x.code} · {x.name} (stock: {fmtQty(x.quantity)})</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div className="bg-orange-50 border border-orange-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+                    <span className="text-xs text-orange-600 font-medium">Stock disponible</span>
+                    <span className="text-lg font-bold text-orange-700">{fmtQty(withdrawItem.quantity)} {withdrawItem.unit || 'unidad'}</span>
+                  </div>
+                  {manualExit && (
+                    <button type="button" onClick={() => setWithdrawItem(null)} className="text-xs text-blue-600 hover:text-blue-800">← Cambiar artículo</button>
+                  )}
+                  <div>
+                    <label className="label">Cantidad a retirar *</label>
+                    <input type="number" min="0.01" step="0.01" className="input text-right text-lg font-semibold"
+                      placeholder="0" value={withdrawQty} onChange={e => setWithdrawQty(e.target.value)}
+                      style={{ fontSize: '16px' }} autoFocus />
+                  </div>
+                  <div>
+                    <label className="label">Motivo</label>
+                    <select className="input" value={withdrawMotivo} onChange={e => setWithdrawMotivo(e.target.value)} style={{ fontSize: '16px' }}>
+                      {MOTIVOS.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Justificación{withdrawMotivo === 'Otro' ? ' *' : ' (opcional)'}</label>
+                    <input className="input" placeholder="Detalle de la salida…" value={withdrawJustif}
+                      onChange={e => setWithdrawJustif(e.target.value)} style={{ fontSize: '16px' }} />
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-5 border-t">
-              <button onClick={() => setWithdrawItem(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={resetWithdraw} className="btn-secondary">Cancelar</button>
               <button
                 onClick={handleWithdraw}
-                disabled={withdrawSaving || !withdrawQty}
+                disabled={withdrawSaving || !withdrawItem || !withdrawQty || (withdrawMotivo === 'Otro' && !withdrawJustif.trim())}
                 className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 disabled:opacity-60 transition-colors text-sm"
               >
                 <ArrowDownCircle size={15} />
