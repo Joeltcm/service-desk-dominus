@@ -805,14 +805,14 @@ export default function Inventario() {
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Estado</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden lg:table-cell">Ubicación</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-600 hidden md:table-cell">Unidad</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('quantity')}>
+                  <span className="flex items-center gap-1 justify-end">Stock <SortIcon field="quantity" /></span>
+                </th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('cost_price')}>
                   <span className="flex items-center gap-1 justify-end">Costo <SortIcon field="cost_price" /></span>
                 </th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 cursor-pointer select-none hidden sm:table-cell" onClick={() => toggleSort('unit_price')}>
                   <span className="flex items-center gap-1 justify-end">Precio venta <SortIcon field="unit_price" /></span>
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600 cursor-pointer select-none" onClick={() => toggleSort('quantity')}>
-                  <span className="flex items-center gap-1 justify-end">Stock <SortIcon field="quantity" /></span>
                 </th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-600 hidden lg:table-cell">Valor</th>
                 <th className="px-2 py-3 sticky right-0 bg-gray-50 z-10 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.06)]" />
@@ -854,37 +854,37 @@ export default function Inventario() {
                   </td>
                   <td className="px-4 py-3 text-gray-600 hidden lg:table-cell text-xs">{it.location || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell text-xs">{it.unit || 'unidad'}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-900">${parseFloat(it.cost_price || '0').toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-blue-700 hidden sm:table-cell">${parseFloat(it.unit_price || '0').toFixed(2)}</td>
                   <td className="px-4 py-3 text-right">
                     <span className={`font-semibold ${lowStock(it) ? 'text-orange-600' : 'text-gray-900'} flex items-center justify-end gap-1`}>
                       {lowStock(it) && <AlertTriangle size={12} />}
                       {fmtQty(it.quantity)}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-900">${parseFloat(it.cost_price || '0').toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-blue-700 hidden sm:table-cell">${parseFloat(it.unit_price || '0').toFixed(2)}</td>
                   <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700 hidden lg:table-cell">
                     ${((parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0)).toFixed(2)}
                   </td>
                   <td className="px-2 py-3 sticky right-0 bg-white group-hover:bg-gray-50 z-10 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.06)]">
-                    <div className="flex gap-1 justify-end">
-                      <button onClick={() => openHistory(it)} className="p-1.5 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
+                    <div className="flex gap-0.5 justify-end">
+                      <button onClick={() => openHistory(it)} className="p-1 rounded hover:bg-violet-50 text-gray-400 hover:text-violet-600" title="Historial">
                         <History size={14} />
                       </button>
                       {canEdit && (
                         <>
-                          <button onClick={() => openReceive(it)} className="p-1.5 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" title="Recibir stock (de proveedor)">
+                          <button onClick={() => openReceive(it)} className="p-1 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600" title="Recibir stock (de proveedor)">
                             <PackagePlus size={14} />
                           </button>
-                          <button onClick={() => openWithdraw(it)} className="p-1.5 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
+                          <button onClick={() => openWithdraw(it)} className="p-1 rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600" title="Registrar salida">
                             <ArrowDownCircle size={14} />
                           </button>
-                          <button onClick={() => openAdjust(it)} className="p-1.5 rounded hover:bg-sky-50 text-gray-400 hover:text-sky-600" title="Ajuste de inventario (con justificación)">
+                          <button onClick={() => openAdjust(it)} className="p-1 rounded hover:bg-sky-50 text-gray-400 hover:text-sky-600" title="Ajuste de inventario (con justificación)">
                             <Scale size={14} />
                           </button>
-                          <button onClick={() => openEdit(it)} className="p-1.5 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
+                          <button onClick={() => openEdit(it)} className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600" title="Editar">
                             <Edit size={14} />
                           </button>
-                          <button onClick={() => handleDelete(it)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Eliminar">
+                          <button onClick={() => handleDelete(it)} className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" title="Eliminar">
                             <Trash2 size={14} />
                           </button>
                         </>
