@@ -139,7 +139,8 @@ export default function Inventario() {
   const [receiveForm, setReceiveForm] = useState({ supplier_id: '', qty: '', cost: '', notes: '' })
   const [receiveSaving, setReceiveSaving] = useState(false)
   const [showNewSupplier, setShowNewSupplier] = useState(false)
-  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '' })
+  const EMPTY_NEW_SUPPLIER = { name: '', contact_name: '', category: '', phone: '', email: '', website: '', address: '', notes: '' }
+  const [newSupplier, setNewSupplier] = useState(EMPTY_NEW_SUPPLIER)
   const [newSupplierSaving, setNewSupplierSaving] = useState(false)
 
   const load = useCallback(() => {
@@ -451,11 +452,21 @@ export default function Inventario() {
     if (!name) return toast.error('Ingresa el nombre del proveedor')
     setNewSupplierSaving(true)
     try {
-      const r = await createSupplier({ name, phone: newSupplier.phone?.trim() || null })
+      const clean = (v) => (v && v.trim() ? v.trim() : null)
+      const r = await createSupplier({
+        name,
+        contact_name: clean(newSupplier.contact_name),
+        category: clean(newSupplier.category),
+        phone: clean(newSupplier.phone),
+        email: clean(newSupplier.email),
+        website: clean(newSupplier.website),
+        address: clean(newSupplier.address),
+        notes: clean(newSupplier.notes),
+      })
       setSuppliers(prev => [...prev, r.data].sort((a, b) => a.name.localeCompare(b.name)))
       setForm(f => ({ ...f, supplier_id: String(r.data.id) }))
       setShowNewSupplier(false)
-      setNewSupplier({ name: '', phone: '' })
+      setNewSupplier(EMPTY_NEW_SUPPLIER)
       toast.success('Proveedor creado ✓')
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Error al crear el proveedor')
@@ -1013,6 +1024,73 @@ export default function Inventario() {
         </div>
       )}
 
+      {/* Nuevo proveedor (desde el formulario de artículo) — todos los campos */}
+      {showNewSupplier && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b sticky top-0 bg-white">
+              <h3 className="font-semibold text-gray-900">Nuevo proveedor</h3>
+              <button onClick={() => setShowNewSupplier(false)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="label">Nombre *</label>
+                <input className="input" placeholder="Nombre del proveedor" value={newSupplier.name}
+                  onChange={e => setNewSupplier(s => ({ ...s, name: e.target.value }))} style={{ fontSize: '16px' }} autoFocus />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Persona de contacto</label>
+                  <input className="input" placeholder="Nombre completo" value={newSupplier.contact_name}
+                    onChange={e => setNewSupplier(s => ({ ...s, contact_name: e.target.value }))} style={{ fontSize: '16px' }} />
+                </div>
+                <div>
+                  <label className="label">Categoría</label>
+                  <input className="input" list="new-supplier-cats" placeholder="Selecciona o escribe una categoría" value={newSupplier.category}
+                    onChange={e => setNewSupplier(s => ({ ...s, category: e.target.value }))} style={{ fontSize: '16px' }} />
+                  <datalist id="new-supplier-cats">
+                    {[...new Set(suppliers.map(s => s.category).filter(Boolean))].map(c => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="label">Teléfono</label>
+                  <input className="input" placeholder="+507 000-0000" value={newSupplier.phone}
+                    onChange={e => setNewSupplier(s => ({ ...s, phone: e.target.value }))} style={{ fontSize: '16px' }} />
+                </div>
+                <div>
+                  <label className="label">Email</label>
+                  <input className="input" type="email" placeholder="correo@ejemplo.com" value={newSupplier.email}
+                    onChange={e => setNewSupplier(s => ({ ...s, email: e.target.value }))} style={{ fontSize: '16px' }} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Sitio web</label>
+                <input className="input" placeholder="https://..." value={newSupplier.website}
+                  onChange={e => setNewSupplier(s => ({ ...s, website: e.target.value }))} style={{ fontSize: '16px' }} />
+              </div>
+              <div>
+                <label className="label">Dirección</label>
+                <input className="input" placeholder="Dirección física" value={newSupplier.address}
+                  onChange={e => setNewSupplier(s => ({ ...s, address: e.target.value }))} style={{ fontSize: '16px' }} />
+              </div>
+              <div>
+                <label className="label">Notas</label>
+                <textarea className="input h-20 resize-none" placeholder="Información adicional..." value={newSupplier.notes}
+                  onChange={e => setNewSupplier(s => ({ ...s, notes: e.target.value }))} style={{ fontSize: '16px' }} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t sticky bottom-0 bg-white">
+              <button onClick={() => setShowNewSupplier(false)} className="btn-secondary">Cancelar</button>
+              <button onClick={handleCreateSupplier} disabled={newSupplierSaving || !newSupplier.name.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors text-sm">
+                <Plus size={15} />
+                {newSupplierSaving ? 'Creando...' : 'Crear y seleccionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Form panel */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1094,33 +1172,15 @@ export default function Inventario() {
               <div>
                 <div className="flex items-center justify-between">
                   <label className="label">Proveedor</label>
-                  {!showNewSupplier && (
-                    <button type="button" onClick={() => { setNewSupplier({ name: '', phone: '' }); setShowNewSupplier(true) }}
-                      className="text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center gap-1">
-                      <Plus size={12} /> Nuevo proveedor
-                    </button>
-                  )}
+                  <button type="button" onClick={() => { setNewSupplier(EMPTY_NEW_SUPPLIER); setShowNewSupplier(true) }}
+                    className="text-xs font-medium text-emerald-600 hover:text-emerald-800 flex items-center gap-1">
+                    <Plus size={12} /> Nuevo proveedor
+                  </button>
                 </div>
-                {showNewSupplier ? (
-                  <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 space-y-2">
-                    <input className="input" placeholder="Nombre del proveedor *" value={newSupplier.name}
-                      onChange={e => setNewSupplier(s => ({ ...s, name: e.target.value }))} style={{ fontSize: '16px' }} autoFocus />
-                    <input className="input" placeholder="Teléfono (opcional)" value={newSupplier.phone}
-                      onChange={e => setNewSupplier(s => ({ ...s, phone: e.target.value }))} style={{ fontSize: '16px' }} />
-                    <div className="flex justify-end gap-2 pt-1">
-                      <button type="button" onClick={() => setShowNewSupplier(false)} className="btn-secondary text-xs py-1.5">Cancelar</button>
-                      <button type="button" onClick={handleCreateSupplier} disabled={newSupplierSaving || !newSupplier.name.trim()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 disabled:opacity-60">
-                        {newSupplierSaving ? 'Creando...' : 'Crear y seleccionar'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
-                    <option value="">— Sin proveedor —</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                )}
+                <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Sin proveedor —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
