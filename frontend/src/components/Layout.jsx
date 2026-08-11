@@ -1,6 +1,7 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useState, useEffect } from 'react'
 import defaultLogo from '../assets/default-logo.png'
+import dgsLogo from '../assets/dgs-logo.png'
 import { NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useAuth } from '../context/AuthContext'
@@ -302,8 +303,9 @@ export default function Layout({ children }) {
       >
 
         {/* Logo */}
-        <div className="flex items-center justify-between h-14 md:h-16 px-4 border-b border-white/10 flex-shrink-0">
-          <div className={`flex items-center gap-2.5 ${!sidebarOpen ? 'md:hidden' : ''}`}>
+        <div className="relative overflow-hidden flex items-center justify-between h-14 md:h-16 px-4 border-b border-white/10 flex-shrink-0">
+          <div className="absolute -top-10 -right-8 w-28 h-28 bg-white/5 rounded-full pointer-events-none" />
+          <div className={`relative flex items-center gap-2.5 ${!sidebarOpen ? 'md:hidden' : ''}`}>
             <div className="w-[54px] h-[54px] rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-white/20">
               <img src={logoSrc} alt={companyName || 'Logo'} className="w-full h-full object-cover" />
             </div>
@@ -394,6 +396,17 @@ export default function Layout({ children }) {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Créditos del desarrollador */}
+        <div className={`px-4 pb-3 ${!sidebarOpen ? 'md:hidden' : ''}`}>
+          <div className="flex items-center gap-2 pt-2.5 border-t border-white/10">
+            <img src={dgsLogo} alt="DG Solutions" className="w-6 h-6 rounded-md object-cover opacity-80 flex-shrink-0 ring-1 ring-white/10" />
+            <p className="text-[10px] leading-tight text-white/40">
+              Aplicación desarrollada por{' '}
+              <span className="text-white/70 font-semibold">DG Solutions</span>
+            </p>
           </div>
         </div>
       </aside>

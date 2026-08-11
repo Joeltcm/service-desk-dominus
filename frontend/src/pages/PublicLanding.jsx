@@ -1,6 +1,7 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { companyLogoUrl } from '../services/api'
+import dgsLogo from '../assets/dgs-logo.png'
 import { LifeBuoy, ShoppingCart, Ticket, Package, ArrowRight, LogIn } from 'lucide-react'
 
 export default function PublicLanding() {
@@ -52,6 +53,11 @@ export default function PublicLanding() {
           <p className="text-center text-xs text-gray-400 mt-6">Al enviar te pediremos iniciar sesión o crear una cuenta (gratis).</p>
         </div>
       </main>
+
+      <footer className="py-5 flex items-center justify-center gap-2">
+        <img src={dgsLogo} alt="DG Solutions" className="w-6 h-6 rounded-md object-cover opacity-70" />
+        <p className="text-[11px] text-gray-400">Aplicación desarrollada por <span className="text-gray-600 font-semibold">DG Solutions</span></p>
+      </footer>
     </div>
   )
 }
