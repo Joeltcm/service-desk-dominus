@@ -541,6 +541,16 @@ def _migrate_pg():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS pending_qty VARCHAR(50)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE part_requests ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS invoice_payments (
                     id SERIAL PRIMARY KEY,

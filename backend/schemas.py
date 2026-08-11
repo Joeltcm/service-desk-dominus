@@ -1381,6 +1381,7 @@ class InventoryItemOut(BaseModel):
     unit_price: Optional[str] = None
     cost_price: Optional[str] = None
     quantity: Optional[str] = None
+    pending_qty: Optional[str] = None
     category: Optional[str] = None
     notes: Optional[str] = None
     is_active: bool
@@ -1948,8 +1949,10 @@ TicketListItem.model_rebuild()
 # ── Solicitudes de partes (desde tickets) ──────────────────────────────────────
 class PartRequestCreate(BaseModel):
     ticket_id: int
-    item_code: str
+    item_code: Optional[str] = None          # requerido para parte de inventario; vacío para parte especial
+    item_name: Optional[str] = None          # descripción (parte especial)
     quantity: str = "1"
+    is_special: bool = False
     notes: Optional[str] = None
 
 
@@ -1961,10 +1964,11 @@ class PartRequestOut(BaseModel):
     id: int
     ticket_id: int
     ticket_title: Optional[str] = None
-    item_code: str
+    item_code: Optional[str] = None
     item_name: Optional[str] = None
     quantity: str
     status: str
+    is_special: bool = False
     notes: Optional[str] = None
     decision_notes: Optional[str] = None
     requested_by_id: Optional[int] = None

@@ -719,6 +719,7 @@ class InventoryItem(Base):
     unit_price = Column(String(50), nullable=True, default="0.00")  # precio de venta
     cost_price = Column(String(50), nullable=True, default="0.00")  # último precio de compra
     quantity = Column(String(50), nullable=True, default="0")
+    pending_qty = Column(String(50), nullable=True)  # cantidad pendiente por recibir (parte especial aprobada, aún no llega)
     category = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -772,6 +773,7 @@ class PartRequest(Base):
     item_name = Column(String(300), nullable=True)
     quantity = Column(String(50), nullable=False, default="1")
     status = Column(String(20), nullable=False, default="pendiente")  # pendiente | aprobado | rechazado
+    is_special = Column(Boolean, default=False, nullable=False)  # parte especial que no estaba en inventario
     notes = Column(Text, nullable=True)             # nota del solicitante
     decision_notes = Column(Text, nullable=True)    # nota del aprobador
     requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

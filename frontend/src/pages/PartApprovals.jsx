@@ -70,9 +70,10 @@ export default function PartApprovals() {
                 <div key={r.id} className="flex items-start gap-3 p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-semibold text-blue-700">{r.item_code}</span>
+                      {r.item_code && <span className="font-mono text-xs font-semibold text-blue-700">{r.item_code}</span>}
                       <span className="text-sm text-gray-900 font-medium">{r.item_name}</span>
                       <span className="text-xs text-gray-500">× {r.quantity}</span>
+                      {r.is_special && <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-purple-100 text-purple-700">Especial</span>}
                       <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${st.cls}`}>{st.label}</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">

@@ -1136,6 +1136,11 @@ export default function Inventario() {
                   <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
+                    {parseFloat(it.pending_qty || '0') > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 mt-1">
+                        ⏳ {fmtQty(it.pending_qty)} pendiente(s) por recibir
+                      </span>
+                    )}
                     <div className="flex flex-wrap items-center gap-1.5 mt-1 lg:hidden">
                       {it.condition && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span>}
                       {it.item_status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span>}

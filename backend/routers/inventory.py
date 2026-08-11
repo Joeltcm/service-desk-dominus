@@ -692,6 +692,16 @@ def receive_inventory_item(
     item.quantity = str(round(new_qty, 4))
     item.cost_price = f"{avg_cost:.2f}"
 
+    # Si tenía cantidad pendiente por recibir (parte especial), la reducimos con lo recibido.
+    try:
+        pending = float(item.pending_qty or 0)
+    except (ValueError, TypeError):
+        pending = 0.0
+    part_arrived = pending > 0
+    if pending > 0:
+        remaining = max(0.0, pending - data.qty)
+        item.pending_qty = (f"{remaining:.4f}".rstrip("0").rstrip(".") or None) if remaining > 0 else None
+
     note = f"Recibido de {supplier.name} · costo unit. ${data.cost:.2f}"
     if data.notes and data.notes.strip():
         note += f" · {data.notes.strip()}"
@@ -699,6 +709,29 @@ def receive_inventory_item(
                        supplier_id=data.supplier_id, notes=note[:300], unit_cost=data.cost)
     db.commit()
     db.refresh(item)
+
+    # Aviso al técnico que solicitó la parte especial: ya llegó.
+    if part_arrived:
+        try:
+            from notify import create_notification
+            reqs = db.query(models.PartRequest).filter(
+                models.PartRequest.item_code == item.code,
+                models.PartRequest.is_special == True,
+                models.PartRequest.status == "aprobado",
+            ).all()
+            seen = set()
+            for pr in reqs:
+                if pr.requested_by_id and pr.requested_by_id not in seen:
+                    seen.add(pr.requested_by_id)
+                    create_notification(
+                        db, pr.requested_by_id,
+                        "Parte recibida 📦",
+                        f"Ya llegó la parte que solicitaste: {item.name} · Ticket #{pr.ticket_id}",
+                        url=f"/tickets/{pr.ticket_id}", kind="part_received",
+                    )
+            db.commit()
+        except Exception:
+            db.rollback()
     return item
 
 

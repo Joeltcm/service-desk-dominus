@@ -19,6 +19,7 @@ def _serialize(pr: models.PartRequest) -> dict:
         "item_name": pr.item_name,
         "quantity": pr.quantity,
         "status": pr.status,
+        "is_special": bool(getattr(pr, "is_special", False)),
         "notes": pr.notes,
         "decision_notes": pr.decision_notes,
         "requested_by_id": pr.requested_by_id,
@@ -39,14 +40,6 @@ def create_part_request(
     ticket = db.query(models.Ticket).filter(models.Ticket.id == data.ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
-    # Solo se pueden solicitar artículos de la bodega de PARTES.
-    item = db.query(models.InventoryItem).filter(
-        models.InventoryItem.code == data.item_code,
-        models.InventoryItem.warehouse == "partes",
-        models.InventoryItem.is_active == True,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=400, detail="El artículo no existe en la bodega de partes")
     try:
         qty = float(data.quantity or "0")
     except (ValueError, TypeError):
@@ -54,15 +47,44 @@ def create_part_request(
     if qty <= 0:
         raise HTTPException(status_code=400, detail="Cantidad inválida")
 
-    pr = models.PartRequest(
-        ticket_id=data.ticket_id,
-        item_code=item.code,
-        item_name=item.name,
-        quantity=data.quantity,
-        status="pendiente",
-        notes=(data.notes or None),
-        requested_by_id=current_user.id,
-    )
+    if data.is_special:
+        # Parte especial: no está en inventario. Se guarda la descripción; al aprobar se
+        # crea el artículo "pendiente por recibir" en la bodega de partes.
+        desc = (data.item_name or "").strip()
+        if not desc:
+            raise HTTPException(status_code=400, detail="Describe la parte especial que necesitas")
+        pr = models.PartRequest(
+            ticket_id=data.ticket_id,
+            item_code="",
+            item_name=desc,
+            quantity=data.quantity,
+            status="pendiente",
+            is_special=True,
+            notes=(data.notes or None),
+            requested_by_id=current_user.id,
+        )
+        notif_name = desc
+    else:
+        # Solo se pueden solicitar artículos de la bodega de PARTES.
+        item = db.query(models.InventoryItem).filter(
+            models.InventoryItem.code == data.item_code,
+            models.InventoryItem.warehouse == "partes",
+            models.InventoryItem.is_active == True,
+        ).first()
+        if not item:
+            raise HTTPException(status_code=400, detail="El artículo no existe en la bodega de partes")
+        pr = models.PartRequest(
+            ticket_id=data.ticket_id,
+            item_code=item.code,
+            item_name=item.name,
+            quantity=data.quantity,
+            status="pendiente",
+            is_special=False,
+            notes=(data.notes or None),
+            requested_by_id=current_user.id,
+        )
+        notif_name = item.name
+
     db.add(pr)
     db.commit()
     db.refresh(pr)
@@ -73,8 +95,8 @@ def create_part_request(
         notify_roles_inapp(
             db,
             [models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supplies],
-            "Nueva solicitud de parte",
-            f"{current_user.name}: {item.name} (x{data.quantity}) · Ticket #{data.ticket_id}",
+            "Nueva solicitud de parte especial" if data.is_special else "Nueva solicitud de parte",
+            f"{current_user.name}: {notif_name} (x{data.quantity}) · Ticket #{data.ticket_id}",
             url="/partes",
             kind="part_request",
             exclude_user_id=current_user.id,
@@ -146,24 +168,50 @@ def approve_part_request(
     if pr.status != "pendiente":
         raise HTTPException(status_code=400, detail=f"La solicitud ya está '{pr.status}'")
 
-    item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
-    if not item:
-        raise HTTPException(status_code=400, detail="El artículo ya no existe en el inventario")
-    try:
-        qty = float(pr.quantity or "0")
-        current = float(item.quantity or "0")
-    except (ValueError, TypeError):
-        qty, current = 0.0, 0.0
-    new_qty = max(0.0, current - qty)
-    delta = current - new_qty
-    item.quantity = f"{new_qty:.4f}".rstrip("0").rstrip(".") or "0"
-    db.add(models.InventoryTransaction(
-        item_code=pr.item_code,
-        qty_delta=f"-{delta:.4f}".rstrip("0").rstrip("."),
-        source_type="ticket_part",
-        source_id=pr.ticket_id,
-        notes=f"Parte para ticket #{pr.ticket_id} · aprobó {current_user.name}",
-    ))
+    if pr.is_special:
+        # Parte especial: se crea (o reutiliza) el artículo en la bodega de partes como
+        # "pendiente por recibir" (stock 0, pending_qty = cantidad). No descuenta stock.
+        code = f"ESP-T{pr.ticket_id}-{pr.id}"
+        item = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+        if not item:
+            item = models.InventoryItem(
+                code=code,
+                name=(pr.item_name or f"Parte especial #{pr.id}")[:300],
+                warehouse="partes",
+                quantity="0",
+                pending_qty=pr.quantity,
+                item_status="ingresado",
+                condition="nuevo",
+                is_active=True,
+                notes=f"Parte especial solicitada para ticket #{pr.ticket_id}",
+            )
+            db.add(item)
+        else:
+            try:
+                cur_pending = float(item.pending_qty or "0")
+            except (ValueError, TypeError):
+                cur_pending = 0.0
+            item.pending_qty = f"{cur_pending + float(pr.quantity or '0'):.4f}".rstrip("0").rstrip(".") or "0"
+        pr.item_code = code
+    else:
+        item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
+        if not item:
+            raise HTTPException(status_code=400, detail="El artículo ya no existe en el inventario")
+        try:
+            qty = float(pr.quantity or "0")
+            current = float(item.quantity or "0")
+        except (ValueError, TypeError):
+            qty, current = 0.0, 0.0
+        new_qty = max(0.0, current - qty)
+        delta = current - new_qty
+        item.quantity = f"{new_qty:.4f}".rstrip("0").rstrip(".") or "0"
+        db.add(models.InventoryTransaction(
+            item_code=pr.item_code,
+            qty_delta=f"-{delta:.4f}".rstrip("0").rstrip("."),
+            source_type="ticket_part",
+            source_id=pr.ticket_id,
+            notes=f"Parte para ticket #{pr.ticket_id} · aprobó {current_user.name}",
+        ))
     pr.status = "aprobado"
     pr.approved_by_id = current_user.id
     pr.decision_notes = (data.decision_notes or None)
@@ -171,10 +219,14 @@ def approve_part_request(
     if pr.requested_by_id:
         try:
             from notify import create_notification
+            if pr.is_special:
+                body = f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — se ordenó la parte; te avisaremos al recibirla."
+            else:
+                body = f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — aprobó {current_user.name}"
             create_notification(
                 db, pr.requested_by_id,
                 "Solicitud de parte aprobada ✓",
-                f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — aprobó {current_user.name}",
+                body,
                 url=f"/tickets/{pr.ticket_id}", kind="part_decision",
             )
         except Exception:
