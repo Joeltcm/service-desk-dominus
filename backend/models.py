@@ -366,6 +366,7 @@ class Dispatch(Base):
     date = Column(Date, nullable=True)
     delivery_date = Column(Date, nullable=True)
     status = Column(String(50), default="Borrador", nullable=False)
+    assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # técnico que prepara los equipos
     notes = Column(Text, nullable=True)
     items = Column(Text, nullable=True)  # JSON: [{description, qty, unit_price}]
     itbms_enabled = Column(Boolean, default=False)
@@ -382,8 +383,62 @@ class Dispatch(Base):
 
     order = relationship("Order", foreign_keys=[order_id], back_populates="dispatches")
     quote = relationship("Quote", foreign_keys=[quote_id])
+    assigned_tech = relationship("User", foreign_keys=[assigned_to_id])
     attachments = relationship("DispatchAttachment", back_populates="dispatch", cascade="all, delete-orphan")
     invoice = relationship("Invoice", foreign_keys="[Invoice.dispatch_id]", back_populates="dispatch", uselist=False)
+    timeline = relationship("DispatchTimeline", back_populates="dispatch", order_by="DispatchTimeline.created_at", cascade="all, delete-orphan")
+    tasks = relationship("DispatchTask", back_populates="dispatch", order_by="DispatchTask.position", cascade="all, delete-orphan")
+
+    @property
+    def assigned_to_name(self):
+        return self.assigned_tech.name if self.assigned_tech else None
+
+    @property
+    def tasks_total(self):
+        return len(self.tasks or [])
+
+    @property
+    def tasks_done(self):
+        return sum(1 for t in (self.tasks or []) if t.is_done)
+
+
+class DispatchTimeline(Base):
+    __tablename__ = "dispatch_timeline"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dispatch_id = Column(Integer, ForeignKey("dispatches.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content = Column(Text, nullable=False)
+    entry_type = Column(String(30), default="comment")  # comment, status_change, assignment, task, system
+    is_internal = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    dispatch = relationship("Dispatch", back_populates="timeline")
+    user = relationship("User")
+
+    @property
+    def user_name(self):
+        return self.user.name if self.user else None
+
+
+class DispatchTask(Base):
+    __tablename__ = "dispatch_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dispatch_id = Column(Integer, ForeignKey("dispatches.id"), nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    is_done = Column(Boolean, default=False, nullable=False)
+    position = Column(Integer, default=0)
+    done_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    done_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    dispatch = relationship("Dispatch", back_populates="tasks")
+    done_by = relationship("User", foreign_keys=[done_by_id])
+
+    @property
+    def done_by_name(self):
+        return self.done_by.name if self.done_by else None
 
 
 class DispatchAttachment(Base):

@@ -740,6 +740,7 @@ class DispatchCreate(BaseModel):
     dispatch_number: Optional[str] = None
     order_id: Optional[int] = None
     quote_id: Optional[int] = None
+    assigned_to_id: Optional[int] = None
     client_name: Optional[str] = None
     client_ruc: Optional[str] = None
     client_address: Optional[str] = None
@@ -761,6 +762,7 @@ class DispatchUpdate(BaseModel):
     dispatch_number: Optional[str] = None
     order_id: Optional[int] = None
     quote_id: Optional[int] = None
+    assigned_to_id: Optional[int] = None
     client_name: Optional[str] = None
     client_ruc: Optional[str] = None
     client_address: Optional[str] = None
@@ -785,6 +787,10 @@ class DispatchOut(BaseModel):
     order: Optional[OrderMiniRef] = None
     quote_id: Optional[int] = None
     quote: Optional[QuoteMini] = None
+    assigned_to_id: Optional[int] = None
+    assigned_to_name: Optional[str] = None
+    tasks_total: int = 0
+    tasks_done: int = 0
     client_name: Optional[str] = None
     client_ruc: Optional[str] = None
     client_address: Optional[str] = None
@@ -812,6 +818,50 @@ class DispatchOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── Dispatch timeline & tasks ─────────────────────────
+class DispatchTimelineOut(BaseModel):
+    id: int
+    dispatch_id: int
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    content: str
+    entry_type: str = "comment"
+    is_internal: bool = False
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DispatchTimelineCreate(BaseModel):
+    content: str
+    is_internal: bool = False
+
+
+class DispatchTaskOut(BaseModel):
+    id: int
+    dispatch_id: int
+    title: str
+    is_done: bool = False
+    position: int = 0
+    done_by_id: Optional[int] = None
+    done_by_name: Optional[str] = None
+    done_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DispatchTaskCreate(BaseModel):
+    title: str
+
+
+class DispatchTaskUpdate(BaseModel):
+    title: Optional[str] = None
+    is_done: Optional[bool] = None
 
 
 # ── Warranties ────────────────────────────────────────

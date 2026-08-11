@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from typing import List, Optional
 from datetime import datetime, timezone
 import os, uuid, json, re
@@ -9,6 +9,15 @@ from database import get_db
 from auth import require_staff
 import models, schemas
 import storage
+
+
+def _log_dispatch_event(db: Session, dispatch_id: int, user_id: Optional[int], content: str,
+                        entry_type: str = "comment", is_internal: bool = False):
+    """Registra un evento en el historial del pedido/despacho (espejo del timeline de tickets)."""
+    db.add(models.DispatchTimeline(
+        dispatch_id=dispatch_id, user_id=user_id, content=content,
+        entry_type=entry_type, is_internal=is_internal,
+    ))
 
 MAX_FILE_SIZE = 20 * 1024 * 1024
 
@@ -274,7 +283,7 @@ def update_dispatch(
     dispatch_id: int,
     data: schemas.DispatchUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_staff),
+    current_user: models.User = Depends(require_staff),
 ):
     d = db.query(models.Dispatch).filter(
         models.Dispatch.id == dispatch_id,
@@ -283,6 +292,7 @@ def update_dispatch(
     if not d:
         raise HTTPException(status_code=404, detail="Despacho no encontrado")
     old_status = d.status
+    old_assigned = d.assigned_to_id
     updates = data.model_dump(exclude_unset=True)
     # Bloqueo de entrega (it_support): no se puede pasar a "Entregado" sin una garantía
     # vinculada que tenga los N° de serie de todos los equipos del pedido.
@@ -297,6 +307,15 @@ def update_dispatch(
     for field, value in updates.items():
         setattr(d, field, value)
     _sync_dispatch_inventory(d, db, items_changed="items" in updates)
+    # Auto-log en el historial del pedido/despacho
+    if "status" in updates and d.status != old_status:
+        _log_dispatch_event(db, d.id, current_user.id, f"Cambió el estado a «{d.status}»", entry_type="status_change")
+    if "assigned_to_id" in updates and d.assigned_to_id != old_assigned:
+        if d.assigned_to_id:
+            tech = db.query(models.User).filter(models.User.id == d.assigned_to_id).first()
+            _log_dispatch_event(db, d.id, current_user.id, f"Asignó el pedido a {tech.name if tech else '—'}", entry_type="assignment")
+        else:
+            _log_dispatch_event(db, d.id, current_user.id, "Quitó la asignación del pedido", entry_type="assignment")
     db.commit()
     db.refresh(d)
     if d.order_id and "status" in updates:
@@ -366,6 +385,140 @@ def delete_dispatch(
         if order and order.status not in ("Inventariado",):
             _sync_order_status(order, db)
             db.commit()
+    return {"ok": True}
+
+
+# ── Historial (timeline) ──────────────────────────────
+
+@router.get("/{dispatch_id}/timeline", response_model=List[schemas.DispatchTimelineOut])
+def get_dispatch_timeline(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    return (
+        db.query(models.DispatchTimeline)
+        .filter(models.DispatchTimeline.dispatch_id == dispatch_id)
+        .order_by(models.DispatchTimeline.created_at)
+        .all()
+    )
+
+
+@router.post("/{dispatch_id}/timeline", response_model=schemas.DispatchTimelineOut)
+def add_dispatch_timeline(
+    dispatch_id: int,
+    data: schemas.DispatchTimelineCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    content = (data.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío")
+    entry = models.DispatchTimeline(
+        dispatch_id=dispatch_id, user_id=current_user.id, content=content,
+        entry_type="comment", is_internal=bool(data.is_internal),
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+# ── Checklist de preparación (tasks) ──────────────────
+
+@router.get("/{dispatch_id}/tasks", response_model=List[schemas.DispatchTaskOut])
+def get_dispatch_tasks(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    return (
+        db.query(models.DispatchTask)
+        .filter(models.DispatchTask.dispatch_id == dispatch_id)
+        .order_by(models.DispatchTask.position, models.DispatchTask.id)
+        .all()
+    )
+
+
+@router.post("/{dispatch_id}/tasks", response_model=schemas.DispatchTaskOut)
+def add_dispatch_task(
+    dispatch_id: int,
+    data: schemas.DispatchTaskCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="La tarea no puede estar vacía")
+    max_pos = db.query(func.max(models.DispatchTask.position)).filter(models.DispatchTask.dispatch_id == dispatch_id).scalar() or 0
+    task = models.DispatchTask(dispatch_id=dispatch_id, title=title, position=max_pos + 1)
+    db.add(task)
+    _log_dispatch_event(db, dispatch_id, current_user.id, f"Agregó la tarea: {title}", entry_type="task")
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.patch("/{dispatch_id}/tasks/{task_id}", response_model=schemas.DispatchTaskOut)
+def update_dispatch_task(
+    dispatch_id: int,
+    task_id: int,
+    data: schemas.DispatchTaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    task = db.query(models.DispatchTask).filter(
+        models.DispatchTask.id == task_id, models.DispatchTask.dispatch_id == dispatch_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    upd = data.model_dump(exclude_unset=True)
+    if upd.get("title") is not None:
+        new_title = upd["title"].strip()
+        if new_title:
+            task.title = new_title
+    if upd.get("is_done") is not None:
+        if upd["is_done"] and not task.is_done:
+            task.is_done = True
+            task.done_by_id = current_user.id
+            task.done_at = datetime.now(timezone.utc)
+            _log_dispatch_event(db, dispatch_id, current_user.id, f"Completó la tarea: {task.title}", entry_type="task")
+        elif not upd["is_done"] and task.is_done:
+            task.is_done = False
+            task.done_by_id = None
+            task.done_at = None
+            _log_dispatch_event(db, dispatch_id, current_user.id, f"Reabrió la tarea: {task.title}", entry_type="task")
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.delete("/{dispatch_id}/tasks/{task_id}")
+def delete_dispatch_task(
+    dispatch_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    task = db.query(models.DispatchTask).filter(
+        models.DispatchTask.id == task_id, models.DispatchTask.dispatch_id == dispatch_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    db.delete(task)
+    db.commit()
     return {"ok": True}
 
 

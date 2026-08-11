@@ -4,11 +4,12 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
   getDispatches, createDispatch, updateDispatch, deleteDispatch, cancelDispatch, getNextDispatchNumber,
-  getOrders, getQuotes, getContacts, getCompanies,
+  getOrders, getQuotes, getContacts, getCompanies, getAgents,
   uploadDispatchAttachment, deleteDispatchAttachment, dispatchAttachmentDownloadUrl,
   downloadWithAuth,
   createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
   createInvoiceFromDispatch,
+  getDispatchTimeline, addDispatchTimeline, getDispatchTasks, addDispatchTask, updateDispatchTask, deleteDispatchTask,
 } from '../services/api'
 import {
   Search, Plus, Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft,
@@ -16,6 +17,7 @@ import {
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
   Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
   Tag, ShieldCheck, AlertTriangle,
+  User, MessageSquare, CheckSquare, Square, History as HistoryIcon, ListChecks,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -239,7 +241,7 @@ function DispatchAttachmentSection({ dispatchId, docType, label, icon, attachmen
 
 // ── Main page ─────────────────────────────────────────
 const EMPTY_FORM = {
-  title: '', dispatch_number: '', order_id: '', quote_id: '',
+  title: '', dispatch_number: '', order_id: '', quote_id: '', assigned_to_id: '',
   client_name: '', client_ruc: '', client_address: '',
   date: new Date().toISOString().slice(0, 10),
   delivery_date: '',
@@ -271,6 +273,7 @@ export default function Despacho() {
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [orders, setOrders] = useState([])
   const [quotes, setQuotes] = useState([])
+  const [agents, setAgents] = useState([])
   const [quotesLoaded, setQuotesLoaded] = useState(false)
   const [pendingSelectId, setPendingSelectId] = useState(null)
   const [pendingFromOrder, setPendingFromOrder] = useState(null)
@@ -290,6 +293,7 @@ export default function Despacho() {
   useEffect(() => { load() }, [load])
   useEffect(() => {
     getOrders().then((r) => setOrders(r.data)).catch(() => {})
+    getAgents().then((r) => setAgents(r.data)).catch(() => {})
   }, [])
   // Cotizaciones: solo se cargan si el módulo está habilitado (respeta el toggle del
   // sysadmin). Si está apagado, se omite la llamada para no generar 403 innecesarios.
@@ -385,6 +389,7 @@ export default function Despacho() {
       dispatch_number: selected.dispatch_number || '',
       order_id: selected.order_id ?? '',
       quote_id: selected.quote_id ?? '',
+      assigned_to_id: selected.assigned_to_id ?? '',
       client_name: selected.client_name || '',
       client_ruc: selected.client_ruc || '',
       client_address: selected.client_address || '',
@@ -405,6 +410,17 @@ export default function Despacho() {
       load()
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Error actualizando estado', { duration: 6000 })
+    }
+  }
+
+  const handleAssignChange = async (dispatch, techId) => {
+    try {
+      const res = await updateDispatch(dispatch.id, { assigned_to_id: techId ? Number(techId) : null })
+      setSelected(res.data)
+      load()
+      toast.success(techId ? 'Técnico asignado' : 'Asignación quitada')
+    } catch {
+      toast.error('Error al asignar técnico')
     }
   }
 
@@ -444,6 +460,7 @@ export default function Despacho() {
       dispatch_number: form.dispatch_number || null,
       order_id: form.order_id ? Number(form.order_id) : null,
       quote_id: form.quote_id ? Number(form.quote_id) : null,
+      assigned_to_id: form.assigned_to_id ? Number(form.assigned_to_id) : null,
       client_name: form.client_name || null,
       client_ruc: form.client_ruc || null,
       client_address: form.client_address || null,
@@ -572,6 +589,16 @@ export default function Despacho() {
                   <p className={`font-semibold text-sm truncate ${selected?.id === d.id ? 'text-blue-700' : 'text-gray-900'}`}>{d.title}</p>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <StatusBadge status={d.status} />
+                    {d.assigned_to_name && (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                        <User size={10} /> {d.assigned_to_name}
+                      </span>
+                    )}
+                    {d.tasks_total > 0 && (
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${d.tasks_done === d.tasks_total ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'}`}>
+                        <ListChecks size={10} /> {d.tasks_done}/{d.tasks_total}
+                      </span>
+                    )}
                     {d.total && <span className="text-xs text-gray-500 font-medium">{d.total}</span>}
                     {d.dispatch_number && <span className="text-xs font-mono text-gray-400">{d.dispatch_number}</span>}
                   </div>
@@ -591,6 +618,7 @@ export default function Despacho() {
             orders={orders}
             quotes={quotes}
             dispatches={dispatches}
+            agents={agents}
             onSave={handleSave}
             onCancel={() => { setShowForm(false); if (!selected) setMobileDetailOpen(false) }}
             saving={saving} isEdit={!!selected} onBack={handleBack}
@@ -598,6 +626,7 @@ export default function Despacho() {
         ) : selected ? (
           <DispatchDetail
             dispatch={selected}
+            agents={agents}
             onEdit={handleEdit}
             onDelete={() => handleDelete(selected)}
             onBack={handleBack}
@@ -606,6 +635,7 @@ export default function Despacho() {
             onAttachmentChange={() => refreshSelected(selected.id)}
             onViewOrder={(orderId) => navigate('/orders', { state: { selectOrderId: orderId } })}
             onStatusChange={handleStatusChange}
+            onAssignChange={(techId) => handleAssignChange(selected, techId)}
             onCancel={handleCancelDispatch}
             onDeliveryDateChange={handleDeliveryDateChange}
             onCalendarChange={() => refreshSelected(selected.id)}
@@ -705,7 +735,145 @@ function StatusSelector({ status, onChange, loading }) {
 }
 
 // ── Detail ─────────────────────────────────────────────
-function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onCancel, onDeliveryDateChange, onCalendarChange }) {
+// ── Checklist de preparación ────────────────────────────
+function DispatchChecklist({ dispatchId, onChanged }) {
+  const [tasks, setTasks] = useState([])
+  const [newTitle, setNewTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getDispatchTasks(dispatchId).then((r) => setTasks(r.data)).catch(() => {})
+  }, [dispatchId])
+  useEffect(() => { load() }, [load])
+
+  const add = async () => {
+    const t = newTitle.trim()
+    if (!t) return
+    setBusy(true)
+    try { await addDispatchTask(dispatchId, t); setNewTitle(''); load(); onChanged?.() }
+    catch { toast.error('Error al agregar la tarea') }
+    finally { setBusy(false) }
+  }
+  const toggle = async (task) => {
+    try { await updateDispatchTask(dispatchId, task.id, { is_done: !task.is_done }); load(); onChanged?.() }
+    catch { toast.error('Error al actualizar la tarea') }
+  }
+  const del = async (task) => {
+    try { await deleteDispatchTask(dispatchId, task.id); load(); onChanged?.() }
+    catch { toast.error('Error al eliminar la tarea') }
+  }
+
+  const done = tasks.filter((t) => t.is_done).length
+  const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+          <ListChecks size={13} /> Preparación (checklist)
+        </h3>
+        {tasks.length > 0 && <span className="text-xs font-medium text-gray-500">{done}/{tasks.length}</span>}
+      </div>
+      {tasks.length > 0 && (
+        <div className="w-full h-1.5 bg-gray-100 rounded-full mb-3 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <div className="space-y-1.5">
+        {tasks.map((task) => (
+          <div key={task.id} className="flex items-center gap-2 group">
+            <button onClick={() => toggle(task)} className="flex-shrink-0 text-gray-400 hover:text-blue-600">
+              {task.is_done ? <CheckSquare size={16} className="text-emerald-600" /> : <Square size={16} />}
+            </button>
+            <span className={`flex-1 text-sm ${task.is_done ? 'line-through text-gray-400' : 'text-gray-700'}`}>{task.title}</span>
+            {task.is_done && task.done_by_name && (
+              <span className="text-[10px] text-gray-300 hidden sm:inline">{task.done_by_name}</span>
+            )}
+            <button onClick={() => del(task)} className="flex-shrink-0 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+        {tasks.length === 0 && <p className="text-xs text-gray-400">Sin tareas. Agrega los pasos de preparación (instalar parte, SO, apps, pruebas…).</p>}
+      </div>
+      <div className="flex gap-2 mt-3">
+        <input
+          className="input flex-1 text-sm" placeholder="Nueva tarea…" value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          style={{ fontSize: '16px' }}
+        />
+        <button onClick={add} disabled={busy || !newTitle.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50">
+          <Plus size={14} /> Agregar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Historial del pedido/despacho ───────────────────────
+const DISPATCH_TL_ICON = {
+  status_change: <PackageCheck size={12} />,
+  assignment: <User size={12} />,
+  task: <CheckSquare size={12} />,
+  system: <Clock size={12} />,
+  comment: <MessageSquare size={12} />,
+}
+function DispatchHistory({ dispatchId, version }) {
+  const [items, setItems] = useState([])
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getDispatchTimeline(dispatchId).then((r) => setItems(r.data)).catch(() => {})
+  }, [dispatchId])
+  useEffect(() => { load() }, [load, version])
+
+  const add = async () => {
+    const t = text.trim()
+    if (!t) return
+    setBusy(true)
+    try { await addDispatchTimeline(dispatchId, { content: t }); setText(''); load() }
+    catch { toast.error('Error al agregar la nota') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+        <HistoryIcon size={13} /> Historial
+      </h3>
+      <div className="space-y-3 mb-3">
+        {items.length === 0 && <p className="text-xs text-gray-400">Sin eventos todavía.</p>}
+        {items.map((e) => (
+          <div key={e.id} className="flex gap-2.5">
+            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${e.entry_type === 'comment' ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
+              {DISPATCH_TL_ICON[e.entry_type] || <MessageSquare size={12} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {e.user_name || 'Sistema'} · {fmtD(e.created_at)} {fmtTime(e.created_at)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <textarea
+          className="input flex-1 text-sm h-10 resize-none" placeholder="Agregar nota (ej.: instalé RAM 8GB, Windows 11 + Office, pruebas OK)…"
+          value={text} onChange={(e) => setText(e.target.value)}
+          style={{ fontSize: '16px' }}
+        />
+        <button onClick={add} disabled={busy || !text.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50 self-start">
+          <Plus size={14} /> Nota
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function DispatchDetail({ dispatch: d, agents = [], onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onAssignChange, onCancel, onDeliveryDateChange, onCalendarChange }) {
   const navigate = useNavigate()
   const { vertical } = useCompany()
   const itMode = vertical === 'it_support'
@@ -715,6 +883,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
   const hasItems = items.some((it) => it.description?.trim())
   const { subtotal, itbmsAmt, total } = calcTotals(items, d.itbms_enabled)
   const [changingStatus, setChangingStatus] = useState(false)
+  const [histVersion, setHistVersion] = useState(0)
   const [localDeliveryDate, setLocalDeliveryDate] = useState(d.delivery_date || '')
   const [creatingInvoice, setCreatingInvoice] = useState(false)
 
@@ -875,6 +1044,17 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <StatusSelector status={d.status} onChange={handleStatusSelect} loading={changingStatus} />
+          <div className="flex items-center gap-1.5" title="Técnico asignado">
+            <User size={14} className="text-gray-400" />
+            <select
+              className="text-sm border border-gray-200 rounded-lg px-2.5 py-2 bg-white text-gray-700 max-w-[160px]"
+              value={d.assigned_to_id || ''}
+              onChange={(e) => onAssignChange?.(e.target.value)}
+            >
+              <option value="">Sin técnico</option>
+              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
           <div className="flex gap-2 flex-wrap ml-auto">
             <button onClick={() => onPrint(true)} title="Imprimir" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 active:bg-black transition-colors">
               <Printer size={13} /> <span className="hidden sm:inline">Imprimir</span>
@@ -922,6 +1102,9 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
           </div>
         </div>
       </div>
+
+      {/* Preparación: checklist */}
+      <DispatchChecklist dispatchId={d.id} onChanged={() => setHistVersion((v) => v + 1)} />
 
       {/* Aviso de flujo incompleto: falta la garantía con las series (it_support) */}
       {itMode && d.status !== 'Borrador' && d.status !== 'Cancelado' && d.warranty_status !== 'complete' && (
@@ -1118,6 +1301,9 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
           </div>
         </div>
       )}
+
+      {/* Historial del pedido */}
+      <DispatchHistory dispatchId={d.id} version={`${d.status}|${d.assigned_to_id}|${histVersion}`} />
     </div>
 
     {/* Calendar Modal */}
@@ -1248,7 +1434,7 @@ function DispatchDetail({ dispatch: d, onEdit, onDelete, onBack, onPrint, onShar
 }
 
 // ── Form ───────────────────────────────────────────────
-function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onSave, onCancel, saving, isEdit, onBack }) {
+function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], agents = [], onSave, onCancel, saving, isEdit, onBack }) {
   const { vertical } = useCompany()
   const itMode = vertical === 'it_support'
   const noun = itMode ? 'pedido' : 'despacho'
@@ -1435,6 +1621,13 @@ function DispatchForm({ form, setForm, orders, quotes = [], dispatches = [], onS
               <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
               <select className="input w-full" value={form.status} onChange={set('status')} style={{fontSize:'16px'}}>
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Técnico asignado</label>
+              <select className="input w-full" value={form.assigned_to_id || ''} onChange={set('assigned_to_id')} style={{fontSize:'16px'}}>
+                <option value="">Sin técnico</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
             {form.order_id && (
