@@ -5,10 +5,11 @@ import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useNavigate, useLocation, useSearchParams, useParams } from 'react-router-dom'
 import {
   getOrders, createOrder, updateOrder, deleteOrder, getNextOrderNumber,
-  getSuppliers, createSupplier, getTickets, getQuotes,
+  getSuppliers, createSupplier, getTickets, getQuotes, getAgents,
   uploadOrderAttachment, deleteOrderAttachment, orderAttachmentDownloadUrl, downloadWithAuth,
   createOrderCalendarEvent, deleteOrderCalendarEvent, getCalendarAuthUrl,
   applyOrderInventory, updateExpense,
+  getOrderTimeline, addOrderTimeline, getOrderTasks, addOrderTask, updateOrderTask, deleteOrderTask,
 } from '../services/api'
 import { supplierLogoUrl } from '../services/api'
 import {
@@ -17,7 +18,8 @@ import {
   CheckCircle2, Clock, Package, XCircle, Upload, Download,
   FileCheck, Paperclip, Receipt, Printer, PackageCheck, Save, ClipboardList,
   ExternalLink, CalendarDays, AlertTriangle, Share2, CreditCard, BadgeAlert,
-  Banknote,
+  Banknote, User, MessageSquare, CheckSquare, Square, History as HistoryIcon,
+  ListChecks,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -26,25 +28,31 @@ import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor from '../components/ItemEditor'
 import { getCompanyCache, useCompany } from '../context/CompanyContext'
 
-const STATUSES = ['Pendiente', 'En proceso', 'Retiro Programado', 'Recibido', 'Inventariado', 'Cancelado']
+// Ciclo del pedido (cliente → Dominus): el técnico prepara los equipos en "En proceso".
+const STATUSES = ['Pendiente', 'En proceso', 'Listo para entrega', 'Entregado', 'Cancelado']
 const SUPPLIER_CATEGORIES = ['Hardware', 'Software', 'Consumibles', 'Servicios', 'Redes', 'Impresión', 'Otro']
 
 const STATUS_STYLE = {
   'Pendiente':            'bg-yellow-100 text-yellow-700',
   'En proceso':           'bg-blue-100 text-blue-700',
+  'Listo para entrega':   'bg-indigo-100 text-indigo-700',
+  'Entregado':            'bg-green-100 text-green-700',
+  'Cancelado':            'bg-red-100 text-red-600',
+  // Estados heredados (pedidos previos): se muestran, pero ya no son seleccionables
   'Retiro Programado':    'bg-orange-100 text-orange-700',
   'Recibido':             'bg-green-100 text-green-700',
   'Inventariado':         'bg-emerald-100 text-emerald-700',
-  'Cancelado':            'bg-red-100 text-red-600',
 }
 
 const STATUS_ICON = {
   'Pendiente':            <Clock size={11} />,
   'En proceso':           <Package size={11} />,
+  'Listo para entrega':   <PackageCheck size={11} />,
+  'Entregado':            <CheckCircle2 size={11} />,
+  'Cancelado':            <XCircle size={11} />,
   'Retiro Programado':    <CalendarDays size={11} />,
   'Recibido':             <CheckCircle2 size={11} />,
   'Inventariado':         <PackageCheck size={11} />,
-  'Cancelado':            <XCircle size={11} />,
 }
 
 const DISPATCH_STATUS_STYLE = {
@@ -532,7 +540,7 @@ function QuoteSearch({ quotes, value, onChange }) {
 }
 
 const EMPTY_FORM = {
-  title: '', order_number: '', status: 'Pendiente', ticket_id: null, quote_id: null, notes: '',
+  title: '', order_number: '', status: 'Pendiente', assigned_to_id: '', ticket_id: null, quote_id: null, notes: '',
   supplier1_id: '', supplier2_id: '', supplier3_id: '', expected_date: '',
   items: [{ ...EMPTY_ITEM }],
   itbms_enabled: false,
@@ -555,6 +563,7 @@ export default function Orders() {
   const [suppliers, setSuppliers] = useState([])
   const [tickets, setTickets] = useState([])
   const [quotes, setQuotes] = useState([])
+  const [agents, setAgents] = useState([])
   const [pendingSelectId, setPendingSelectId] = useState(null)
 
   useEffect(() => {
@@ -574,6 +583,7 @@ export default function Orders() {
     getSuppliers().then((r) => setSuppliers(r.data)).catch(() => {})
     getTickets().then((r) => setTickets(r.data)).catch(() => {})
     getQuotes().then((r) => setQuotes(r.data)).catch(() => {})
+    getAgents().then((r) => setAgents(r.data)).catch(() => {})
   }, [])
 
   // Handle navigation from Despacho page ("Ver pedido")
@@ -635,6 +645,7 @@ export default function Orders() {
       title: selected.title || '',
       order_number: selected.order_number || '',
       status: selected.status || 'Pendiente',
+      assigned_to_id: selected.assigned_to_id ?? '',
       ticket_id: selected.ticket_id ?? null,
       quote_id: selected.quote_id ?? null,
       notes: selected.notes || '',
@@ -659,6 +670,7 @@ export default function Orders() {
       title: form.title,
       order_number: form.order_number || null,
       status: form.status,
+      assigned_to_id: form.assigned_to_id ? Number(form.assigned_to_id) : null,
       ticket_id: form.ticket_id ? Number(form.ticket_id) : null,
       quote_id: form.quote_id ? Number(form.quote_id) : null,
       supplier1_id: form.supplier1_id ? Number(form.supplier1_id) : null,
@@ -752,6 +764,17 @@ export default function Orders() {
     }
   }
 
+  const handleAssignChange = async (order, techId) => {
+    try {
+      const res = await updateOrder(order.id, { assigned_to_id: techId ? Number(techId) : null })
+      setSelected(res.data)
+      load()
+      toast.success(techId ? 'Técnico asignado' : 'Asignación quitada')
+    } catch {
+      toast.error('Error al asignar técnico')
+    }
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Left panel */}
@@ -832,6 +855,16 @@ export default function Orders() {
                         <BadgeAlert size={10} /> Pago pendiente
                       </span>
                     )}
+                    {o.assigned_to_name && (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                        <User size={10} /> {o.assigned_to_name}
+                      </span>
+                    )}
+                    {o.tasks_total > 0 && (
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${o.tasks_done === o.tasks_total ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'}`}>
+                        <ListChecks size={10} /> {o.tasks_done}/{o.tasks_total}
+                      </span>
+                    )}
                     {o.order_number && <span className="text-xs font-mono text-gray-400">{o.order_number}</span>}
                     {o.ticket && <span className="text-xs text-gray-400">#{o.ticket.id}</span>}
                     {o.attachments?.length > 0 && (
@@ -854,7 +887,7 @@ export default function Orders() {
         {showForm ? (
           <OrderForm
             form={form} setForm={setForm}
-            suppliers={suppliers} tickets={tickets} quotes={quotes}
+            suppliers={suppliers} tickets={tickets} quotes={quotes} agents={agents}
             onSave={handleSave}
             onCancel={() => { setShowForm(false); if (!selected) setMobileDetailOpen(false) }}
             saving={saving} isEdit={!!selected} onBack={handleBack}
@@ -863,6 +896,7 @@ export default function Orders() {
         ) : selected ? (
           <OrderDetail
             order={selected}
+            agents={agents}
             onEdit={handleEdit}
             onDelete={() => handleDelete(selected)}
             onBack={handleBack}
@@ -872,6 +906,7 @@ export default function Orders() {
             onConvertToDispatch={() => handleConvertToDispatch(selected)}
             onViewDispatch={(d) => navigate('/pedidos', { state: { selectDispatchId: d.id } })}
             onStatusChange={(newStatus) => handleStatusChange(selected, newStatus)}
+            onAssignChange={(techId) => handleAssignChange(selected, techId)}
             onCalendarChange={() => refreshSelected(selected.id)}
             onInventoryApplied={() => refreshSelected(selected.id)}
             onExpenseUpdated={() => refreshSelected(selected.id)}
@@ -892,8 +927,146 @@ export default function Orders() {
   )
 }
 
+// ── Checklist de preparación ────────────────────────────
+function OrderChecklist({ orderId, onChanged }) {
+  const [tasks, setTasks] = useState([])
+  const [newTitle, setNewTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getOrderTasks(orderId).then((r) => setTasks(r.data)).catch(() => {})
+  }, [orderId])
+  useEffect(() => { load() }, [load])
+
+  const add = async () => {
+    const t = newTitle.trim()
+    if (!t) return
+    setBusy(true)
+    try { await addOrderTask(orderId, t); setNewTitle(''); load(); onChanged?.() }
+    catch { toast.error('Error al agregar la tarea') }
+    finally { setBusy(false) }
+  }
+  const toggle = async (task) => {
+    try { await updateOrderTask(orderId, task.id, { is_done: !task.is_done }); load(); onChanged?.() }
+    catch { toast.error('Error al actualizar la tarea') }
+  }
+  const del = async (task) => {
+    try { await deleteOrderTask(orderId, task.id); load(); onChanged?.() }
+    catch { toast.error('Error al eliminar la tarea') }
+  }
+
+  const done = tasks.filter((t) => t.is_done).length
+  const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+          <ListChecks size={13} /> Preparación (checklist)
+        </h3>
+        {tasks.length > 0 && <span className="text-xs font-medium text-gray-500">{done}/{tasks.length}</span>}
+      </div>
+      {tasks.length > 0 && (
+        <div className="w-full h-1.5 bg-gray-100 rounded-full mb-3 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <div className="space-y-1.5">
+        {tasks.map((task) => (
+          <div key={task.id} className="flex items-center gap-2 group">
+            <button onClick={() => toggle(task)} className="flex-shrink-0 text-gray-400 hover:text-blue-600">
+              {task.is_done ? <CheckSquare size={16} className="text-emerald-600" /> : <Square size={16} />}
+            </button>
+            <span className={`flex-1 text-sm ${task.is_done ? 'line-through text-gray-400' : 'text-gray-700'}`}>{task.title}</span>
+            {task.is_done && task.done_by_name && (
+              <span className="text-[10px] text-gray-300 hidden sm:inline">{task.done_by_name}</span>
+            )}
+            <button onClick={() => del(task)} className="flex-shrink-0 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+        {tasks.length === 0 && <p className="text-xs text-gray-400">Sin tareas. Agrega los pasos de preparación (instalar parte, SO, apps, pruebas…).</p>}
+      </div>
+      <div className="flex gap-2 mt-3">
+        <input
+          className="input flex-1 text-sm" placeholder="Nueva tarea…" value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          style={{ fontSize: '16px' }}
+        />
+        <button onClick={add} disabled={busy || !newTitle.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50">
+          <Plus size={14} /> Agregar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Historial del pedido ────────────────────────────────
+const ORDER_TL_ICON = {
+  status_change: <Package size={12} />,
+  assignment: <User size={12} />,
+  task: <CheckSquare size={12} />,
+  system: <Clock size={12} />,
+  comment: <MessageSquare size={12} />,
+}
+function OrderHistory({ orderId, version }) {
+  const [items, setItems] = useState([])
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    getOrderTimeline(orderId).then((r) => setItems(r.data)).catch(() => {})
+  }, [orderId])
+  useEffect(() => { load() }, [load, version])
+
+  const add = async () => {
+    const t = text.trim()
+    if (!t) return
+    setBusy(true)
+    try { await addOrderTimeline(orderId, { content: t }); setText(''); load() }
+    catch { toast.error('Error al agregar la nota') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+        <HistoryIcon size={13} /> Historial
+      </h3>
+      <div className="space-y-3 mb-3">
+        {items.length === 0 && <p className="text-xs text-gray-400">Sin eventos todavía.</p>}
+        {items.map((e) => (
+          <div key={e.id} className="flex gap-2.5">
+            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${e.entry_type === 'comment' ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
+              {ORDER_TL_ICON[e.entry_type] || <MessageSquare size={12} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {e.user_name || 'Sistema'} · {fmtD(e.created_at)} {fmtTime(e.created_at)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <textarea
+          className="input flex-1 text-sm h-10 resize-none" placeholder="Agregar nota (ej.: instalé RAM 8GB, Windows 11 + Office, pruebas OK)…"
+          value={text} onChange={(e) => setText(e.target.value)}
+          style={{ fontSize: '16px' }}
+        />
+        <button onClick={add} disabled={busy || !text.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50 self-start">
+          <Plus size={14} /> Nota
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Detail view ─────────────────────────────────────────
-function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPrint, onShare, onConvertToDispatch, onViewDispatch, onStatusChange, onCalendarChange, onInventoryApplied, onExpenseUpdated }) {
+function OrderDetail({ order, agents = [], onEdit, onDelete, onBack, onAttachmentChange, onPrint, onShare, onConvertToDispatch, onViewDispatch, onStatusChange, onAssignChange, onCalendarChange, onInventoryApplied, onExpenseUpdated }) {
   const { vertical } = useCompany()
   const nounPlCap = vertical === 'it_support' ? 'Pedidos' : 'Despachos'
   const supplierList = [order.supplier1, order.supplier2, order.supplier3].filter(Boolean)
@@ -903,6 +1076,8 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
   const { subtotal, itbmsAmt, total } = calcTotals(items, order.itbms_enabled, shippingCost)
   const [changingStatus, setChangingStatus] = useState(false)
   const [applyingInv, setApplyingInv] = useState(false)
+  const [histVersion, setHistVersion] = useState(0)
+  const hasPurchaseItems = !!order.purchase_items && order.purchase_items !== '[]'
   const [savingPayment, setSavingPayment] = useState(false)
   const [dueDate, setDueDate] = useState(order.expense?.due_date || '')
   const [payMethod, setPayMethod] = useState('Efectivo')
@@ -977,11 +1152,11 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
   }
 
   const handleApplyInventory = async () => {
-    if (!window.confirm('¿Aplicar los artículos de este pedido al inventario? El pedido pasará a estado "Inventariado".')) return
+    if (!window.confirm('¿Ingresar los artículos de la compra de este pedido al inventario?')) return
     setApplyingInv(true)
     try {
       await applyOrderInventory(order.id)
-      toast.success('Inventario actualizado — pedido marcado como Inventariado')
+      toast.success('Compra ingresada al inventario')
       onInventoryApplied?.()
     } catch {
       toast.error('Error al aplicar inventario')
@@ -1146,6 +1321,17 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <StatusSelector status={order.status} onChange={handleStatusChange} loading={changingStatus} />
+          <div className="flex items-center gap-1.5" title="Técnico asignado">
+            <User size={14} className="text-gray-400" />
+            <select
+              className="text-sm border border-gray-200 rounded-lg px-2.5 py-2 bg-white text-gray-700 max-w-[160px]"
+              value={order.assigned_to_id || ''}
+              onChange={(e) => onAssignChange?.(e.target.value)}
+            >
+              <option value="">Sin técnico</option>
+              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
           <div className="flex gap-2 flex-wrap ml-auto">
             <button onClick={() => onPrint(true)} title="Imprimir" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 active:bg-black transition-colors">
               <Printer size={13} /> <span className="hidden sm:inline">Imprimir</span>
@@ -1156,8 +1342,8 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
             <button onClick={onShare} title="Compartir PDF" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors">
               <Share2 size={13} /> <span className="hidden sm:inline">Compartir</span>
             </button>
-            {(order.status === 'Recibido' || (order.status === 'Inventariado' && order.inventory_applied)) && (
-              <button onClick={handleApplyInventory} disabled={applyingInv} title="Aplicar al inventario" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors">
+            {hasPurchaseItems && !order.inventory_applied && (
+              <button onClick={handleApplyInventory} disabled={applyingInv} title="Ingresar la compra al inventario" className="flex items-center gap-1.5 px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors">
                 <Package size={13} /> <span className="hidden sm:inline">{applyingInv ? 'Aplicando...' : 'Inventariar'}</span>
               </button>
             )}
@@ -1188,6 +1374,9 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
           </button>
         </div>
       )}
+
+      {/* Preparación: checklist */}
+      <OrderChecklist orderId={order.id} onChanged={() => setHistVersion((v) => v + 1)} />
 
       {/* Proveedores */}
       {supplierList.length > 0 && (
@@ -1584,6 +1773,9 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
           </button>
         </div>
       )}
+
+      {/* Historial del pedido */}
+      <OrderHistory orderId={order.id} version={`${order.status}|${order.assigned_to_id}|${histVersion}`} />
     </div>
 
     {/* Calendar Modal */}
@@ -1726,7 +1918,7 @@ function OrderDetail({ order, onEdit, onDelete, onBack, onAttachmentChange, onPr
 }
 
 // ── Form ────────────────────────────────────────────────
-function OrderForm({ form, setForm, suppliers, tickets, quotes, onSave, onCancel, saving, isEdit, onBack, onSupplierCreated }) {
+function OrderForm({ form, setForm, suppliers, tickets, quotes, agents = [], onSave, onCancel, saving, isEdit, onBack, onSupplierCreated }) {
   const [isDirty, setIsDirty] = useState(false)
   useFormGuard(isDirty)
   const set = (field) => (e) => { setIsDirty(true); setForm((f) => ({ ...f, [field]: e.target.value })) }
@@ -1815,6 +2007,13 @@ function OrderForm({ form, setForm, suppliers, tickets, quotes, onSave, onCancel
               <label className="block text-xs font-medium text-gray-600 mb-1">Estado</label>
               <select className="input w-full" value={form.status} onChange={set('status')} style={{fontSize:'16px'}}>
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Técnico asignado</label>
+              <select className="input w-full" value={form.assigned_to_id || ''} onChange={set('assigned_to_id')} style={{fontSize:'16px'}}>
+                <option value="">Sin técnico</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
             <div>

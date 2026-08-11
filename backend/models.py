@@ -300,6 +300,7 @@ class Order(Base):
     title = Column(String(300), nullable=False)
     order_number = Column(String(50), nullable=True)
     status = Column(String(50), default="Pendiente", nullable=False)
+    assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # técnico que prepara los equipos
     ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
     supplier1_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     supplier2_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
@@ -324,6 +325,7 @@ class Order(Base):
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
 
     ticket = relationship("Ticket", foreign_keys=[ticket_id])
+    assigned_tech = relationship("User", foreign_keys=[assigned_to_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     invoice = relationship("Invoice", foreign_keys=[invoice_id])
     supplier1 = relationship("Supplier", foreign_keys=[supplier1_id])
@@ -332,6 +334,59 @@ class Order(Base):
     attachments = relationship("OrderAttachment", back_populates="order", cascade="all, delete-orphan")
     dispatches = relationship("Dispatch", back_populates="order")
     expense = relationship("Expense", foreign_keys="[Expense.order_id]", back_populates="order", uselist=False)
+    timeline = relationship("OrderTimeline", back_populates="order", order_by="OrderTimeline.created_at", cascade="all, delete-orphan")
+    tasks = relationship("OrderTask", back_populates="order", order_by="OrderTask.position", cascade="all, delete-orphan")
+
+    @property
+    def assigned_to_name(self):
+        return self.assigned_tech.name if self.assigned_tech else None
+
+    @property
+    def tasks_total(self):
+        return len(self.tasks or [])
+
+    @property
+    def tasks_done(self):
+        return sum(1 for t in (self.tasks or []) if t.is_done)
+
+
+class OrderTimeline(Base):
+    __tablename__ = "order_timeline"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content = Column(Text, nullable=False)
+    entry_type = Column(String(30), default="comment")  # comment, status_change, assignment, task, system
+    is_internal = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    order = relationship("Order", back_populates="timeline")
+    user = relationship("User")
+
+    @property
+    def user_name(self):
+        return self.user.name if self.user else None
+
+
+class OrderTask(Base):
+    __tablename__ = "order_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    is_done = Column(Boolean, default=False, nullable=False)
+    position = Column(Integer, default=0)
+    done_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    done_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    order = relationship("Order", back_populates="tasks")
+    done_by = relationship("User", foreign_keys=[done_by_id])
+
+    @property
+    def done_by_name(self):
+        return self.done_by.name if self.done_by else None
 
 
 class OrderAttachment(Base):
