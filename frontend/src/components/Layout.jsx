@@ -8,7 +8,7 @@ import { getDashboard, getTrialStatus } from '../services/api'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
-  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle
+  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle, Home
 } from 'lucide-react'
 import TicketScanner from './TicketScanner'
 import NotificationBell from './NotificationBell'
@@ -22,7 +22,9 @@ import PushPromptBanner from './PushPromptBanner'
 const navItems = [
   { to: '/dashboard',         group: 'main',      subgroup: null,       featureKey: 'dashboard_servicios', moduleKey: 'dashboard_servicios', label: 'Dashboard',             icon: LayoutDashboard, roles: ['admin', 'supervisor', 'agent', 'superadmin'],            color: 'text-blue-500',    bg: 'bg-blue-500/15' },
   { to: '/ventas',            group: 'main',      subgroup: null,       featureKey: 'dashboard_ventas',    moduleKey: 'dashboard_ventas',    label: 'Dashboard Ventas',      icon: TrendingUp,      roles: ['admin', 'supervisor', 'agent', 'ventas', 'superadmin'],  color: 'text-emerald-500', bg: 'bg-emerald-500/15' },
+  { to: '/inicio',            group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: null,                  label: 'Inicio',                icon: Home,            roles: ['client'],                    color: 'text-blue-500',    bg: 'bg-blue-500/15' },
   { to: '/tickets',           group: 'main',      subgroup: null,       featureKey: 'tickets',             moduleKey: 'tickets',             label: 'Tickets',               icon: Ticket,          roles: ['admin', 'supervisor', 'agent', 'client', 'supplies', 'superadmin'], color: 'text-orange-500',  bg: 'bg-orange-500/15' },
+  { to: '/mis-pedidos',       group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: null,                  label: 'Mis Pedidos',           icon: Package,         roles: ['client'],                    color: 'text-blue-500',    bg: 'bg-blue-500/15' },
   { to: '/mis-documentos',    group: 'main',      subgroup: null,       featureKey: 'mis_documentos',      moduleKey: null,                  label: 'Mis Documentos',        icon: FileText,        roles: ['client'],                    color: 'text-indigo-500',  bg: 'bg-indigo-500/15' },
   { to: '/agenda',            group: 'main',      subgroup: null,       featureKey: 'agenda',              moduleKey: 'agenda',              label: 'Agenda',                icon: CalendarDays,    roles: ['admin', 'supervisor', 'agent', 'client', 'superadmin'],  color: 'text-violet-500',  bg: 'bg-violet-500/15' },
   { to: '/projects',          group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: 'proyectos',           label: 'Proyectos',             icon: FolderKanban,    roles: ['admin', 'supervisor', 'agent', 'superadmin'],            color: 'text-indigo-500',  bg: 'bg-indigo-500/15' },

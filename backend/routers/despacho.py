@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import os, uuid, json, re
 from database import get_db
-from auth import require_staff
+from auth import require_staff, get_current_user
 import models, schemas
 import storage
 
@@ -260,6 +260,58 @@ def create_dispatch(
         db.rollback()
     _attach_warranty_status([dispatch], db)
     return dispatch
+
+
+# ── Portal del cliente: crear y ver sus propios pedidos ──
+
+@router.get("/mis", response_model=List[schemas.MyDispatchOut])
+def my_dispatches(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Pedidos que el cliente autenticado ha solicitado desde el portal."""
+    return (
+        db.query(models.Dispatch)
+        .filter(models.Dispatch.client_id == current_user.id, models.Dispatch.deleted_at.is_(None))
+        .order_by(models.Dispatch.created_at.desc())
+        .all()
+    )
+
+
+@router.post("/mis", response_model=schemas.MyDispatchOut)
+def create_client_dispatch(
+    data: schemas.ClientDispatchCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """El cliente crea una solicitud de pedido (Borrador). Descripción genérica y
+    artículos en texto libre (sin inventario). Un agente la evalúa y la ajusta después."""
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="El asunto del pedido es obligatorio")
+    d = models.Dispatch(
+        title=title,
+        status="Borrador",
+        client_id=current_user.id,
+        client_name=current_user.name or current_user.email,
+        notes=(data.notes or None),
+        items=(data.items or None),
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    # Notifica a admin/supervisor (campana + push) de una nueva solicitud de pedido del cliente.
+    try:
+        from notify import notify_admins
+        notify_admins(
+            db, "📦 Nueva solicitud de pedido",
+            f"{current_user.name or current_user.email} solicitó: {title}",
+            url="/pedidos", kind="pedido", exclude_user_id=current_user.id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    return d
 
 
 @router.get("/{dispatch_id}", response_model=schemas.DispatchOut)

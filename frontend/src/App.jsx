@@ -34,6 +34,8 @@ import Settings from './pages/Settings'
 import Gastos from './pages/Gastos'
 import GastosDashboard from './pages/GastosDashboard'
 import ClientDocs from './pages/ClientDocs'
+import ClientPortal from './pages/ClientPortal'
+import MisPedidos from './pages/MisPedidos'
 import ResetPassword from './pages/ResetPassword'
 import Letters from './pages/Letters'
 import Contratos from './pages/Contratos'
@@ -97,7 +99,7 @@ function AppRoutes() {
     <>
     <FormatLoader />
     <Routes>
-      <Route path="/login" element={user ? <Navigate to={user.role === 'client' ? '/tickets' : user.role === 'superadmin' ? '/system' : '/dashboard'} /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to={user.role === 'client' ? '/inicio' : user.role === 'superadmin' ? '/system' : '/dashboard'} /> : <Login />} />
       <Route path="/system" element={<PrivateRoute roles={['superadmin']}><SystemConfig /></PrivateRoute>} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/dashboard" element={<PrivateRoute roles={['admin', 'agent', 'supervisor']}><Dashboard /></PrivateRoute>} />
@@ -136,7 +138,9 @@ function AppRoutes() {
       <Route path="/projects/:ref?" element={<PrivateRoute roles={['admin', 'agent', 'supervisor']}><Projects /></PrivateRoute>} />
       <Route path="/suppliers/:ref?" element={<PrivateRoute roles={['admin', 'ventas', 'supervisor']}><Suppliers /></PrivateRoute>} />
       <Route path="/mis-documentos/:ref?" element={<PrivateRoute roles={['client']}><ClientDocs /></PrivateRoute>} />
-      <Route path="/" element={<Navigate to={user?.role === 'client' ? '/tickets' : user?.role === 'superadmin' ? '/system' : '/dashboard'} replace />} />
+      <Route path="/inicio" element={<PrivateRoute roles={['client']}><ClientPortal /></PrivateRoute>} />
+      <Route path="/mis-pedidos" element={<PrivateRoute roles={['client']}><MisPedidos /></PrivateRoute>} />
+      <Route path="/" element={<Navigate to={user?.role === 'client' ? '/inicio' : user?.role === 'superadmin' ? '/system' : '/dashboard'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </>

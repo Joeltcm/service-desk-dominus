@@ -367,6 +367,7 @@ class Dispatch(Base):
     delivery_date = Column(Date, nullable=True)
     status = Column(String(50), default="Borrador", nullable=False)
     assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # técnico que prepara los equipos
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # cliente que solicitó el pedido (portal)
     notes = Column(Text, nullable=True)
     items = Column(Text, nullable=True)  # JSON: [{description, qty, unit_price}]
     itbms_enabled = Column(Boolean, default=False)
@@ -384,6 +385,7 @@ class Dispatch(Base):
     order = relationship("Order", foreign_keys=[order_id], back_populates="dispatches")
     quote = relationship("Quote", foreign_keys=[quote_id])
     assigned_tech = relationship("User", foreign_keys=[assigned_to_id])
+    client = relationship("User", foreign_keys=[client_id])
     attachments = relationship("DispatchAttachment", back_populates="dispatch", cascade="all, delete-orphan")
     invoice = relationship("Invoice", foreign_keys="[Invoice.dispatch_id]", back_populates="dispatch", uselist=False)
     timeline = relationship("DispatchTimeline", back_populates="dispatch", order_by="DispatchTimeline.created_at", cascade="all, delete-orphan")

@@ -536,6 +536,11 @@ def _migrate_pg():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS client_id INTEGER REFERENCES users(id)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS invoice_payments (
                     id SERIAL PRIMARY KEY,

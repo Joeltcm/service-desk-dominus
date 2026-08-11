@@ -779,12 +779,37 @@ class DispatchUpdate(BaseModel):
     total: Optional[str] = None
 
 
+class ClientDispatchCreate(BaseModel):
+    """Solicitud de pedido creada por un cliente desde el portal (descripción genérica,
+    artículos en texto libre; luego un agente la evalúa)."""
+    title: str
+    notes: Optional[str] = None
+    items: Optional[str] = None  # JSON: [{description, qty}]
+
+
+class MyDispatchOut(BaseModel):
+    id: int
+    dispatch_number: Optional[str] = None
+    title: str
+    status: str
+    notes: Optional[str] = None
+    items: Optional[str] = None
+    total: Optional[str] = None
+    delivery_date: Optional[_Date] = None
+    assigned_to_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class DispatchOut(BaseModel):
     id: int
     title: str
     dispatch_number: Optional[str] = None
     order_id: Optional[int] = None
     order: Optional[OrderMiniRef] = None
+    client_id: Optional[int] = None
     quote_id: Optional[int] = None
     quote: Optional[QuoteMini] = None
     assigned_to_id: Optional[int] = None
