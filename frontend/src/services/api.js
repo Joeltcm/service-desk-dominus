@@ -383,6 +383,7 @@ export const getInventoryTransactions = (id, limit = 50) => api.get(`/inventory/
 export const withdrawInventoryItem = (id, data) => api.post(`/inventory/${id}/withdraw`, data)
 export const receiveInventoryItem = (id, data) => api.post(`/inventory/${id}/receive`, data)
 export const adjustInventoryItem = (id, data) => api.post(`/inventory/${id}/adjust`, data)
+export const updateInventoryPending = (id, data) => api.patch(`/inventory/${id}/pending`, data)
 export const getAllInventoryTransactions = (params) => api.get('/inventory/transactions/all', { params })
 export const getInventoryReportPdf = (params) => api.get('/inventory/reports/movements/pdf', { params, responseType: 'blob' })
 export const importInventoryCSV = (file) => {

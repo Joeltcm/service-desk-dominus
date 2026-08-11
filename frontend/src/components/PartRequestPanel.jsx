@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest, returnPartRequest } from '../services/api'
+import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest, returnPartRequest, getSuppliers } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { Boxes, Plus, Check, X, Search, Clock, Ban, Undo2 } from 'lucide-react'
+import { Boxes, Plus, Check, X, Search, Clock, Ban, Undo2, Truck, CalendarClock } from 'lucide-react'
+import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
 
 const STATUS = {
@@ -27,9 +28,25 @@ export default function PartRequestPanel({ ticketId }) {
   const [acting, setActing] = useState(null)
   const [special, setSpecial] = useState(false)
   const [specialDesc, setSpecialDesc] = useState('')
+  const [suppliers, setSuppliers] = useState([])
+  const [approveReq, setApproveReq] = useState(null)   // solicitud especial en aprobación
+  const [apSupplier, setApSupplier] = useState('')
+  const [apEta, setApEta] = useState('')
 
   const load = () => getPartRequests({ ticket_id: ticketId }).then(r => setRequests(r.data)).catch(() => {})
   useEffect(() => { if (ticketId) load() }, [ticketId])
+  useEffect(() => { if (isApprover) getSuppliers().then(r => setSuppliers(r.data)).catch(() => {}) }, [isApprover])
+
+  const openApprove = (r) => { setApproveReq(r); setApSupplier(''); setApEta('') }
+  const confirmApprove = async () => {
+    setActing(approveReq.id)
+    try {
+      await approvePartRequest(approveReq.id, { supplier_id: apSupplier ? Number(apSupplier) : null, expected_date: apEta || null })
+      toast.success('Aprobada · pendiente por recibir')
+      setApproveReq(null); load()
+    } catch (e) { toast.error(e.response?.data?.detail || 'Error al aprobar') }
+    finally { setActing(null) }
+  }
 
   const openModal = () => {
     setShowModal(true); setSel(null); setQ(''); setQty('1'); setNotes(''); setSpecial(false); setSpecialDesc('')
@@ -104,14 +121,31 @@ export default function PartRequestPanel({ ticketId }) {
                     Solicitó: {r.requested_by_name || '—'}
                     {r.approved_by_name && ` · ${r.status === 'aprobado' ? 'Aprobó' : 'Decidió'}: ${r.approved_by_name}`}
                   </div>
+                  {/* Estado de espera de la parte especial aprobada */}
+                  {r.is_special && r.status === 'aprobado' && r.special_state === 'en_espera' && (() => {
+                    const overdue = r.pending_eta && new Date(r.pending_eta) < new Date(new Date().toDateString())
+                    return (
+                      <div className={`inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full font-medium mt-1 ${overdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                        <CalendarClock size={11} />
+                        En espera de proveedor
+                        {r.pending_eta ? ` · llega ${fmtD(r.pending_eta + 'T12:00:00')}${overdue ? ' (atrasada)' : ''}` : ' · sin fecha'}
+                        {r.supplier_name ? ` · ${r.supplier_name}` : ''}
+                      </div>
+                    )
+                  })()}
+                  {r.is_special && r.status === 'aprobado' && r.special_state === 'disponible' && (
+                    <div className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full font-medium mt-1 bg-emerald-100 text-emerald-700">
+                      <Check size={11} /> Recibida · disponible en inventario
+                    </div>
+                  )}
                   {r.notes && <div className="text-xs text-gray-500 mt-0.5 italic">“{r.notes}”</div>}
                 </div>
                 {r.status === 'pendiente' && (
                   <div className="flex gap-1.5 flex-shrink-0 items-center">
                     {isApprover && (
                       <>
-                        <button onClick={() => decide(r.id, 'approve')} disabled={acting === r.id}
-                          className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title="Aprobar y despachar">
+                        <button onClick={() => r.is_special ? openApprove(r) : decide(r.id, 'approve')} disabled={acting === r.id}
+                          className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title={r.is_special ? 'Aprobar y ordenar (fecha estimada)' : 'Aprobar y despachar'}>
                           <Check size={14} />
                         </button>
                         <button onClick={() => decide(r.id, 'reject')} disabled={acting === r.id}
@@ -217,6 +251,40 @@ export default function PartRequestPanel({ ticketId }) {
               <button onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
               <button onClick={submit} disabled={saving || (special ? !specialDesc.trim() : !sel)} className="btn-primary disabled:opacity-60">
                 {saving ? 'Enviando...' : 'Solicitar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal aprobar parte especial (proveedor + ETA) */}
+      {approveReq && (
+        <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={() => setApproveReq(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Truck size={16} className="text-teal-600" /> Aprobar y ordenar parte</h3>
+              <button onClick={() => setApproveReq(null)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X size={16} /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-gray-500 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
+                <b>{approveReq.item_name}</b> (x{approveReq.quantity}). Quedará <b>pendiente por recibir</b> hasta que llegue del proveedor.
+              </p>
+              <div>
+                <label className="label">Proveedor (opcional)</label>
+                <select className="input w-full" value={apSupplier} onChange={e => setApSupplier(e.target.value)} style={{ fontSize: '16px' }}>
+                  <option value="">— Sin definir —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Fecha estimada de llegada (opcional)</label>
+                <input type="date" className="input w-full" value={apEta} onChange={e => setApEta(e.target.value)} style={{ fontSize: '16px' }} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-100">
+              <button onClick={() => setApproveReq(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={confirmApprove} disabled={acting === approveReq.id} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-60 text-sm">
+                <Check size={15} /> {acting === approveReq.id ? 'Aprobando…' : 'Aprobar'}
               </button>
             </div>
           </div>

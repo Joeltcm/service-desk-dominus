@@ -546,6 +546,11 @@ def _migrate_pg():
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS pending_eta DATE"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute(text("ALTER TABLE part_requests ADD COLUMN IF NOT EXISTS is_special BOOLEAN DEFAULT FALSE"))
             conn.commit()
         except Exception:

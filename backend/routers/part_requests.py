@@ -10,8 +10,31 @@ import models, schemas
 router = APIRouter(prefix="/api/part-requests", tags=["part-requests"])
 
 
-def _serialize(pr: models.PartRequest) -> dict:
+def _pending_info(db: Session, pr: models.PartRequest) -> dict:
+    """Para partes especiales aprobadas: estado de espera derivado del artículo pendiente."""
+    if not (getattr(pr, "is_special", False) and pr.item_code):
+        return {}
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
+    if not item:
+        return {}
+    try:
+        pending = float(item.pending_qty or 0)
+    except (ValueError, TypeError):
+        pending = 0.0
+    sup = None
+    if item.supplier_id:
+        s = db.query(models.Supplier.name).filter(models.Supplier.id == item.supplier_id).first()
+        sup = s[0] if s else None
     return {
+        "pending_qty": item.pending_qty,
+        "pending_eta": item.pending_eta.isoformat() if item.pending_eta else None,
+        "supplier_name": sup,
+        "special_state": ("en_espera" if pending > 0 else "disponible") if pr.status == "aprobado" else None,
+    }
+
+
+def _serialize(pr: models.PartRequest, db: Session = None) -> dict:
+    d = {
         "id": pr.id,
         "ticket_id": pr.ticket_id,
         "ticket_title": pr.ticket.title if pr.ticket else None,
@@ -29,6 +52,9 @@ def _serialize(pr: models.PartRequest) -> dict:
         "created_at": pr.created_at.isoformat() if pr.created_at else None,
         "decided_at": pr.decided_at.isoformat() if pr.decided_at else None,
     }
+    if db is not None:
+        d.update(_pending_info(db, pr))
+    return d
 
 
 @router.post("", response_model=schemas.PartRequestOut)
@@ -104,7 +130,7 @@ def create_part_request(
         db.commit()
     except Exception:
         db.rollback()
-    return _serialize(pr)
+    return _serialize(pr, db)
 
 
 @router.post("/{req_id}/cancel", response_model=schemas.PartRequestOut)
@@ -127,7 +153,7 @@ def cancel_part_request(
     pr.decided_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(pr)
-    return _serialize(pr)
+    return _serialize(pr, db)
 
 
 @router.get("", response_model=List[schemas.PartRequestOut])
@@ -143,7 +169,7 @@ def list_part_requests(
     if ticket_id:
         q = q.filter(models.PartRequest.ticket_id == ticket_id)
     rows = q.order_by(models.PartRequest.created_at.desc()).all()
-    return [_serialize(r) for r in rows]
+    return [_serialize(r, db) for r in rows]
 
 
 @router.get("/pending-count")
@@ -192,6 +218,11 @@ def approve_part_request(
             except (ValueError, TypeError):
                 cur_pending = 0.0
             item.pending_qty = f"{cur_pending + float(pr.quantity or '0'):.4f}".rstrip("0").rstrip(".") or "0"
+        # Espera del proveedor: proveedor + fecha estimada de llegada (ETA).
+        if data.supplier_id:
+            item.supplier_id = data.supplier_id
+        if data.expected_date:
+            item.pending_eta = data.expected_date
         pr.item_code = code
     else:
         item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
@@ -233,7 +264,7 @@ def approve_part_request(
             pass
     db.commit()
     db.refresh(pr)
-    return _serialize(pr)
+    return _serialize(pr, db)
 
 
 @router.post("/{req_id}/return", response_model=schemas.PartRequestOut)
@@ -271,7 +302,7 @@ def return_part_request(
     pr.decided_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(pr)
-    return _serialize(pr)
+    return _serialize(pr, db)
 
 
 @router.post("/{req_id}/reject", response_model=schemas.PartRequestOut)
@@ -304,4 +335,4 @@ def reject_part_request(
             pass
     db.commit()
     db.refresh(pr)
-    return _serialize(pr)
+    return _serialize(pr, db)

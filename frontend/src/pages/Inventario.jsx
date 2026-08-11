@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, updateInventoryPending, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
 import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -161,6 +161,9 @@ export default function Inventario() {
   const [historyItem, setHistoryItem] = useState(null)
   const [historyTxns, setHistoryTxns] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [etaItem, setEtaItem] = useState(null)
+  const [etaValue, setEtaValue] = useState('')
+  const [etaSaving, setEtaSaving] = useState(false)
   const [withdrawItem, setWithdrawItem] = useState(null)
   const [withdrawQty, setWithdrawQty] = useState('')
   const [withdrawMotivo, setWithdrawMotivo] = useState(MOTIVOS[0])
@@ -582,6 +585,17 @@ export default function Inventario() {
   const openReceive = (item) => {
     setReceiveForm({ supplier_id: item.supplier_id ? String(item.supplier_id) : '', qty: '', cost: '', notes: '' })
     setReceiveItem(item)
+  }
+
+  const openEta = (item) => { setEtaValue(item.pending_eta || ''); setEtaItem(item) }
+  const saveEta = async () => {
+    setEtaSaving(true)
+    try {
+      await updateInventoryPending(etaItem.id, { expected_date: etaValue || null })
+      toast.success('Fecha estimada actualizada')
+      setEtaItem(null); load()
+    } catch { toast.error('Error al actualizar la fecha') }
+    finally { setEtaSaving(false) }
   }
 
   const handleReceive = async () => {
@@ -1136,11 +1150,21 @@ export default function Inventario() {
                   <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
-                    {parseFloat(it.pending_qty || '0') > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 mt-1">
-                        ⏳ {fmtQty(it.pending_qty)} pendiente(s) por recibir
-                      </span>
-                    )}
+                    {parseFloat(it.pending_qty || '0') > 0 && (() => {
+                      const overdue = it.pending_eta && new Date(it.pending_eta) < new Date(new Date().toDateString())
+                      const eta = it.pending_eta ? `${it.pending_eta.slice(8, 10)}/${it.pending_eta.slice(5, 7)}` : null
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => { if (canEdit) { e.stopPropagation(); openEta(it) } }}
+                          disabled={!canEdit}
+                          title={canEdit ? 'Editar fecha estimada de llegada' : undefined}
+                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold mt-1 ${overdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'} ${canEdit ? 'hover:brightness-95 cursor-pointer' : 'cursor-default'}`}
+                        >
+                          ⏳ {fmtQty(it.pending_qty)} pendiente(s) por recibir{eta ? ` · ETA ${eta}${overdue ? ' (atrasada)' : ''}` : ' · sin fecha'}
+                        </button>
+                      )
+                    })()}
                     <div className="flex flex-wrap items-center gap-1.5 mt-1 lg:hidden">
                       {it.condition && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span>}
                       {it.item_status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span>}
@@ -1343,6 +1367,31 @@ export default function Inventario() {
       )}
 
       {/* Recibir stock (de proveedor) */}
+      {etaItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-5 border-b">
+              <div>
+                <h3 className="font-semibold text-gray-900">Fecha estimada de llegada</h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{etaItem.code} · {etaItem.name}</p>
+              </div>
+              <button onClick={() => setEtaItem(null)}><X size={18} className="text-gray-400" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-gray-500">Actualiza cuándo esperas recibir esta parte pendiente. Déjala vacía si aún no la sabes.</p>
+              <input type="date" className="input w-full" value={etaValue} onChange={e => setEtaValue(e.target.value)} style={{ fontSize: '16px' }} />
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t">
+              {etaValue && <button onClick={() => setEtaValue('')} className="text-sm text-gray-500 hover:text-gray-700 mr-auto">Quitar fecha</button>}
+              <button onClick={() => setEtaItem(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={saveEta} disabled={etaSaving} className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 disabled:opacity-60 text-sm">
+                {etaSaving ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {receiveItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">

@@ -700,7 +700,11 @@ def receive_inventory_item(
     part_arrived = pending > 0
     if pending > 0:
         remaining = max(0.0, pending - data.qty)
-        item.pending_qty = (f"{remaining:.4f}".rstrip("0").rstrip(".") or None) if remaining > 0 else None
+        if remaining > 0:
+            item.pending_qty = f"{remaining:.4f}".rstrip("0").rstrip(".") or None
+        else:
+            item.pending_qty = None
+            item.pending_eta = None  # ya llegó todo lo pendiente
 
     note = f"Recibido de {supplier.name} · costo unit. ${data.cost:.2f}"
     if data.notes and data.notes.strip():
@@ -732,6 +736,27 @@ def receive_inventory_item(
             db.commit()
         except Exception:
             db.rollback()
+    return item
+
+
+@router.patch("/{item_id}/pending", response_model=schemas.InventoryItemOut)
+def update_pending_eta(
+    item_id: int,
+    data: schemas.InventoryPendingUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    """Actualiza la fecha estimada de llegada (ETA) y/o el proveedor de una parte pendiente por recibir."""
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    updates = data.model_dump(exclude_unset=True)
+    if "expected_date" in updates:
+        item.pending_eta = updates["expected_date"]
+    if "supplier_id" in updates:
+        item.supplier_id = updates["supplier_id"]
+    db.commit()
+    db.refresh(item)
     return item
 
 

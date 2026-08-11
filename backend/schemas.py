@@ -1382,11 +1382,13 @@ class InventoryItemOut(BaseModel):
     cost_price: Optional[str] = None
     quantity: Optional[str] = None
     pending_qty: Optional[str] = None
+    pending_eta: Optional[date] = None
     category: Optional[str] = None
     notes: Optional[str] = None
     is_active: bool
     warehouse: Optional[str] = None
     supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
     condition: Optional[str] = None
     item_status: Optional[str] = None
     location: Optional[str] = None
@@ -1958,6 +1960,13 @@ class PartRequestCreate(BaseModel):
 
 class PartRequestDecision(BaseModel):
     decision_notes: Optional[str] = None
+    supplier_id: Optional[int] = None       # proveedor al que se le pedirá (parte especial)
+    expected_date: Optional[date] = None    # fecha estimada de llegada (ETA)
+
+
+class InventoryPendingUpdate(BaseModel):
+    expected_date: Optional[date] = None
+    supplier_id: Optional[int] = None
 
 
 class PartRequestOut(BaseModel):
@@ -1969,6 +1978,10 @@ class PartRequestOut(BaseModel):
     quantity: str
     status: str
     is_special: bool = False
+    pending_qty: Optional[str] = None
+    pending_eta: Optional[date] = None
+    special_state: Optional[str] = None      # en_espera | disponible (partes especiales aprobadas)
+    supplier_name: Optional[str] = None
     notes: Optional[str] = None
     decision_notes: Optional[str] = None
     requested_by_id: Optional[int] = None

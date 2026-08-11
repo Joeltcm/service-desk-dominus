@@ -720,6 +720,7 @@ class InventoryItem(Base):
     cost_price = Column(String(50), nullable=True, default="0.00")  # último precio de compra
     quantity = Column(String(50), nullable=True, default="0")
     pending_qty = Column(String(50), nullable=True)  # cantidad pendiente por recibir (parte especial aprobada, aún no llega)
+    pending_eta = Column(Date, nullable=True)         # fecha estimada de llegada de la parte pendiente
     category = Column(String(100), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -732,6 +733,10 @@ class InventoryItem(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     supplier = relationship("Supplier")
+
+    @property
+    def supplier_name(self):
+        return self.supplier.name if self.supplier else None
 
 
 class TicketTimeLog(Base):
