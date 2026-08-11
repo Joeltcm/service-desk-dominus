@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, updateInventoryPending, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock } from 'lucide-react'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -209,7 +209,13 @@ export default function Inventario() {
     return items.find(it => (it.description || '').trim().toLowerCase() === d && it.code !== form.code) || null
   })()
 
+  // Partes especiales aún pendientes por recibir: van en su propia tarjeta, no en la tabla.
+  const isPending = (it) => (parseFloat(it.pending_qty || '0') || 0) > 0
+  const pendingItems = items.filter(isPending)
+  const stockItems = items.filter(it => !isPending(it))  // inventario real (sin pendientes por recibir)
+
   const filtered = items.filter(it => {
+    if (isPending(it)) return false  // excluidas de la tabla principal hasta que se reciban
     const q = search.toLowerCase()
     const matchSearch = !q || it.code.toLowerCase().includes(q) || it.name.toLowerCase().includes(q) || (it.category || '').toLowerCase().includes(q) || (it.location || '').toLowerCase().includes(q)
     const matchCat = !filterCategory || it.category === filterCategory
@@ -733,7 +739,7 @@ export default function Inventario() {
           onClick={() => handleTabChange('items')}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'items' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
         >
-          <span className="flex items-center gap-1.5"><Package size={14} /> Artículos <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{items.length}</span></span>
+          <span className="flex items-center gap-1.5"><Package size={14} /> Artículos <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{stockItems.length}</span></span>
         </button>
         <button
           onClick={() => handleTabChange('movimientos')}
@@ -1042,23 +1048,23 @@ export default function Inventario() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
           <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
             <p className="text-xs text-gray-400 mb-1">Total artículos</p>
-            <p className="text-2xl font-bold text-gray-900">{items.length}</p>
+            <p className="text-2xl font-bold text-gray-900">{stockItems.length}</p>
           </div>
           <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 shadow-sm col-span-1">
             <p className="text-xs text-emerald-600 font-medium mb-1">Valor en bodega</p>
             <p className="text-2xl font-bold text-emerald-700">
-              ${items.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${stockItems.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 shadow-sm col-span-1">
             <p className="text-xs text-blue-600 font-medium mb-1">Valor de venta</p>
             <p className="text-2xl font-bold text-blue-700">
-              ${items.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.unit_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${stockItems.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.unit_price || '0') || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
-          <div className={`rounded-xl p-4 shadow-sm border ${items.filter(lowStock).length > 0 ? 'bg-orange-50 border-orange-100' : 'bg-white border-gray-100'}`}>
-            <p className={`text-xs font-medium mb-1 ${items.filter(lowStock).length > 0 ? 'text-orange-500' : 'text-gray-400'}`}>Stock bajo (≤5)</p>
-            <p className={`text-2xl font-bold ${items.filter(lowStock).length > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{items.filter(lowStock).length}</p>
+          <div className={`rounded-xl p-4 shadow-sm border ${stockItems.filter(lowStock).length > 0 ? 'bg-orange-50 border-orange-100' : 'bg-white border-gray-100'}`}>
+            <p className={`text-xs font-medium mb-1 ${stockItems.filter(lowStock).length > 0 ? 'text-orange-500' : 'text-gray-400'}`}>Stock bajo (≤5)</p>
+            <p className={`text-2xl font-bold ${stockItems.filter(lowStock).length > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{stockItems.filter(lowStock).length}</p>
           </div>
         </div>
       )}
@@ -1101,6 +1107,50 @@ export default function Inventario() {
           )}
         </div>
       </div>
+
+      {/* Pendientes por recibir (partes especiales aprobadas, aún no llegan) */}
+      {pendingItems.length > 0 && (
+        <div className="card mb-4">
+          <div className="flex items-center gap-2 mb-3">
+            <CalendarClock size={15} className="text-amber-500" />
+            <h3 className="text-sm font-semibold text-gray-800">Pendientes por recibir</h3>
+            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">{pendingItems.length}</span>
+            <span className="text-xs text-gray-400 hidden sm:inline">— pasan al inventario al recibirlas</span>
+          </div>
+          <div className="space-y-2">
+            {pendingItems.map(it => {
+              const overdue = it.pending_eta && new Date(it.pending_eta) < new Date(new Date().toDateString())
+              const eta = it.pending_eta ? `${it.pending_eta.slice(8, 10)}/${it.pending_eta.slice(5, 7)}/${it.pending_eta.slice(0, 4)}` : null
+              const m = (it.code || '').match(/^ESP-T(\d+)-/)
+              return (
+                <div key={it.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-amber-100 bg-amber-50/40 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-[11px] font-semibold text-gray-500">{it.code}</span>
+                      <span className="text-sm font-medium text-gray-800">{it.name}</span>
+                      <span className="text-xs text-gray-500">× {fmtQty(it.pending_qty)}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                      {m && <a href={`/tickets/${m[1]}`} className="text-blue-500 hover:text-blue-700">Ticket #{m[1]}</a>}
+                      {it.supplier_name && <span>· {it.supplier_name}</span>}
+                      <button onClick={() => openEta(it)} disabled={!canEdit}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium ${overdue ? 'text-red-600' : 'text-amber-700'} ${canEdit ? 'hover:bg-amber-100' : ''}`}
+                        title={canEdit ? 'Editar fecha estimada de llegada' : undefined}>
+                        <CalendarClock size={11} /> {eta ? `ETA ${eta}${overdue ? ' (atrasada)' : ''}` : 'Definir ETA'}
+                      </button>
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <button onClick={() => openReceive(it)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 flex-shrink-0">
+                      <PackagePlus size={13} /> Recibir
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="card overflow-hidden p-0">
@@ -1150,21 +1200,6 @@ export default function Inventario() {
                   <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
-                    {parseFloat(it.pending_qty || '0') > 0 && (() => {
-                      const overdue = it.pending_eta && new Date(it.pending_eta) < new Date(new Date().toDateString())
-                      const eta = it.pending_eta ? `${it.pending_eta.slice(8, 10)}/${it.pending_eta.slice(5, 7)}` : null
-                      return (
-                        <button
-                          type="button"
-                          onClick={(e) => { if (canEdit) { e.stopPropagation(); openEta(it) } }}
-                          disabled={!canEdit}
-                          title={canEdit ? 'Editar fecha estimada de llegada' : undefined}
-                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold mt-1 ${overdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'} ${canEdit ? 'hover:brightness-95 cursor-pointer' : 'cursor-default'}`}
-                        >
-                          ⏳ {fmtQty(it.pending_qty)} pendiente(s) por recibir{eta ? ` · ETA ${eta}${overdue ? ' (atrasada)' : ''}` : ' · sin fecha'}
-                        </button>
-                      )
-                    })()}
                     <div className="flex flex-wrap items-center gap-1.5 mt-1 lg:hidden">
                       {it.condition && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CONDITION_COLOR[it.condition] || 'bg-gray-100 text-gray-600'}`}>{CONDITION_LABEL[it.condition] || it.condition}</span>}
                       {it.item_status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_STATUS_COLOR[it.item_status] || 'bg-gray-100 text-gray-600'}`}>{ITEM_STATUS_LABEL[it.item_status] || it.item_status}</span>}
@@ -1238,7 +1273,7 @@ export default function Inventario() {
         <div className="mt-3 flex gap-4 text-xs text-gray-500 flex-wrap">
           <span>{filtered.length} artículos mostrados</span>
           <span className="text-orange-500 flex items-center gap-1">
-            <AlertTriangle size={11} /> {items.filter(lowStock).length} con stock bajo (≤5)
+            <AlertTriangle size={11} /> {stockItems.filter(lowStock).length} con stock bajo (≤5)
           </span>
           <span className="ml-auto font-semibold text-emerald-700">
             Valor total en bodega: ${filtered.reduce((s, it) => s + (parseFloat(it.quantity || '0') || 0) * (parseFloat(it.cost_price || '0') || 0), 0).toFixed(2)}
@@ -1302,7 +1337,7 @@ export default function Inventario() {
                   {(() => {
                     const q = exitSearch.trim().toLowerCase()
                     const matches = items
-                      .filter(x => x.is_active !== false && (!q || `${x.code} ${x.name}`.toLowerCase().includes(q)))
+                      .filter(x => x.is_active !== false && !isPending(x) && (!q || `${x.code} ${x.name}`.toLowerCase().includes(q)))
                       .slice(0, 40)
                     return (
                       <div className="mt-2 border border-gray-200 rounded-lg max-h-56 overflow-y-auto divide-y divide-gray-50">
