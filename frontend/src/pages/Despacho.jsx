@@ -272,6 +272,7 @@ export default function Despacho() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [orders, setOrders] = useState([])
   const [quotes, setQuotes] = useState([])
   const [agents, setAgents] = useState([])
@@ -515,7 +516,7 @@ export default function Despacho() {
     }
   }
 
-  const handleBack = () => { setMobileDetailOpen(false); setShowForm(false); navigate(-1) }
+  const handleBack = () => { setMobileDetailOpen(false); setShowForm(false); setSelected(null); navigate('/pedidos') }
   const detailSwipe = useTouchSwipe({ onSwipeRight: handleBack })
 
   const handlePrint = (d, autoprint = true) => {
@@ -531,88 +532,95 @@ export default function Despacho() {
     await sharePdfFromHtml(`${Noun} ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
   }
 
+  const displayedDispatches = onlyUnassigned ? dispatches.filter((d) => !d.assigned_to_id) : dispatches
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* Left panel */}
-      <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
-        <div className="px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold text-gray-900">{NounPl}</h1>
-            {canEditPedidos && <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3 py-2">
+      {/* Vista lista: tabla full-width (estilo Tickets) */}
+      <div className={`${(!selected && !showForm) ? 'flex' : 'hidden'} flex-1 flex-col bg-gray-50 overflow-hidden`}>
+        <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">{NounPl}</h1>
+            <p className="text-xs text-gray-400 mt-0.5">{dispatches.length} {nounPl}</p>
+          </div>
+          {canEditPedidos && (
+            <button onClick={handleNew} className="btn-primary flex items-center gap-1.5 text-sm px-3.5 py-2">
               <Plus size={15} /> Nuevo
-            </button>}
-          </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <FileCheck size={12} className="text-blue-400" />
-            <p className="text-xs text-blue-500 font-medium">{dispatches.length} guardado{dispatches.length !== 1 ? 's' : ''}</p>
-          </div>
+            </button>
+          )}
         </div>
 
-        <div className="px-4 py-3 space-y-2 border-b border-gray-100">
-          <div className="relative">
+        <div className="px-4 sm:px-6 pb-3 flex items-center gap-2 flex-wrap flex-shrink-0">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input className="input pl-8 w-full text-sm" placeholder={`Buscar ${nounPl}...`} value={search} onChange={(e) => setSearch(e.target.value)} style={{fontSize:'16px'}} />
           </div>
-          <select className="input w-full text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{fontSize:'16px'}}>
+          <select className="input text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{fontSize:'16px'}}>
             <option value="">Todos los estados</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          <button
+            onClick={() => setOnlyUnassigned((v) => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${onlyUnassigned ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+          >
+            <User size={12} /> Sin asignar <span className="font-bold">{dispatches.filter((d) => !d.assigned_to_id).length}</span>
+          </button>
         </div>
 
-        {dispatches.length > 0 && (
-          <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-1.5">
-            <FileCheck size={11} className="text-green-400" />
-            <span className="text-xs text-gray-400 font-medium">Registros guardados</span>
+        <div className="flex-1 overflow-auto px-4 sm:px-6 pb-6 min-h-0">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">N°</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">TÍTULO</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 hidden sm:table-cell">CLIENTE</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">TÉCNICO</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 hidden lg:table-cell">PREPARACIÓN</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">ESTADO</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 hidden md:table-cell">TOTAL</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 hidden md:table-cell">FECHA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedDispatches.length === 0 && (
+                    <tr><td colSpan={8} className="px-4 py-16 text-center text-gray-400 text-sm">
+                      {onlyUnassigned ? `Sin ${nounPl} sin asignar` : `Sin ${nounPl} guardados`}
+                    </td></tr>
+                  )}
+                  {displayedDispatches.map((d) => (
+                    <tr key={d.id} onClick={() => handleSelect(d)}
+                      className="border-b border-gray-50 last:border-0 cursor-pointer hover:bg-blue-50 transition-colors">
+                      <td className="px-4 py-3 text-gray-500 font-mono text-xs whitespace-nowrap">{d.dispatch_number || `#${d.id}`}</td>
+                      <td className="px-4 py-3 max-w-[220px]">
+                        <p className="font-medium text-gray-900 truncate" title={d.title}>{d.title}</p>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate hidden sm:table-cell">{d.client_name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 max-w-[150px] truncate">
+                        {d.assigned_to_name
+                          ? <span className="inline-flex items-center gap-1 text-gray-700"><User size={12} className="text-gray-400" /> {d.assigned_to_name}</span>
+                          : <span className="inline-flex items-center gap-1 text-amber-600"><User size={12} /> Sin asignar</span>}
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {d.tasks_total > 0
+                          ? <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${d.tasks_done === d.tasks_total ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'}`}><ListChecks size={11} /> {d.tasks_done}/{d.tasks_total}</span>
+                          : <span className="text-gray-300 text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap hidden md:table-cell">{d.total || '—'}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap hidden md:table-cell">{d.date ? fmtD(d.date + 'T12:00:00') : fmtD(d.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 divide-y divide-gray-50">
-          {dispatches.length === 0
-            ? (
-              <div className="text-center py-16 px-4 space-y-3">
-                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
-                  <FileCheck size={20} className="text-blue-200" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-400">Sin {nounPl} guardados</p>
-                  <p className="text-xs text-gray-300 mt-1">Usa el botón "Nuevo" para crear tu primer {noun}</p>
-                </div>
-              </div>
-            )
-            : dispatches.map((d) => (
-              <button key={d.id} onClick={() => handleSelect(d)}
-                className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${selected?.id === d.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-              >
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${STATUS_STYLE[d.status] || 'bg-gray-100'}`}>
-                  {STATUS_ICON[d.status] || <PackageCheck size={14} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className={`font-semibold text-sm truncate ${selected?.id === d.id ? 'text-blue-700' : 'text-gray-900'}`}>{d.title}</p>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <StatusBadge status={d.status} />
-                    {d.assigned_to_name && (
-                      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                        <User size={10} /> {d.assigned_to_name}
-                      </span>
-                    )}
-                    {d.tasks_total > 0 && (
-                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${d.tasks_done === d.tasks_total ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-600'}`}>
-                        <ListChecks size={10} /> {d.tasks_done}/{d.tasks_total}
-                      </span>
-                    )}
-                    {d.total && <span className="text-xs text-gray-500 font-medium">{d.total}</span>}
-                    {d.dispatch_number && <span className="text-xs font-mono text-gray-400">{d.dispatch_number}</span>}
-                  </div>
-                </div>
-                <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
-              </button>
-            ))
-          }
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className={`${mobileDetailOpen ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-gray-50 overflow-y-auto overscroll-contain min-h-0`} {...detailSwipe}>
+      {/* Detalle / formulario a pantalla completa */}
+      <div className={`${(selected || showForm) ? 'flex' : 'hidden'} flex-1 flex-col bg-gray-50 overflow-y-auto overscroll-contain min-h-0`} {...detailSwipe}>
         {showForm ? (
           <DispatchForm
             form={form} setForm={setForm}
@@ -841,34 +849,42 @@ function DispatchHistory({ dispatchId, version }) {
 
   return (
     <div className="card">
-      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-        <HistoryIcon size={13} /> Historial
+      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        <HistoryIcon size={16} className="text-gray-400" /> Historial
       </h3>
-      <div className="space-y-3 mb-3">
-        {items.length === 0 && <p className="text-xs text-gray-400">Sin eventos todavía.</p>}
-        {items.map((e) => (
-          <div key={e.id} className="flex gap-2.5">
-            <div className={`mt-0.5 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${e.entry_type === 'comment' ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-400'}`}>
-              {DISPATCH_TL_ICON[e.entry_type] || <MessageSquare size={12} />}
+      <div className="space-y-4 mb-4">
+        {items.length === 0 && <p className="text-sm text-gray-400 italic">Sin eventos todavía.</p>}
+        {items.map((e) => {
+          const isComment = e.entry_type === 'comment'
+          return (
+            <div key={e.id} className="flex gap-3">
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${isComment ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                {DISPATCH_TL_ICON[e.entry_type] || <MessageSquare size={12} />}
+              </div>
+              <div className="flex-1 min-w-0 py-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-700">{e.user_name || 'Sistema'}</span>
+                  <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">{fmtD(e.created_at)} · {fmtTime(e.created_at)}</span>
+                </div>
+                {isComment
+                  ? <div className="mt-1 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</div>
+                  : <p className="text-xs text-gray-500 italic mt-0.5 whitespace-pre-wrap break-words">{e.content}</p>}
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {e.user_name || 'Sistema'} · {fmtD(e.created_at)} {fmtTime(e.created_at)}
-              </p>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
-      <div className="flex gap-2">
+      <div className="border-t border-gray-100 pt-3">
         <textarea
-          className="input flex-1 text-sm h-10 resize-none" placeholder="Agregar nota (ej.: instalé RAM 8GB, Windows 11 + Office, pruebas OK)…"
+          className="input w-full text-sm resize-none h-16" placeholder="Escribe una nota… (ej.: instalé RAM 8GB, Windows 11 + Office, pruebas OK)"
           value={text} onChange={(e) => setText(e.target.value)}
           style={{ fontSize: '16px' }}
         />
-        <button onClick={add} disabled={busy || !text.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50 self-start">
-          <Plus size={14} /> Nota
-        </button>
+        <div className="flex justify-end mt-2">
+          <button onClick={add} disabled={busy || !text.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors text-sm">
+            <MessageSquare size={14} /> Agregar nota
+          </button>
+        </div>
       </div>
     </div>
   )

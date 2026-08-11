@@ -39,6 +39,8 @@ export default defineConfig({
         // Load push + notification handlers before Workbox initializes
         importScripts: ['push-handlers.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // El bundle principal superó los 2 MiB por defecto; subimos el límite de precache.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // No servir el index.html precacheado (cache-first) en navegaciones: eso hacía
         // que cambios de branding/deploy tardaran en verse. La navegación va network-first
         // (index.html siempre fresco), con caché solo como respaldo offline.
