@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { createClientDispatch, createTicket, getStatuses, companyLogoUrl } from '../services/api'
+import { createClientDispatch, createTicket, getStatuses, companyLogoUrl, getPublicCompanyInfo } from '../services/api'
+import defaultLogo from '../assets/default-logo.png'
+import dgsLogo from '../assets/dgs-logo.png'
 import { ArrowLeft, Plus, X, Send, LogIn, UserPlus, LifeBuoy, ShoppingCart } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -11,6 +13,12 @@ export default function PublicRequest() {
   const { user } = useAuth()
   const tipo = params.get('tipo') === 'pedido' ? 'pedido' : 'ticket'
   const isPedido = tipo === 'pedido'
+
+  const [info, setInfo] = useState({ company_name: '', company_sidebar_color: '' })
+  useEffect(() => { getPublicCompanyInfo().then((r) => setInfo(r.data || {})).catch(() => {}) }, [])
+  const brandName = info.company_name || info.company_app_name || 'Dominus Tech'
+  const bg = info.company_sidebar_color || '#1a3353'
+  const onLogoError = (e) => { e.currentTarget.onerror = null; e.currentTarget.src = defaultLogo }
 
   const [title, setTitle] = useState('')
   const [notes, setNotes] = useState('')
@@ -65,34 +73,41 @@ export default function PublicRequest() {
     } finally { setSaving(false) }
   }
 
-  const accent = isPedido ? 'blue' : 'orange'
-
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="flex items-center justify-between px-4 sm:px-8 py-4">
-        <img src={companyLogoUrl()} alt="Logo" className="h-9 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
-        <button onClick={() => navigate('/login')} className="flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900">
+    <div className="min-h-screen relative overflow-hidden flex flex-col" style={{ backgroundColor: bg }}>
+      {/* Fondo decorativo (igual al login) */}
+      <div className="absolute -top-24 -left-24 w-96 h-96 bg-white/5 rounded-full pointer-events-none" />
+      <div className="absolute -bottom-32 -right-20 w-[28rem] h-[28rem] bg-white/5 rounded-full pointer-events-none" />
+
+      <header className="relative z-10 flex items-center justify-between px-4 sm:px-8 py-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg overflow-hidden ring-1 ring-white/20">
+            <img src={companyLogoUrl()} onError={onLogoError} alt={brandName} className="w-full h-full object-cover" />
+          </div>
+          <span className="font-bold text-white text-sm">{brandName}</span>
+        </div>
+        <button onClick={() => navigate('/login')} className="flex items-center gap-1.5 text-sm font-medium text-blue-100 hover:text-white">
           <LogIn size={16} /> Iniciar sesión
         </button>
       </header>
 
-      <main className="flex-1">
+      <main className="relative z-10 flex-1">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 sm:py-8 w-full">
-          <button onClick={() => navigate('/bienvenido')} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4">
+          <button onClick={() => navigate('/bienvenido')} className="flex items-center gap-1.5 text-sm text-blue-100 hover:text-white mb-4">
             <ArrowLeft size={16} /> Volver
           </button>
 
           <div className="flex items-center gap-3 mb-5">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white ${isPedido ? 'bg-blue-600' : 'bg-orange-500'}`}>
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-lg ${isPedido ? 'bg-blue-500' : 'bg-orange-500'}`}>
               {isPedido ? <ShoppingCart size={22} /> : <LifeBuoy size={22} />}
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">{isPedido ? 'Solicitar un pedido' : 'Levantar un ticket'}</h1>
-              <p className="text-xs text-gray-400">{isPedido ? 'Pide equipos o artículos' : 'Reporta una falla o solicita soporte'}</p>
+              <h1 className="text-xl font-bold text-white">{isPedido ? 'Solicitar un pedido' : 'Levantar un ticket'}</h1>
+              <p className="text-xs text-blue-200">{isPedido ? 'Pide equipos o artículos' : 'Reporta una falla o solicita soporte'}</p>
             </div>
           </div>
 
-          <div className="card space-y-4">
+          <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 space-y-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Asunto *</label>
               <input className="input w-full" placeholder={isPedido ? 'Ej.: Necesito 3 laptops para ventas' : 'Ej.: Mi computadora no enciende'}
@@ -123,23 +138,28 @@ export default function PublicRequest() {
 
           {/* Aviso: se necesita cuenta para enviar */}
           {!user && (
-            <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-sm text-gray-600">Para <b>enviar</b> tu solicitud necesitas una cuenta (gratis). Guardaremos lo que escribiste y lo enviaremos apenas ingreses.</p>
+            <div className="mt-4 rounded-xl border border-white/15 bg-white/10 p-4">
+              <p className="text-sm text-blue-50">Para <b className="text-white">enviar</b> tu solicitud necesitas una cuenta (gratis). Guardaremos lo que escribiste y lo enviaremos apenas ingreses.</p>
               <div className="flex flex-wrap gap-2 mt-3">
-                <button onClick={() => saveDraftAndGo('/login')} className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg hover:bg-gray-900"><LogIn size={15} /> Iniciar sesión</button>
-                <button onClick={() => saveDraftAndGo('/login?registro=1')} className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white rounded-lg ${isPedido ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}`}><UserPlus size={15} /> Crear una cuenta</button>
+                <button onClick={() => saveDraftAndGo('/login')} className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-white text-gray-800 rounded-lg hover:bg-gray-100"><LogIn size={15} /> Iniciar sesión</button>
+                <button onClick={() => saveDraftAndGo('/login?registro=1')} className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white rounded-lg ${isPedido ? 'bg-blue-500 hover:bg-blue-600' : 'bg-orange-500 hover:bg-orange-600'}`}><UserPlus size={15} /> Crear una cuenta</button>
               </div>
             </div>
           )}
 
           <div className="flex justify-end mt-4">
             <button onClick={submit} disabled={saving || !title.trim()}
-              className={`flex items-center gap-2 px-5 py-2.5 text-white rounded-lg font-medium disabled:opacity-60 transition-colors ${isPedido ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}`}>
+              className={`flex items-center gap-2 px-5 py-2.5 text-white rounded-lg font-medium disabled:opacity-60 transition-colors shadow-lg ${isPedido ? 'bg-blue-500 hover:bg-blue-600' : 'bg-orange-500 hover:bg-orange-600'}`}>
               <Send size={16} /> {saving ? 'Enviando…' : (user ? 'Enviar solicitud' : 'Continuar')}
             </button>
           </div>
         </div>
       </main>
+
+      <footer className="relative z-10 py-5 flex items-center justify-center gap-2">
+        <img src={dgsLogo} alt="DG Solutions" className="w-6 h-6 rounded-md object-cover opacity-70" />
+        <p className="text-[11px] text-blue-200/50">Aplicación desarrollada por <span className="text-blue-100/80 font-semibold">DG Solutions</span></p>
+      </footer>
     </div>
   )
 }
