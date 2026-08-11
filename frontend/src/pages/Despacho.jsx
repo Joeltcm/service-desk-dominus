@@ -9,7 +9,7 @@ import {
   downloadWithAuth,
   createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
   createInvoiceFromDispatch,
-  getDispatchTimeline, addDispatchTimeline, getDispatchTasks, addDispatchTask, updateDispatchTask, deleteDispatchTask,
+  getDispatchTimeline, addDispatchTimeline, updateDispatchTimeline, deleteDispatchTimeline, getDispatchTasks, addDispatchTask, updateDispatchTask, deleteDispatchTask,
   getDispatchParts, addDispatchPart, deleteDispatchPart, searchInventory,
 } from '../services/api'
 import {
@@ -26,6 +26,7 @@ import toast from 'react-hot-toast'
 import { useFormGuard } from '../context/UnsavedChangesContext'
 import ItemEditor, { EMPTY_ITEM, parseItems, calcTotals } from '../components/ItemEditor'
 import { getCompanyCache, useCompany } from '../context/CompanyContext'
+import { useAuth } from '../context/AuthContext'
 import { useModuleAccess } from '../context/RoleFeaturesContext'
 import { useModules } from '../context/ModulesContext'
 
@@ -829,9 +830,12 @@ const DISPATCH_TL_ICON = {
   comment: <MessageSquare size={12} />,
 }
 function DispatchHistory({ dispatchId, version }) {
+  const { user } = useAuth()
   const [items, setItems] = useState([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
 
   const load = useCallback(() => {
     getDispatchTimeline(dispatchId).then((r) => setItems(r.data)).catch(() => {})
@@ -847,6 +851,23 @@ function DispatchHistory({ dispatchId, version }) {
     finally { setBusy(false) }
   }
 
+  const startEdit = (e) => { setEditingId(e.id); setEditText(e.content) }
+  const cancelEdit = () => { setEditingId(null); setEditText('') }
+  const saveEdit = async (e) => {
+    const t = editText.trim()
+    if (!t) return
+    try { await updateDispatchTimeline(dispatchId, e.id, t); cancelEdit(); load() }
+    catch (err) { toast.error(err?.response?.data?.detail || 'Error al editar la nota') }
+  }
+  const del = async (e) => {
+    if (!window.confirm('¿Eliminar esta nota?')) return
+    try { await deleteDispatchTimeline(dispatchId, e.id); load() }
+    catch (err) { toast.error(err?.response?.data?.detail || 'Error al eliminar la nota') }
+  }
+  const canModify = (e) => e.entry_type === 'comment' && (
+    e.user_id === user?.id || ['admin', 'supervisor', 'superadmin'].includes(user?.role)
+  )
+
   return (
     <div className="card">
       <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -856,8 +877,9 @@ function DispatchHistory({ dispatchId, version }) {
         {items.length === 0 && <p className="text-sm text-gray-400 italic">Sin eventos todavía.</p>}
         {items.map((e) => {
           const isComment = e.entry_type === 'comment'
+          const editing = editingId === e.id
           return (
-            <div key={e.id} className="flex gap-3">
+            <div key={e.id} className="flex gap-3 group">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${isComment ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
                 {DISPATCH_TL_ICON[e.entry_type] || <MessageSquare size={12} />}
               </div>
@@ -865,10 +887,26 @@ function DispatchHistory({ dispatchId, version }) {
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-gray-700">{e.user_name || 'Sistema'}</span>
                   <span className="text-xs text-gray-400 ml-auto whitespace-nowrap">{fmtD(e.created_at)} · {fmtTime(e.created_at)}</span>
+                  {canModify(e) && !editing && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => startEdit(e)} className="text-gray-300 hover:text-blue-600" title="Editar nota"><Pencil size={12} /></button>
+                      <button onClick={() => del(e)} className="text-gray-300 hover:text-red-500" title="Eliminar nota"><Trash2 size={12} /></button>
+                    </div>
+                  )}
                 </div>
-                {isComment
-                  ? <div className="mt-1 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</div>
-                  : <p className="text-xs text-gray-500 italic mt-0.5 whitespace-pre-wrap break-words">{e.content}</p>}
+                {editing ? (
+                  <div className="mt-1">
+                    <textarea className="input w-full text-sm resize-none h-16" value={editText} onChange={(ev) => setEditText(ev.target.value)} style={{ fontSize: '16px' }} autoFocus />
+                    <div className="flex justify-end gap-2 mt-1">
+                      <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancelar</button>
+                      <button onClick={() => saveEdit(e)} disabled={!editText.trim()} className="flex items-center gap-1 text-xs px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"><Save size={12} /> Guardar</button>
+                    </div>
+                  </div>
+                ) : isComment ? (
+                  <div className="mt-1 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 text-sm text-gray-700 whitespace-pre-wrap break-words">{e.content}</div>
+                ) : (
+                  <p className="text-xs text-gray-500 italic mt-0.5 whitespace-pre-wrap break-words">{e.content}</p>
+                )}
               </div>
             </div>
           )

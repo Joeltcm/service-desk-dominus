@@ -840,6 +840,10 @@ class DispatchTimelineCreate(BaseModel):
     is_internal: bool = False
 
 
+class DispatchTimelineUpdate(BaseModel):
+    content: str
+
+
 class DispatchTaskOut(BaseModel):
     id: int
     dispatch_id: int

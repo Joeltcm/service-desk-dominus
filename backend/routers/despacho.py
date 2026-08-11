@@ -433,6 +433,63 @@ def add_dispatch_timeline(
     return entry
 
 
+def _can_edit_note(entry: models.DispatchTimeline, user: models.User) -> bool:
+    """Solo el autor de la nota o un admin/supervisor pueden editarla/eliminarla."""
+    return (
+        entry.user_id == user.id
+        or user.role in (models.UserRole.admin, models.UserRole.supervisor, models.UserRole.superadmin)
+    )
+
+
+@router.patch("/{dispatch_id}/timeline/{entry_id}", response_model=schemas.DispatchTimelineOut)
+def update_dispatch_timeline(
+    dispatch_id: int,
+    entry_id: int,
+    data: schemas.DispatchTimelineUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    entry = db.query(models.DispatchTimeline).filter(
+        models.DispatchTimeline.id == entry_id,
+        models.DispatchTimeline.dispatch_id == dispatch_id,
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    if entry.entry_type != "comment":
+        raise HTTPException(status_code=400, detail="Solo se pueden editar las notas, no los eventos automáticos")
+    if not _can_edit_note(entry, current_user):
+        raise HTTPException(status_code=403, detail="No tienes permiso para editar esta nota")
+    content = (data.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="La nota no puede estar vacía")
+    entry.content = content
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@router.delete("/{dispatch_id}/timeline/{entry_id}")
+def delete_dispatch_timeline(
+    dispatch_id: int,
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    entry = db.query(models.DispatchTimeline).filter(
+        models.DispatchTimeline.id == entry_id,
+        models.DispatchTimeline.dispatch_id == dispatch_id,
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    if entry.entry_type != "comment":
+        raise HTTPException(status_code=400, detail="Solo se pueden eliminar las notas, no los eventos automáticos")
+    if not _can_edit_note(entry, current_user):
+        raise HTTPException(status_code=403, detail="No tienes permiso para eliminar esta nota")
+    db.delete(entry)
+    db.commit()
+    return {"ok": True}
+
+
 # ── Checklist de preparación (tasks) ──────────────────
 
 @router.get("/{dispatch_id}/tasks", response_model=List[schemas.DispatchTaskOut])
