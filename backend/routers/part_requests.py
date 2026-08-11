@@ -33,6 +33,37 @@ def _pending_info(db: Session, pr: models.PartRequest) -> dict:
     }
 
 
+def _clear_special_pending(db: Session, pr: models.PartRequest, hard: bool = False):
+    """Quita del artículo ESP la cantidad pendiente de esta solicitud. Si `hard` (eliminar) y el
+    artículo nunca se recibió, borra el artículo ESP y sus movimientos (limpia también stock fantasma)."""
+    if not (getattr(pr, "is_special", False) and pr.item_code):
+        return
+    item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
+    if not item:
+        return
+    try:
+        pend = float(item.pending_qty or 0); q = float(pr.quantity or 0)
+    except (ValueError, TypeError):
+        pend, q = 0.0, 0.0
+    rem = max(0.0, pend - q)
+    item.pending_qty = (f"{rem:.4f}".rstrip("0").rstrip(".") or None) if rem > 0 else None
+    if item.pending_qty is None:
+        item.pending_eta = None
+    received = db.query(models.InventoryTransaction).filter(
+        models.InventoryTransaction.item_code == item.code,
+        models.InventoryTransaction.source_type == "recepcion",
+    ).first()
+    try:
+        stock = float(item.quantity or 0)
+    except (ValueError, TypeError):
+        stock = 0.0
+    is_esp = (item.code or "").startswith("ESP-")
+    # Borra el artículo ESP solo si nunca se recibió (así no tocamos stock real ya recibido).
+    if is_esp and received is None and (hard or (item.pending_qty is None and stock <= 0)):
+        db.query(models.InventoryTransaction).filter(models.InventoryTransaction.item_code == item.code).delete()
+        db.delete(item)
+
+
 def _serialize(pr: models.PartRequest, db: Session = None) -> dict:
     d = {
         "id": pr.id,
@@ -142,13 +173,30 @@ def cancel_part_request(
     pr = db.query(models.PartRequest).filter(models.PartRequest.id == req_id).first()
     if not pr:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if pr.status != "pendiente":
-        raise HTTPException(status_code=400, detail=f"Solo se pueden cancelar solicitudes pendientes (actual: '{pr.status}')")
-    # Puede cancelar el solicitante o un admin/responsable de inventario.
-    if pr.requested_by_id != current_user.id and current_user.role not in (
-        models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supplies,
-    ):
+    is_approver = current_user.role in (
+        models.UserRole.admin, models.UserRole.superadmin, models.UserRole.supervisor, models.UserRole.supplies,
+    )
+    # Se puede cancelar: una solicitud pendiente, o el pedido de una parte especial ya aprobada
+    # que aún no ha llegado (queda sin efecto y se quita de "pendientes por recibir").
+    special_pending = pr.is_special and pr.status == "aprobado"
+    if pr.status != "pendiente" and not special_pending:
+        raise HTTPException(status_code=400, detail=f"No se puede cancelar una solicitud '{pr.status}'")
+    if special_pending and not is_approver:
+        raise HTTPException(status_code=403, detail="Solo un administrador/inventario puede cancelar un pedido aprobado")
+    if pr.status == "pendiente" and pr.requested_by_id != current_user.id and not is_approver:
         raise HTTPException(status_code=403, detail="Solo el solicitante o un administrador puede cancelar")
+    if special_pending:
+        _clear_special_pending(db, pr)
+        if pr.requested_by_id:
+            try:
+                from notify import create_notification
+                create_notification(
+                    db, pr.requested_by_id, "Pedido de parte cancelado",
+                    f"{pr.item_name} (x{pr.quantity}) · Ticket #{pr.ticket_id} — canceló {current_user.name}",
+                    url=f"/tickets/{pr.ticket_id}", kind="part_decision",
+                )
+            except Exception:
+                pass
     pr.status = "cancelado"
     pr.decided_at = datetime.now(timezone.utc)
     db.commit()
@@ -280,6 +328,8 @@ def return_part_request(
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
     if pr.status != "aprobado":
         raise HTTPException(status_code=400, detail=f"Solo se pueden devolver partes aprobadas (actual: '{pr.status}')")
+    if pr.is_special:
+        raise HTTPException(status_code=400, detail="Una parte especial no se devuelve. Usa 'Cancelar pedido' si aún no llega, o elimínala.")
 
     item = db.query(models.InventoryItem).filter(models.InventoryItem.code == pr.item_code).first()
     if item:
@@ -336,3 +386,22 @@ def reject_part_request(
     db.commit()
     db.refresh(pr)
     return _serialize(pr, db)
+
+
+@router.delete("/{req_id}")
+def delete_part_request(
+    req_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin_or_supplies),
+):
+    """Elimina la solicitud de parte. Si es una parte especial que nunca se recibió, también
+    limpia el artículo 'pendiente por recibir' (y stock fantasma) que había generado.
+    OJO: para partes normales aprobadas NO repone stock — usa 'Devolver' antes si aplica."""
+    pr = db.query(models.PartRequest).filter(models.PartRequest.id == req_id).first()
+    if not pr:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if pr.is_special:
+        _clear_special_pending(db, pr, hard=True)
+    db.delete(pr)
+    db.commit()
+    return {"ok": True}

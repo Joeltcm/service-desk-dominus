@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest, returnPartRequest, getSuppliers } from '../services/api'
+import { getInventory, getPartRequests, createPartRequest, approvePartRequest, rejectPartRequest, cancelPartRequest, returnPartRequest, deletePartRequest, getSuppliers } from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { Boxes, Plus, Check, X, Search, Clock, Ban, Undo2, Truck, CalendarClock } from 'lucide-react'
+import { Boxes, Plus, Check, X, Search, Clock, Ban, Undo2, Truck, CalendarClock, Trash2 } from 'lucide-react'
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
 
@@ -73,11 +73,13 @@ export default function PartRequestPanel({ ticketId }) {
   }
 
   const decide = async (id, action) => {
+    if (action === 'delete' && !window.confirm('¿Eliminar esta solicitud de parte? Si es especial y no se ha recibido, se quitará también de "pendientes por recibir".')) return
     setActing(id)
     try {
       if (action === 'approve') { await approvePartRequest(id); toast.success('Solicitud aprobada') }
-      else if (action === 'cancel') { await cancelPartRequest(id); toast.success('Solicitud cancelada') }
+      else if (action === 'cancel') { await cancelPartRequest(id); toast.success('Cancelada') }
       else if (action === 'return') { await returnPartRequest(id); toast.success('Parte devuelta · repuesta al inventario') }
+      else if (action === 'delete') { await deletePartRequest(id); toast.success('Solicitud eliminada') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()
     } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
@@ -140,37 +142,53 @@ export default function PartRequestPanel({ ticketId }) {
                   )}
                   {r.notes && <div className="text-xs text-gray-500 mt-0.5 italic">“{r.notes}”</div>}
                 </div>
-                {r.status === 'pendiente' && (
-                  <div className="flex gap-1.5 flex-shrink-0 items-center">
-                    {isApprover && (
-                      <>
-                        <button onClick={() => r.is_special ? openApprove(r) : decide(r.id, 'approve')} disabled={acting === r.id}
-                          className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title={r.is_special ? 'Aprobar y ordenar (fecha estimada)' : 'Aprobar y despachar'}>
-                          <Check size={14} />
+                <div className="flex gap-1.5 flex-shrink-0 items-center">
+                  {r.status === 'pendiente' && (
+                    <>
+                      {isApprover && (
+                        <>
+                          <button onClick={() => r.is_special ? openApprove(r) : decide(r.id, 'approve')} disabled={acting === r.id}
+                            className="p-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50" title={r.is_special ? 'Aprobar y ordenar (fecha estimada)' : 'Aprobar y despachar'}>
+                            <Check size={14} />
+                          </button>
+                          <button onClick={() => decide(r.id, 'reject')} disabled={acting === r.id}
+                            className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50" title="Rechazar">
+                            <X size={14} />
+                          </button>
+                        </>
+                      )}
+                      {(r.requested_by_id === user?.id || isApprover) && (
+                        <button onClick={() => decide(r.id, 'cancel')} disabled={acting === r.id}
+                          className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-50" title="Cancelar solicitud">
+                          <Ban size={14} />
                         </button>
-                        <button onClick={() => decide(r.id, 'reject')} disabled={acting === r.id}
-                          className="p-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50" title="Rechazar">
-                          <X size={14} />
-                        </button>
-                      </>
-                    )}
-                    {(r.requested_by_id === user?.id || isApprover) && (
-                      <button onClick={() => decide(r.id, 'cancel')} disabled={acting === r.id}
-                        className="p-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-50" title="Cancelar solicitud">
-                        <Ban size={14} />
-                      </button>
-                    )}
-                    {!isApprover && r.requested_by_id !== user?.id && (
-                      <span className="text-xs text-amber-500 flex items-center gap-1"><Clock size={12} /> En espera</span>
-                    )}
-                  </div>
-                )}
-                {r.status === 'aprobado' && isApprover && (
-                  <button onClick={() => decide(r.id, 'return')} disabled={acting === r.id}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 text-xs hover:bg-blue-50 disabled:opacity-50 flex-shrink-0" title="Devolver la parte al inventario">
-                    <Undo2 size={13} /> Devolver
-                  </button>
-                )}
+                      )}
+                      {!isApprover && r.requested_by_id !== user?.id && (
+                        <span className="text-xs text-amber-500 flex items-center gap-1"><Clock size={12} /> En espera</span>
+                      )}
+                    </>
+                  )}
+                  {/* Aprobado: partes normales se devuelven; especiales en espera se cancelan (no se devuelven) */}
+                  {r.status === 'aprobado' && isApprover && !r.is_special && (
+                    <button onClick={() => decide(r.id, 'return')} disabled={acting === r.id}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 text-blue-600 text-xs hover:bg-blue-50 disabled:opacity-50" title="Devolver la parte al inventario">
+                      <Undo2 size={13} /> Devolver
+                    </button>
+                  )}
+                  {r.status === 'aprobado' && isApprover && r.is_special && r.special_state === 'en_espera' && (
+                    <button onClick={() => decide(r.id, 'cancel')} disabled={acting === r.id}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-700 text-xs hover:bg-amber-50 disabled:opacity-50" title="Cancelar el pedido (aún no llega)">
+                      <Ban size={13} /> Cancelar pedido
+                    </button>
+                  )}
+                  {/* Eliminar la solicitud (aprobadores) */}
+                  {isApprover && r.status !== 'pendiente' && (
+                    <button onClick={() => decide(r.id, 'delete')} disabled={acting === r.id}
+                      className="p-1.5 rounded-lg border border-red-200 text-red-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50" title="Eliminar solicitud">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}

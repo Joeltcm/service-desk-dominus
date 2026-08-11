@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getPartRequests, approvePartRequest, rejectPartRequest, returnPartRequest } from '../services/api'
-import { Boxes, Check, X, ExternalLink, Undo2 } from 'lucide-react'
+import { getPartRequests, approvePartRequest, rejectPartRequest, returnPartRequest, cancelPartRequest, deletePartRequest } from '../services/api'
+import { Boxes, Check, X, ExternalLink, Undo2, Ban, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { fmtDT } from '../utils/fmt'
 
@@ -31,10 +31,13 @@ export default function PartApprovals() {
   useEffect(() => { load() }, [filter])
 
   const decide = async (id, action) => {
+    if (action === 'delete' && !window.confirm('¿Eliminar esta solicitud de parte? Si es especial y no se ha recibido, se quitará también de "pendientes por recibir".')) return
     setActing(id)
     try {
       if (action === 'approve') { await approvePartRequest(id); toast.success('Solicitud aprobada') }
       else if (action === 'return') { await returnPartRequest(id); toast.success('Parte devuelta · repuesta al inventario') }
+      else if (action === 'cancel') { await cancelPartRequest(id); toast.success('Pedido cancelado') }
+      else if (action === 'delete') { await deletePartRequest(id); toast.success('Solicitud eliminada') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()
     } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
@@ -99,10 +102,22 @@ export default function PartApprovals() {
                       </button>
                     </div>
                   )}
-                  {r.status === 'aprobado' && (
+                  {r.status === 'aprobado' && !r.is_special && (
                     <button onClick={() => decide(r.id, 'return')} disabled={acting === r.id}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-200 text-blue-600 text-sm hover:bg-blue-50 disabled:opacity-50 flex-shrink-0" title="Devolver al inventario">
                       <Undo2 size={14} /> <span className="hidden sm:inline">Devolver</span>
+                    </button>
+                  )}
+                  {r.status === 'aprobado' && r.is_special && r.special_state === 'en_espera' && (
+                    <button onClick={() => decide(r.id, 'cancel')} disabled={acting === r.id}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 text-amber-700 text-sm hover:bg-amber-50 disabled:opacity-50 flex-shrink-0" title="Cancelar el pedido (aún no llega)">
+                      <Ban size={14} /> <span className="hidden sm:inline">Cancelar pedido</span>
+                    </button>
+                  )}
+                  {r.status !== 'pendiente' && (
+                    <button onClick={() => decide(r.id, 'delete')} disabled={acting === r.id}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-200 text-red-400 hover:text-red-600 text-sm hover:bg-red-50 disabled:opacity-50 flex-shrink-0" title="Eliminar solicitud">
+                      <Trash2 size={14} />
                     </button>
                   )}
                 </div>
