@@ -33,7 +33,7 @@ export default function PartApprovals() {
   const decide = async (id, action) => {
     setActing(id)
     try {
-      if (action === 'approve') { await approvePartRequest(id); toast.success('Aprobado · descontado del inventario') }
+      if (action === 'approve') { await approvePartRequest(id); toast.success('Solicitud aprobada') }
       else if (action === 'return') { await returnPartRequest(id); toast.success('Parte devuelta · repuesta al inventario') }
       else { await rejectPartRequest(id); toast.success('Solicitud rechazada') }
       load()

@@ -82,9 +82,9 @@ def require_supplies_or_above(current_user: models.User = Depends(get_current_us
 
 
 def require_admin_or_supplies(current_user: models.User = Depends(get_current_user)) -> models.User:
-    """admin/superadmin + supplies (Responsable de Inventario) — para aprobar despachos de partes."""
-    if current_user.role not in [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.supplies]:
-        raise HTTPException(status_code=403, detail="Se requiere administrador o responsable de inventario")
+    """admin/superadmin + supervisor + supplies (Responsable de Inventario) — para aprobar despachos de partes."""
+    if current_user.role not in [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.supervisor, models.UserRole.supplies]:
+        raise HTTPException(status_code=403, detail="Se requiere administrador, supervisor o responsable de inventario")
     return current_user
 
 

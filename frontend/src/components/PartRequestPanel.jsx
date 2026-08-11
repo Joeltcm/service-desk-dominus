@@ -15,7 +15,7 @@ const STATUS = {
 
 export default function PartRequestPanel({ ticketId }) {
   const { user } = useAuth()
-  const isApprover = ['admin', 'superadmin', 'supplies'].includes(user?.role)
+  const isApprover = ['admin', 'superadmin', 'supervisor', 'supplies'].includes(user?.role)
 
   const [requests, setRequests] = useState([])
   const [showModal, setShowModal] = useState(false)
