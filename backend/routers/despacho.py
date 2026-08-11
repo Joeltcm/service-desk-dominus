@@ -492,6 +492,20 @@ def delete_dispatch_timeline(
 
 # ── Checklist de preparación (tasks) ──────────────────
 
+@router.get("/tasks/suggestions", response_model=List[str])
+def dispatch_task_suggestions(db: Session = Depends(get_db), _=Depends(require_staff)):
+    """Títulos de tareas ya creadas (en todos los pedidos), ordenados por frecuencia,
+    para autocompletar el checklist."""
+    rows = (
+        db.query(models.DispatchTask.title, func.count(models.DispatchTask.id).label("c"))
+        .group_by(models.DispatchTask.title)
+        .order_by(func.count(models.DispatchTask.id).desc())
+        .limit(50)
+        .all()
+    )
+    return [r[0] for r in rows if r[0]]
+
+
 @router.get("/{dispatch_id}/tasks", response_model=List[schemas.DispatchTaskOut])
 def get_dispatch_tasks(
     dispatch_id: int,

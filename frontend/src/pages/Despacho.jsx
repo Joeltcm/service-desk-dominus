@@ -9,7 +9,7 @@ import {
   downloadWithAuth,
   createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
   createInvoiceFromDispatch,
-  getDispatchTimeline, addDispatchTimeline, updateDispatchTimeline, deleteDispatchTimeline, getDispatchTasks, addDispatchTask, updateDispatchTask, deleteDispatchTask,
+  getDispatchTimeline, addDispatchTimeline, updateDispatchTimeline, deleteDispatchTimeline, getDispatchTasks, getDispatchTaskSuggestions, addDispatchTask, updateDispatchTask, deleteDispatchTask,
   getDispatchParts, addDispatchPart, deleteDispatchPart, searchInventory,
 } from '../services/api'
 import {
@@ -750,17 +750,25 @@ function DispatchChecklist({ dispatchId, onChanged }) {
   const [tasks, setTasks] = useState([])
   const [newTitle, setNewTitle] = useState('')
   const [busy, setBusy] = useState(false)
+  const [suggestions, setSuggestions] = useState([])
 
   const load = useCallback(() => {
     getDispatchTasks(dispatchId).then((r) => setTasks(r.data)).catch(() => {})
   }, [dispatchId])
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    getDispatchTaskSuggestions().then((r) => setSuggestions(r.data || [])).catch(() => {})
+  }, [])
 
   const add = async () => {
     const t = newTitle.trim()
     if (!t) return
     setBusy(true)
-    try { await addDispatchTask(dispatchId, t); setNewTitle(''); load(); onChanged?.() }
+    try {
+      await addDispatchTask(dispatchId, t)
+      setSuggestions((prev) => (prev.includes(t) ? prev : [t, ...prev]))
+      setNewTitle(''); load(); onChanged?.()
+    }
     catch { toast.error('Error al agregar la tarea') }
     finally { setBusy(false) }
   }
@@ -809,10 +817,14 @@ function DispatchChecklist({ dispatchId, onChanged }) {
       <div className="flex gap-2 mt-3">
         <input
           className="input flex-1 text-sm" placeholder="Nueva tarea…" value={newTitle}
+          list="dispatch-task-suggestions"
           onChange={(e) => setNewTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
           style={{ fontSize: '16px' }}
         />
+        <datalist id="dispatch-task-suggestions">
+          {suggestions.map((s) => <option key={s} value={s} />)}
+        </datalist>
         <button onClick={add} disabled={busy || !newTitle.trim()} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50">
           <Plus size={14} /> Agregar
         </button>
