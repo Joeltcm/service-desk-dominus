@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import defaultLogo from '../assets/default-logo.png'
 import dgsLogo from '../assets/dgs-logo.png'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCompany } from '../context/CompanyContext'
 import { login as apiLogin, register as apiRegister, getCaptcha, forgotPassword, getPublicCompanyInfo, companyLogoUrl } from '../services/api'
@@ -11,7 +11,8 @@ import toast from 'react-hot-toast'
 export default function Login() {
   const { company_sidebar_color: sidebarColor, company_name: companyName } = useCompany()
   const [publicInfo, setPublicInfo] = useState({ company_name: '', has_logo: false, modules: {} })
-  const [mode, setMode] = useState('login') // 'login' | 'register'
+  const [searchParams] = useSearchParams()
+  const [mode, setMode] = useState(searchParams.get('registro') === '1' ? 'register' : 'login') // 'login' | 'register'
   const [errorMsg, setErrorMsg] = useState('')
 
   // Login fields

@@ -36,6 +36,9 @@ import GastosDashboard from './pages/GastosDashboard'
 import ClientDocs from './pages/ClientDocs'
 import ClientPortal from './pages/ClientPortal'
 import MisPedidos from './pages/MisPedidos'
+import PublicLanding from './pages/PublicLanding'
+import PublicRequest from './pages/PublicRequest'
+import PendingRequestHandler from './components/PendingRequestHandler'
 import ResetPassword from './pages/ResetPassword'
 import Letters from './pages/Letters'
 import Contratos from './pages/Contratos'
@@ -98,7 +101,10 @@ function AppRoutes() {
   return (
     <>
     <FormatLoader />
+    <PendingRequestHandler />
     <Routes>
+      <Route path="/bienvenido" element={user ? <Navigate to={user.role === 'client' ? '/inicio' : user.role === 'superadmin' ? '/system' : '/dashboard'} /> : <PublicLanding />} />
+      <Route path="/solicitar" element={<PublicRequest />} />
       <Route path="/login" element={user ? <Navigate to={user.role === 'client' ? '/inicio' : user.role === 'superadmin' ? '/system' : '/dashboard'} /> : <Login />} />
       <Route path="/system" element={<PrivateRoute roles={['superadmin']}><SystemConfig /></PrivateRoute>} />
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -140,7 +146,7 @@ function AppRoutes() {
       <Route path="/mis-documentos/:ref?" element={<PrivateRoute roles={['client']}><ClientDocs /></PrivateRoute>} />
       <Route path="/inicio" element={<PrivateRoute roles={['client']}><ClientPortal /></PrivateRoute>} />
       <Route path="/mis-pedidos" element={<PrivateRoute roles={['client']}><MisPedidos /></PrivateRoute>} />
-      <Route path="/" element={<Navigate to={user?.role === 'client' ? '/inicio' : user?.role === 'superadmin' ? '/system' : '/dashboard'} replace />} />
+      <Route path="/" element={<Navigate to={!user ? '/bienvenido' : user.role === 'client' ? '/inicio' : user.role === 'superadmin' ? '/system' : '/dashboard'} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </>
