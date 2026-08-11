@@ -388,6 +388,7 @@ class Dispatch(Base):
     invoice = relationship("Invoice", foreign_keys="[Invoice.dispatch_id]", back_populates="dispatch", uselist=False)
     timeline = relationship("DispatchTimeline", back_populates="dispatch", order_by="DispatchTimeline.created_at", cascade="all, delete-orphan")
     tasks = relationship("DispatchTask", back_populates="dispatch", order_by="DispatchTask.position", cascade="all, delete-orphan")
+    parts = relationship("DispatchPart", back_populates="dispatch", order_by="DispatchPart.created_at", cascade="all, delete-orphan")
 
     @property
     def assigned_to_name(self):
@@ -439,6 +440,24 @@ class DispatchTask(Base):
     @property
     def done_by_name(self):
         return self.done_by.name if self.done_by else None
+
+
+class DispatchPart(Base):
+    """Parte de inventario que el técnico instala/consume al preparar los equipos de un pedido.
+    Descuenta stock (movimiento source_type='dispatch_part') y queda trazada al pedido."""
+    __tablename__ = "dispatch_parts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dispatch_id = Column(Integer, ForeignKey("dispatches.id"), nullable=False, index=True)
+    item_code = Column(String(100), nullable=False)
+    item_name = Column(String(300), nullable=True)
+    qty = Column(String(50), nullable=False, default="1")
+    unit_cost = Column(String(50), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    dispatch = relationship("Dispatch", back_populates="parts")
+    created_by = relationship("User", foreign_keys=[created_by_id])
 
 
 class DispatchAttachment(Base):

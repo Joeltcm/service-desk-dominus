@@ -352,6 +352,8 @@ def cancel_dispatch(
     # 2) Cambia a Cancelado → _sync_dispatch_inventory repone el stock descontado.
     d.status = "Cancelado"
     _sync_dispatch_inventory(d, db)
+    # 3) Devuelve al inventario las partes que el técnico había instalado.
+    _revert_dispatch_parts(d, db)
     db.commit()
     db.refresh(d)
 
@@ -378,6 +380,7 @@ def delete_dispatch(
         raise HTTPException(status_code=404, detail="Despacho no encontrado")
     order_id = d.order_id
     _revert_inventory_from_dispatch(d, db)  # repone stock si estaba aplicado
+    _revert_dispatch_parts(d, db)           # devuelve las partes instaladas al inventario
     d.deleted_at = datetime.now(timezone.utc)
     db.commit()
     if order_id:
@@ -518,6 +521,126 @@ def delete_dispatch_task(
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     db.delete(task)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Partes instaladas (consumo de inventario) ─────────
+
+def _fmt_qty(v) -> str:
+    return f"{float(v):.4f}".rstrip("0").rstrip(".") or "0"
+
+
+def _revert_dispatch_parts(d: models.Dispatch, db: Session, user_id: Optional[int] = None):
+    """Devuelve al inventario todas las partes instaladas de un pedido (al cancelar/eliminar)."""
+    from routers.inventory import _log_inventory_txn
+    parts = db.query(models.DispatchPart).filter(models.DispatchPart.dispatch_id == d.id).all()
+    for p in parts:
+        try:
+            qty = float(p.qty or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if qty > 0:
+            inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == p.item_code).first()
+            if inv:
+                try:
+                    current = float(inv.quantity or "0")
+                except (ValueError, TypeError):
+                    current = 0.0
+                inv.quantity = _fmt_qty(current + qty)
+            _log_inventory_txn(db, p.item_code, qty, source_type="dispatch_part_return", source_id=d.id,
+                               notes=f"Reverso de parte instalada · Pedido {d.dispatch_number or d.id}", unit_cost=p.unit_cost)
+        db.delete(p)
+
+
+@router.get("/{dispatch_id}/parts", response_model=List[schemas.DispatchPartOut])
+def get_dispatch_parts(
+    dispatch_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_staff),
+):
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    return (
+        db.query(models.DispatchPart)
+        .filter(models.DispatchPart.dispatch_id == dispatch_id)
+        .order_by(models.DispatchPart.created_at)
+        .all()
+    )
+
+
+@router.post("/{dispatch_id}/parts", response_model=schemas.DispatchPartOut)
+def add_dispatch_part(
+    dispatch_id: int,
+    data: schemas.DispatchPartCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    from routers.inventory import _log_inventory_txn
+    d = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id, models.Dispatch.deleted_at.is_(None)).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Despacho no encontrado")
+    if d.status == "Cancelado":
+        raise HTTPException(status_code=400, detail="No se pueden agregar partes a un pedido cancelado")
+    qty = float(data.qty or 0)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="La cantidad debe ser mayor a 0")
+    code = (data.item_code or "").strip()
+    inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Artículo de inventario no encontrado")
+    try:
+        current = float(inv.quantity or "0")
+    except (ValueError, TypeError):
+        current = 0.0
+    if qty > current:
+        raise HTTPException(status_code=400, detail=f"Stock insuficiente de {code}: disponible {current:g}")
+    inv.quantity = _fmt_qty(current - qty)
+    part = models.DispatchPart(
+        dispatch_id=dispatch_id, item_code=code, item_name=inv.name,
+        qty=_fmt_qty(qty), unit_cost=inv.cost_price, created_by_id=current_user.id,
+    )
+    db.add(part)
+    _log_inventory_txn(db, code, -qty, source_type="dispatch_part", source_id=dispatch_id,
+                       notes=f"Parte instalada · Pedido {d.dispatch_number or d.id}", unit_cost=inv.cost_price)
+    _log_dispatch_event(db, dispatch_id, current_user.id,
+                        f"Instaló {qty:g} × {code} ({inv.name}) — descontado del inventario", entry_type="task")
+    db.commit()
+    db.refresh(part)
+    return part
+
+
+@router.delete("/{dispatch_id}/parts/{part_id}")
+def delete_dispatch_part(
+    dispatch_id: int,
+    part_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    from routers.inventory import _log_inventory_txn
+    part = db.query(models.DispatchPart).filter(
+        models.DispatchPart.id == part_id, models.DispatchPart.dispatch_id == dispatch_id
+    ).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Parte no encontrada")
+    try:
+        qty = float(part.qty or 0)
+    except (ValueError, TypeError):
+        qty = 0.0
+    if qty > 0:
+        inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == part.item_code).first()
+        if inv:
+            try:
+                current = float(inv.quantity or "0")
+            except (ValueError, TypeError):
+                current = 0.0
+            inv.quantity = _fmt_qty(current + qty)
+        _log_inventory_txn(db, part.item_code, qty, source_type="dispatch_part_return", source_id=dispatch_id,
+                           notes=f"Reverso de parte instalada · Pedido {dispatch_id}", unit_cost=part.unit_cost)
+        _log_dispatch_event(db, dispatch_id, current_user.id,
+                            f"Quitó la parte {qty:g} × {part.item_code} — devuelta al inventario", entry_type="task")
+    db.delete(part)
     db.commit()
     return {"ok": True}
 

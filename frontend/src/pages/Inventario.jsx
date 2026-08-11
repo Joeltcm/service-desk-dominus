@@ -61,6 +61,8 @@ const SOURCE_LABEL = {
   ajuste:              'Ajuste de inventario',
   inventario_inicial:  'Inventario inicial',
   baja:                'Baja de inventario',
+  dispatch_part:       'Parte instalada (pedido)',
+  dispatch_part_return: 'Reverso de parte (pedido)',
 }
 
 const SOURCE_COLOR = {
@@ -73,6 +75,8 @@ const SOURCE_COLOR = {
   ajuste:          'bg-sky-100 text-sky-700',
   inventario_inicial: 'bg-gray-100 text-gray-600',
   baja:            'bg-red-100 text-red-700',
+  dispatch_part:   'bg-violet-100 text-violet-700',
+  dispatch_part_return: 'bg-teal-100 text-teal-700',
 }
 
 const MOTIVOS = ['Consumo interno', 'Uso en taller', 'Compra para empresa', 'Dañado/descarte', 'Pérdida', 'Otro']

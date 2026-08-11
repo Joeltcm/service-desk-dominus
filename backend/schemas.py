@@ -864,6 +864,24 @@ class DispatchTaskUpdate(BaseModel):
     is_done: Optional[bool] = None
 
 
+class DispatchPartOut(BaseModel):
+    id: int
+    dispatch_id: int
+    item_code: str
+    item_name: Optional[str] = None
+    qty: str
+    unit_cost: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DispatchPartCreate(BaseModel):
+    item_code: str
+    qty: float = 1
+
+
 # ── Warranties ────────────────────────────────────────
 class WarrantyItemCreate(BaseModel):
     type: str = ""

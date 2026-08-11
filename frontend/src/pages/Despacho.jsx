@@ -10,6 +10,7 @@ import {
   createDispatchCalendarEvent, deleteDispatchCalendarEvent, getCalendarAuthUrl,
   createInvoiceFromDispatch,
   getDispatchTimeline, addDispatchTimeline, getDispatchTasks, addDispatchTask, updateDispatchTask, deleteDispatchTask,
+  getDispatchParts, addDispatchPart, deleteDispatchPart, searchInventory,
 } from '../services/api'
 import {
   Search, Plus, Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft,
@@ -17,7 +18,7 @@ import {
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
   Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
   Tag, ShieldCheck, AlertTriangle,
-  User, MessageSquare, CheckSquare, Square, History as HistoryIcon, ListChecks,
+  User, MessageSquare, CheckSquare, Square, History as HistoryIcon, ListChecks, Wrench,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -873,6 +874,115 @@ function DispatchHistory({ dispatchId, version }) {
   )
 }
 
+// ── Partes instaladas (consumo de inventario) ───────────
+function DispatchParts({ dispatchId, onChanged }) {
+  const [parts, setParts] = useState([])
+  const [q, setQ] = useState('')
+  const [sugs, setSugs] = useState([])
+  const [picked, setPicked] = useState(null)
+  const [qty, setQty] = useState('1')
+  const [busy, setBusy] = useState(false)
+  const [showSugs, setShowSugs] = useState(false)
+
+  const load = useCallback(() => {
+    getDispatchParts(dispatchId).then((r) => setParts(r.data)).catch(() => {})
+  }, [dispatchId])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!q.trim() || picked) { setSugs([]); return }
+    let active = true
+    const t = setTimeout(() => {
+      searchInventory(q.trim()).then((r) => { if (active) { setSugs(r.data); setShowSugs(true) } }).catch(() => {})
+    }, 250)
+    return () => { active = false; clearTimeout(t) }
+  }, [q, picked])
+
+  const pick = (it) => { setPicked(it); setQ(`${it.code} — ${it.name}`); setShowSugs(false) }
+  const clearPick = () => { setPicked(null); setQ(''); setSugs([]) }
+
+  const add = async () => {
+    if (!picked) return toast.error('Selecciona un artículo del inventario')
+    const n = parseFloat(qty)
+    if (!n || n <= 0) return toast.error('Cantidad inválida')
+    setBusy(true)
+    try {
+      await addDispatchPart(dispatchId, picked.code, n)
+      clearPick(); setQty('1'); load(); onChanged?.()
+      toast.success('Parte descontada del inventario')
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Error al agregar la parte')
+    } finally { setBusy(false) }
+  }
+
+  const del = async (p) => {
+    try { await deleteDispatchPart(dispatchId, p.id); load(); onChanged?.(); toast.success('Parte devuelta al inventario') }
+    catch { toast.error('Error al quitar la parte') }
+  }
+
+  const totalCost = parts.reduce((s, p) => s + (parseFloat(p.qty || 0) || 0) * (parseFloat(p.unit_cost || 0) || 0), 0)
+
+  return (
+    <div className="card">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+        <Wrench size={13} /> Partes instaladas (consumo de inventario)
+      </h3>
+      <div className="space-y-1.5 mb-3">
+        {parts.length === 0 && <p className="text-xs text-gray-400">Sin partes. Agrega las que el técnico instaló; se descuentan del inventario y quedan trazadas.</p>}
+        {parts.map((p) => (
+          <div key={p.id} className="flex items-center gap-2 group text-sm">
+            <span className="font-mono text-xs font-semibold text-gray-700 flex-shrink-0">{p.item_code}</span>
+            <span className="text-gray-600 truncate flex-1">{p.item_name}</span>
+            <span className="text-gray-500 flex-shrink-0">×{parseFloat(p.qty)}</span>
+            {p.unit_cost && <span className="text-gray-400 text-xs flex-shrink-0 hidden sm:inline">${fmtMoney((parseFloat(p.qty) || 0) * (parseFloat(p.unit_cost) || 0))}</span>}
+            <button onClick={() => del(p)} className="flex-shrink-0 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Quitar (devuelve al inventario)">
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {parts.length > 0 && (
+        <div className="text-xs text-gray-500 mb-3 flex justify-between border-t border-gray-100 pt-2">
+          <span>{parts.length} parte(s)</span>
+          <span>Costo total: <b className="text-gray-700">${fmtMoney(totalCost)}</b></span>
+        </div>
+      )}
+      <div className="flex gap-2 items-start">
+        <div className="relative flex-1">
+          <input
+            className="input w-full text-sm" placeholder="Buscar artículo por código o descripción…"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); if (picked) setPicked(null) }}
+            onFocus={() => { if (sugs.length) setShowSugs(true) }}
+            style={{ fontSize: '16px' }}
+          />
+          {picked && (
+            <button onClick={clearPick} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500"><X size={14} /></button>
+          )}
+          {showSugs && sugs.length > 0 && !picked && (
+            <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+              {sugs.map((it) => (
+                <button key={it.id} onClick={() => pick(it)} className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 text-sm border-b border-gray-50 last:border-0">
+                  <span className="font-mono text-xs font-semibold text-gray-700">{it.code}</span>
+                  <span className="text-gray-600 truncate flex-1">{it.name}</span>
+                  <span className="text-xs text-gray-400 flex-shrink-0">stock {parseFloat(it.quantity || '0')}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <input
+          type="number" min="0" step="0.01" className="input w-20 text-sm text-right" value={qty}
+          onChange={(e) => setQty(e.target.value)} style={{ fontSize: '16px' }} title="Cantidad"
+        />
+        <button onClick={add} disabled={busy || !picked} className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50">
+          <Plus size={14} /> Agregar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DispatchDetail({ dispatch: d, agents = [], onEdit, onDelete, onBack, onPrint, onShare, onAttachmentChange, onViewOrder, onStatusChange, onAssignChange, onCancel, onDeliveryDateChange, onCalendarChange }) {
   const navigate = useNavigate()
   const { vertical } = useCompany()
@@ -1105,6 +1215,9 @@ function DispatchDetail({ dispatch: d, agents = [], onEdit, onDelete, onBack, on
 
       {/* Preparación: checklist */}
       <DispatchChecklist dispatchId={d.id} onChanged={() => setHistVersion((v) => v + 1)} />
+
+      {/* Partes instaladas (consumo de inventario) */}
+      <DispatchParts dispatchId={d.id} onChanged={() => setHistVersion((v) => v + 1)} />
 
       {/* Aviso de flujo incompleto: falta la garantía con las series (it_support) */}
       {itMode && d.status !== 'Borrador' && d.status !== 'Cancelado' && d.warranty_status !== 'complete' && (
