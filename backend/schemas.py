@@ -614,7 +614,6 @@ class OrderCreate(BaseModel):
     title: str
     order_number: Optional[str] = None
     status: str = "Pendiente"
-    assigned_to_id: Optional[int] = None
     ticket_id: Optional[int] = None
     quote_id: Optional[int] = None
     invoice_id: Optional[int] = None
@@ -635,7 +634,6 @@ class OrderUpdate(BaseModel):
     title: Optional[str] = None
     order_number: Optional[str] = None
     status: Optional[str] = None
-    assigned_to_id: Optional[int] = None
     ticket_id: Optional[int] = None
     quote_id: Optional[int] = None
     invoice_id: Optional[int] = None
@@ -671,10 +669,6 @@ class OrderOut(BaseModel):
     title: str
     order_number: Optional[str] = None
     status: str
-    assigned_to_id: Optional[int] = None
-    assigned_to_name: Optional[str] = None
-    tasks_total: int = 0
-    tasks_done: int = 0
     ticket_id: Optional[int] = None
     ticket: Optional[TicketRef] = None
     quote_id: Optional[int] = None
@@ -715,50 +709,6 @@ class OrderOut(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-# ── Order timeline & tasks ────────────────────────────
-class OrderTimelineOut(BaseModel):
-    id: int
-    order_id: int
-    user_id: Optional[int] = None
-    user_name: Optional[str] = None
-    content: str
-    entry_type: str = "comment"
-    is_internal: bool = False
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class OrderTimelineCreate(BaseModel):
-    content: str
-    is_internal: bool = False
-
-
-class OrderTaskOut(BaseModel):
-    id: int
-    order_id: int
-    title: str
-    is_done: bool = False
-    position: int = 0
-    done_by_id: Optional[int] = None
-    done_by_name: Optional[str] = None
-    done_at: Optional[datetime] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class OrderTaskCreate(BaseModel):
-    title: str
-
-
-class OrderTaskUpdate(BaseModel):
-    title: Optional[str] = None
-    is_done: Optional[bool] = None
 
 
 # ── Dispatches ────────────────────────────────────────

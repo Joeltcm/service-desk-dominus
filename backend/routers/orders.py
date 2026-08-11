@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 from typing import List, Optional
 from datetime import datetime, timezone, date, timedelta
 import os, uuid, logging, json, re
@@ -12,15 +12,6 @@ import models, schemas
 import storage
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
-
-
-def _log_order_event(db: Session, order_id: int, user_id: Optional[int], content: str,
-                     entry_type: str = "comment", is_internal: bool = False):
-    """Registra un evento en el historial del pedido (espejo del timeline de tickets)."""
-    db.add(models.OrderTimeline(
-        order_id=order_id, user_id=user_id, content=content,
-        entry_type=entry_type, is_internal=is_internal,
-    ))
 
 
 def _apply_inventory_from_order(order: models.Order, db: Session, force: bool = False):
@@ -161,7 +152,7 @@ def list_orders(
 def create_order(
     data: schemas.OrderCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
+    _=Depends(require_staff),
 ):
     if data.order_number:
         _check_order_number_unique(db, data.order_number)
@@ -169,7 +160,6 @@ def create_order(
     db.add(order)
     db.commit()
     db.refresh(order)
-    _log_order_event(db, order.id, current_user.id, "Creó el pedido", entry_type="system")
     from routers.expenses import sync_order_expense
     sync_order_expense(db, order)
     db.commit()
@@ -193,7 +183,7 @@ def update_order(
     order_id: int,
     data: schemas.OrderUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
+    _=Depends(require_staff),
 ):
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
@@ -201,21 +191,10 @@ def update_order(
     if data.order_number and data.order_number != order.order_number:
         _check_order_number_unique(db, data.order_number, exclude_id=order_id)
     old_status = order.status
-    old_assigned = order.assigned_to_id
-    updates = data.model_dump(exclude_unset=True)
-    for field, value in updates.items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(order, field, value)
     if order.status in ("Recibido", "Inventariado") and old_status not in ("Recibido", "Inventariado"):
         _apply_inventory_from_order(order, db)
-    # Auto-log en el historial del pedido
-    if "status" in updates and order.status != old_status:
-        _log_order_event(db, order.id, current_user.id, f"Cambió el estado a «{order.status}»", entry_type="status_change")
-    if "assigned_to_id" in updates and order.assigned_to_id != old_assigned:
-        if order.assigned_to_id:
-            tech = db.query(models.User).filter(models.User.id == order.assigned_to_id).first()
-            _log_order_event(db, order.id, current_user.id, f"Asignó el pedido a {tech.name if tech else '—'}", entry_type="assignment")
-        else:
-            _log_order_event(db, order.id, current_user.id, "Quitó la asignación del pedido", entry_type="assignment")
     db.commit()
     db.refresh(order)
     from routers.expenses import sync_order_expense
@@ -279,153 +258,18 @@ def delete_order(
 def apply_order_inventory(
     order_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
+    _=Depends(require_staff),
 ):
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    # Aplicar la compra al inventario (acción independiente del ciclo del pedido).
-    # Solo aplica si aún no fue aplicado (evita duplicar stock).
+    # Solo aplicar si aún no fue aplicado (evita duplicar stock si ya pasó por "Recibido")
     if not order.inventory_applied:
         _apply_inventory_from_order(order, db, force=True)
-        _log_order_event(db, order.id, current_user.id, "Ingresó la compra al inventario", entry_type="system")
+    order.status = "Inventariado"
     db.commit()
     db.refresh(order)
     return order
-
-
-# ── Historial (timeline) ──────────────────────────────
-
-@router.get("/{order_id}/timeline", response_model=List[schemas.OrderTimelineOut])
-def get_order_timeline(
-    order_id: int,
-    db: Session = Depends(get_db),
-    _=Depends(require_staff),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    return (
-        db.query(models.OrderTimeline)
-        .filter(models.OrderTimeline.order_id == order_id)
-        .order_by(models.OrderTimeline.created_at)
-        .all()
-    )
-
-
-@router.post("/{order_id}/timeline", response_model=schemas.OrderTimelineOut)
-def add_order_timeline(
-    order_id: int,
-    data: schemas.OrderTimelineCreate,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    content = (data.content or "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío")
-    entry = models.OrderTimeline(
-        order_id=order_id, user_id=current_user.id, content=content,
-        entry_type="comment", is_internal=bool(data.is_internal),
-    )
-    db.add(entry)
-    db.commit()
-    db.refresh(entry)
-    return entry
-
-
-# ── Checklist de preparación (tasks) ──────────────────
-
-@router.get("/{order_id}/tasks", response_model=List[schemas.OrderTaskOut])
-def get_order_tasks(
-    order_id: int,
-    db: Session = Depends(get_db),
-    _=Depends(require_staff),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    return (
-        db.query(models.OrderTask)
-        .filter(models.OrderTask.order_id == order_id)
-        .order_by(models.OrderTask.position, models.OrderTask.id)
-        .all()
-    )
-
-
-@router.post("/{order_id}/tasks", response_model=schemas.OrderTaskOut)
-def add_order_task(
-    order_id: int,
-    data: schemas.OrderTaskCreate,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Pedido no encontrado")
-    title = (data.title or "").strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="La tarea no puede estar vacía")
-    max_pos = db.query(func.max(models.OrderTask.position)).filter(models.OrderTask.order_id == order_id).scalar() or 0
-    task = models.OrderTask(order_id=order_id, title=title, position=max_pos + 1)
-    db.add(task)
-    _log_order_event(db, order_id, current_user.id, f"Agregó la tarea: {title}", entry_type="task")
-    db.commit()
-    db.refresh(task)
-    return task
-
-
-@router.patch("/{order_id}/tasks/{task_id}", response_model=schemas.OrderTaskOut)
-def update_order_task(
-    order_id: int,
-    task_id: int,
-    data: schemas.OrderTaskUpdate,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_staff),
-):
-    task = db.query(models.OrderTask).filter(
-        models.OrderTask.id == task_id, models.OrderTask.order_id == order_id
-    ).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    upd = data.model_dump(exclude_unset=True)
-    if upd.get("title") is not None:
-        new_title = upd["title"].strip()
-        if new_title:
-            task.title = new_title
-    if upd.get("is_done") is not None:
-        if upd["is_done"] and not task.is_done:
-            task.is_done = True
-            task.done_by_id = current_user.id
-            task.done_at = datetime.now(timezone.utc)
-            _log_order_event(db, order_id, current_user.id, f"Completó la tarea: {task.title}", entry_type="task")
-        elif not upd["is_done"] and task.is_done:
-            task.is_done = False
-            task.done_by_id = None
-            task.done_at = None
-            _log_order_event(db, order_id, current_user.id, f"Reabrió la tarea: {task.title}", entry_type="task")
-    db.commit()
-    db.refresh(task)
-    return task
-
-
-@router.delete("/{order_id}/tasks/{task_id}")
-def delete_order_task(
-    order_id: int,
-    task_id: int,
-    db: Session = Depends(get_db),
-    _=Depends(require_staff),
-):
-    task = db.query(models.OrderTask).filter(
-        models.OrderTask.id == task_id, models.OrderTask.order_id == order_id
-    ).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    db.delete(task)
-    db.commit()
-    return {"ok": True}
 
 
 # ── Attachments ───────────────────────────────────────
