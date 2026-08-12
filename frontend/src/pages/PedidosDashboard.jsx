@@ -26,11 +26,13 @@ const QUARTERS = [
 ]
 
 const STATUS_COLORS = {
-  'Borrador':          '#94a3b8',
-  'Emitido':           '#60a5fa',
-  'Pedido Programado': '#a78bfa',
-  'Entregado':         '#34d399',
-  'Cancelado':         '#f87171',
+  'Borrador':            '#94a3b8',
+  'Emitido':             '#60a5fa',
+  'En proceso':          '#f59e0b',
+  'Despacho Programado': '#22d3ee',
+  'Pedido Programado':   '#a78bfa',
+  'Entregado':           '#34d399',
+  'Cancelado':           '#f87171',
 }
 
 const CLIENT_COLORS = [
@@ -159,10 +161,8 @@ export default function PedidosDashboard() {
 
   const entregados  = data?.by_status?.['Entregado']?.count  || 0
   const cancelados  = data?.by_status?.['Cancelado']?.count  || 0
-  const borrador    = data?.by_status?.['Borrador']?.count   || 0
-  // Pendientes / en proceso: todo lo que no está entregado ni cancelado.
-  const pendientes  = statusData.reduce((s, x) => s + (['Entregado', 'Cancelado'].includes(x.name) ? 0 : (x.count || 0)), 0)
-  const enProceso   = Math.max(0, pendientes - borrador)
+  // Pedidos con el estado "En proceso" (el técnico los está preparando).
+  const enProceso   = data?.by_status?.['En proceso']?.count || 0
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
@@ -225,11 +225,10 @@ export default function PedidosDashboard() {
                 sub={data.total_orders > 0 ? `Prom. ${fmtMoney(data.total_cost / data.total_orders)}` : undefined}
               />
               <KpiCard
-                label="Pedidos pendientes"
-                value={pendientes}
+                label="Pedidos en proceso"
+                value={enProceso}
                 icon={Clock}
                 bg="bg-amber-100" color="text-amber-500"
-                sub={`${borrador} borrador · ${enProceso} en proceso`}
               />
               <KpiCard
                 label="Entregados"

@@ -30,11 +30,12 @@ import { useAuth } from '../context/AuthContext'
 import { useModuleAccess } from '../context/RoleFeaturesContext'
 import { useModules } from '../context/ModulesContext'
 
-const STATUSES = ['Borrador', 'Emitido', 'Despacho Programado', 'Entregado', 'Cancelado']
+const STATUSES = ['Borrador', 'Emitido', 'En proceso', 'Despacho Programado', 'Entregado', 'Cancelado']
 
 const STATUS_STYLE = {
   'Borrador':            'bg-gray-100 text-gray-600',
   'Emitido':             'bg-blue-100 text-blue-700',
+  'En proceso':          'bg-amber-100 text-amber-700',
   'Despacho Programado': 'bg-cyan-100 text-cyan-700',
   'Entregado':           'bg-green-100 text-green-700',
   'Cancelado':           'bg-red-100 text-red-600',
@@ -43,6 +44,7 @@ const STATUS_STYLE = {
 const STATUS_ICON = {
   'Borrador':            <Clock size={11} />,
   'Emitido':             <Send size={11} />,
+  'En proceso':          <Wrench size={11} />,
   'Despacho Programado': <CalendarDays size={11} />,
   'Entregado':           <CheckCircle2 size={11} />,
   'Cancelado':           <XCircle size={11} />,
