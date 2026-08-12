@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   ShoppingCart, PackageCheck, Clock, DollarSign,
-  BarChart2, ArrowLeft, RefreshCw, XCircle,
+  BarChart2, ArrowLeft, RefreshCw, XCircle, Wrench,
 } from 'lucide-react'
 import { getDespachoDashboard } from '../services/api'
 import { useCompany } from '../context/CompanyContext'
@@ -161,8 +161,11 @@ export default function PedidosDashboard() {
 
   const entregados  = data?.by_status?.['Entregado']?.count  || 0
   const cancelados  = data?.by_status?.['Cancelado']?.count  || 0
+  const borrador    = data?.by_status?.['Borrador']?.count   || 0
   // Pedidos con el estado "En proceso" (el técnico los está preparando).
   const enProceso   = data?.by_status?.['En proceso']?.count || 0
+  // Pendientes: agrupa Borrador + Emitido + Despacho Programado (lo que estaba antes).
+  const pendientes  = ['Borrador', 'Emitido', 'Despacho Programado'].reduce((s, n) => s + (data?.by_status?.[n]?.count || 0), 0)
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
@@ -210,7 +213,7 @@ export default function PedidosDashboard() {
         ) : data ? (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <KpiCard
                 label={`Total ${nounPl}`}
                 value={data.total_orders}
@@ -225,9 +228,16 @@ export default function PedidosDashboard() {
                 sub={data.total_orders > 0 ? `Prom. ${fmtMoney(data.total_cost / data.total_orders)}` : undefined}
               />
               <KpiCard
+                label="Pedidos pendientes"
+                value={pendientes}
+                icon={Clock}
+                bg="bg-slate-100" color="text-slate-500"
+                sub={`${borrador} borrador · ${pendientes - borrador} activos`}
+              />
+              <KpiCard
                 label="Pedidos en proceso"
                 value={enProceso}
-                icon={Clock}
+                icon={Wrench}
                 bg="bg-amber-100" color="text-amber-500"
               />
               <KpiCard
