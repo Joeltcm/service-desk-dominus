@@ -86,8 +86,8 @@ function KpiCard({ label, value, icon: Icon, bg, color, sub }) {
     <div className="card p-3 sm:p-5">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide leading-tight">{label}</p>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 leading-none break-all">{value}</p>
+          <p className="text-[11px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide leading-tight">{label}</p>
+          <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 leading-none truncate">{value}</p>
           {sub && <p className="text-xs text-gray-400 mt-1.5 leading-tight">{sub}</p>}
         </div>
         <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
@@ -213,7 +213,7 @@ export default function PedidosDashboard() {
         ) : data ? (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <KpiCard
                 label={`Total ${nounPl}`}
                 value={data.total_orders}
