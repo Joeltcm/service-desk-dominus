@@ -900,7 +900,8 @@ function AsistenciaReport() {
   }, [isClient])
 
   useEffect(() => {
-    if (!clientId && !company) { setTickets([]); return }
+    // Para clientes se requiere su empresa; para staff, sin filtro = todos los tickets del mes.
+    if (isClient && !clientId && !company) { setTickets([]); return }
     const reqId = ++reqRef.current
     setLoading(true)
     const dateFrom = `${year}-${String(month).padStart(2,'0')}-01T00:00:00`
@@ -908,7 +909,7 @@ function AsistenciaReport() {
     const dateTo = `${year}-${String(month).padStart(2,'0')}-${lastDay}T23:59:59`
     const params = { date_from: dateFrom, date_to: dateTo }
     if (company) params.company = company
-    else params.client_id = clientId
+    else if (clientId) params.client_id = clientId
     getReportTickets(params)
       .then(r => { if (reqRef.current === reqId) setTickets(r.data.tickets || []) })
       .catch(() => { if (reqRef.current === reqId) toast.error('Error cargando tickets') })
@@ -919,7 +920,7 @@ function AsistenciaReport() {
   const companies = React.useMemo(() => (
     [...new Set(clients.map(c => c.company).filter(Boolean))].sort()
   ), [clients])
-  const displayLabel = company || selectedClient?.name || ''
+  const displayLabel = company || selectedClient?.name || 'Todos'
 
   const RESOLVED_STATUSES = ['resuelto', 'resolved', 'cerrado', 'closed']
   const isResolved = t => t.closed_at || RESOLVED_STATUSES.includes((t.status || '').toLowerCase())
@@ -928,11 +929,11 @@ function AsistenciaReport() {
   for (let y = now.getFullYear(); y >= now.getFullYear() - 3; y--) years.push(y)
 
   const handlePDF = () => {
-    if ((!selectedClient && !company) || tickets.length === 0) return
+    if (tickets.length === 0) return
     const periodLabel = `${MONTHS_ES[month - 1]} ${year}`
     const genDate = new Date().toLocaleDateString('es-PA', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const clientCompany = company || selectedClient?.company || ''
-    const reportName = company ? company : selectedClient?.name
+    const reportName = company || selectedClient?.name || 'Todos'
 
     const ticketRows = tickets.map((t, i) => {
       const created = t.created_at ? t.created_at.slice(0, 10) : ''
@@ -1079,11 +1080,7 @@ function AsistenciaReport() {
         </div>
       </div>
 
-      {!isClient && !clientId && !company ? (
-        <div className="card py-16 text-center text-gray-400">
-          <p className="text-sm">Selecciona una empresa o un cliente para generar el reporte mensual</p>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="card py-16 text-center text-gray-400">Cargando...</div>
       ) : (
         <>
