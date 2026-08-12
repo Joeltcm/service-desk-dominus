@@ -157,10 +157,12 @@ export default function PedidosDashboard() {
   const clientData  = data?.by_client || []
   const maxClient   = clientData[0]?.total || 1
 
-  const pendientes  = data?.by_status?.['Borrador']?.count    || 0
-  const enProceso   = (data?.by_status?.['Emitido']?.count || 0) + (data?.by_status?.['Pedido Programado']?.count || 0)
   const entregados  = data?.by_status?.['Entregado']?.count  || 0
   const cancelados  = data?.by_status?.['Cancelado']?.count  || 0
+  const borrador    = data?.by_status?.['Borrador']?.count   || 0
+  // Pendientes / en proceso: todo lo que no está entregado ni cancelado.
+  const pendientes  = statusData.reduce((s, x) => s + (['Entregado', 'Cancelado'].includes(x.name) ? 0 : (x.count || 0)), 0)
+  const enProceso   = Math.max(0, pendientes - borrador)
 
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
@@ -223,11 +225,11 @@ export default function PedidosDashboard() {
                 sub={data.total_orders > 0 ? `Prom. ${fmtMoney(data.total_cost / data.total_orders)}` : undefined}
               />
               <KpiCard
-                label="Borrador / Emitido / Programado"
-                value={pendientes + enProceso}
+                label="Pedidos pendientes"
+                value={pendientes}
                 icon={Clock}
                 bg="bg-amber-100" color="text-amber-500"
-                sub={`${pendientes} borrador · ${enProceso} activos`}
+                sub={`${borrador} borrador · ${enProceso} en proceso`}
               />
               <KpiCard
                 label="Entregados"
