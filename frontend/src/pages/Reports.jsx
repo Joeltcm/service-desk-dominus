@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { getReportSummary, getReportTickets, downloadReportCSV, downloadReportExcel, getStatuses, getAgents, getInvoices, getExpenses, getClients, getReportAgents } from '../services/api'
+import { getReportSummary, getReportTickets, downloadReportCSV, downloadReportExcel, getStatuses, getAgents, getInvoices, getExpenses, getClients, getReportAgents, getReportCategories } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { useCompany } from '../context/CompanyContext'
 import { useModules } from '../context/ModulesContext'
 import { companyLogoSrc } from '../utils/branding'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import { Download, FileSpreadsheet, FileText, Filter, Banknote, HandCoins, ChevronDown, ChevronRight, ClipboardList, Users, ChevronUp, Star, Clock, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Download, FileSpreadsheet, FileText, Filter, Banknote, HandCoins, ChevronDown, ChevronRight, ClipboardList, Users, ChevronUp, Star, Clock, CheckCircle, AlertTriangle, Tag } from 'lucide-react'
 import { fmtD } from '../utils/fmt'
 import toast from 'react-hot-toast'
 
@@ -1518,6 +1518,199 @@ function AgenteReport() {
   )
 }
 
+// ── Reporte Por Categoría ─────────────────────────────────────────────────────
+function CategoriaReport() {
+  const { company_name } = useCompany()
+  const coName = company_name || 'Service Desk'
+  const [data, setData]         = useState(null)
+  const [loading, setLoading]   = useState(false)
+  const [dateFrom, setDateFrom] = useState(monthAgo())
+  const [dateTo, setDateTo]     = useState(today())
+  const [expanded, setExpanded] = useState({})
+
+  const load = () => {
+    setLoading(true)
+    const params = {}
+    if (dateFrom) params.date_from = dateFrom + 'T00:00:00'
+    if (dateTo)   params.date_to   = dateTo   + 'T23:59:59'
+    getReportCategories(params)
+      .then(r => setData(r.data))
+      .catch(() => toast.error('Error cargando reporte por categoría'))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line
+  const toggle = (name) => setExpanded(p => ({ ...p, [name]: !p[name] }))
+
+  const cats = data?.categories || []
+  const totalTickets = data?.total_tickets ?? 0
+  const totalResolved = cats.reduce((s, c) => s + c.resolved, 0)
+  const maxTotal = cats[0]?.total || 1
+
+  const handlePDF = () => {
+    if (!data) return
+    const dateLabel = `${dateFrom || '—'} al ${dateTo || '—'}`
+    const rows = cats.map(c => {
+      const ticketRows = c.tickets.map(t => `
+        <tr>
+          <td style="color:#6b7280;font-size:10px">#${t.id}</td>
+          <td>${t.title}</td>
+          <td>${t.client || '—'}${t.client_company ? `<br><span style="color:#9ca3af;font-size:9px">${t.client_company}</span>` : ''}</td>
+          <td>${t.agent || '—'}</td>
+          <td>${t.status || '—'}</td>
+          <td><span style="padding:2px 6px;border-radius:8px;font-size:9px;background:${t.priority==='critical'?'#fee2e2':t.priority==='high'?'#ffedd5':t.priority==='medium'?'#dbeafe':'#f3f4f6'};color:${t.priority==='critical'?'#dc2626':t.priority==='high'?'#ea580c':t.priority==='medium'?'#2563eb':'#6b7280'}">${t.priority_label}</span></td>
+          <td style="color:#6b7280;font-size:10px">${t.created_at ? t.created_at.slice(0,10) : ''}</td>
+          <td style="text-align:right">${t.resolution_hours != null ? t.resolution_hours+'h' : '—'}</td>
+        </tr>`).join('')
+      return `
+        <div class="cat-block">
+          <div class="cat-header">
+            <span class="cat-name">${c.name}</span>
+            <span class="kpi-inline"><b>${c.total}</b> tickets</span>
+            <span class="kpi-inline" style="color:#16a34a"><b>${c.resolved}</b> resueltos</span>
+            <span class="kpi-inline" style="color:#ea580c"><b>${c.open}</b> abiertos</span>
+            <span class="kpi-inline"><b>${c.resolution_rate}%</b> tasa</span>
+            ${c.avg_hours != null ? `<span class="kpi-inline" style="color:#7c3aed"><b>${c.avg_hours}h</b> prom.</span>` : ''}
+          </div>
+          <table><thead><tr><th>#</th><th>Título</th><th>Cliente</th><th>Agente</th><th>Estado</th><th>Prioridad</th><th>Creado</th><th style="text-align:right">Hrs</th></tr></thead>
+          <tbody>${ticketRows}</tbody></table>
+        </div>`
+    }).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reporte por Categoría</title>
+    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;color:#333;background:#f3f4f6}
+    #toolbar{position:sticky;top:0;z-index:100;background:#1a3353;display:flex;align-items:center;justify-content:space-between;padding:10px 24px}
+    #toolbar span{color:#fff;font-size:13px;font-weight:600}#toolbar button{background:#fff;color:#1a3353;border:none;border-radius:6px;padding:8px 18px;font-size:12px;font-weight:700;cursor:pointer}
+    #report{background:#fff;max-width:1000px;margin:24px auto;padding:32px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;border-bottom:3px solid #1a3353;padding-bottom:12px}
+    .header h1{font-size:20px;color:#1a3353}
+    .cat-block{margin-bottom:28px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+    .cat-header{background:#1a3353;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+    .cat-name{font-size:13px;font-weight:700;flex:1}.kpi-inline{font-size:11px;opacity:.9}
+    table{width:100%;border-collapse:collapse}th{background:#f8fafc;color:#374151;padding:7px 10px;text-align:left;font-size:10px;font-weight:600;border-bottom:2px solid #e5e7eb}
+    td{padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:10px}tr:nth-child(even) td{background:#fafafa}
+    @media print{#toolbar{display:none!important}body{background:#fff}#report{box-shadow:none;margin:0;border-radius:0}}
+    @page{size:A4 landscape;margin:1cm}</style>
+    </head><body>
+    <div id="toolbar"><span>Reporte de Tickets por Categoría</span><button onclick="window.print()">⬇ Descargar PDF</button></div>
+    <div id="report">
+    <div class="header">
+      <div><h1>Reporte por Categoría</h1><p style="color:#666;font-size:11px;margin-top:4px">Período: ${dateLabel} · ${totalTickets} tickets en total</p></div>
+      <div style="text-align:right;font-size:11px;color:#666"><strong style="color:#1a3353;font-size:14px">${coName}</strong><br>Generado: ${new Date().toLocaleDateString('es-PA',{day:'2-digit',month:'2-digit',year:'numeric'})}</div>
+    </div>
+    ${rows}
+    </div></body></html>`
+    window.open(URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), '_blank')
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Filtros */}
+      <div className="card">
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="label">Desde</label>
+            <input type="date" className="input w-auto" style={{fontSize:'16px'}} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Hasta</label>
+            <input type="date" className="input w-auto" style={{fontSize:'16px'}} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </div>
+          <button onClick={load} className="btn-primary text-sm">Consultar</button>
+          {data && (
+            <button onClick={handlePDF} className="btn-secondary flex items-center gap-1.5 text-xs text-red-700 border-red-200 hover:bg-red-50 ml-auto">
+              <FileText size={13} /> Exportar PDF
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loading && <div className="py-20 text-center text-gray-400">Cargando...</div>}
+
+      {!loading && data && (
+        <>
+          {/* KPIs globales */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="card text-center">
+              <p className="text-2xl font-bold text-blue-600">{totalTickets}</p>
+              <p className="text-xs text-gray-500 mt-1">Total tickets</p>
+            </div>
+            <div className="card text-center">
+              <p className="text-2xl font-bold text-emerald-600">{cats.length}</p>
+              <p className="text-xs text-gray-500 mt-1">Categorías</p>
+            </div>
+            <div className="card text-center">
+              <p className="text-2xl font-bold text-violet-600">{totalTickets > 0 ? Math.round(totalResolved / totalTickets * 100) : 0}%</p>
+              <p className="text-xs text-gray-500 mt-1">Tasa resolución</p>
+            </div>
+            <div className="card text-center">
+              <p className="text-2xl font-bold text-orange-600">{cats[0]?.name || '—'}</p>
+              <p className="text-xs text-gray-500 mt-1">Categoría más frecuente</p>
+            </div>
+          </div>
+
+          {cats.length === 0 ? (
+            <div className="card py-16 text-center text-gray-400 text-sm">Sin tickets en el período.</div>
+          ) : (
+            <div className="space-y-3">
+              {cats.map(c => (
+                <div key={c.name} className="card p-0 overflow-hidden">
+                  <button onClick={() => toggle(c.name)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900 text-sm truncate">{c.name}</span>
+                        <span className="text-xs text-gray-400">{c.total} ticket{c.total !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="mt-1.5 h-2 bg-gray-100 rounded-full overflow-hidden max-w-md">
+                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.round(c.total / maxTotal * 100)}%` }} />
+                      </div>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-4 text-xs flex-shrink-0">
+                      <span className="text-emerald-600 font-semibold">{c.resolved} <span className="text-gray-400 font-normal">resueltos</span></span>
+                      <span className="text-orange-600 font-semibold">{c.open} <span className="text-gray-400 font-normal">abiertos</span></span>
+                      <span className="text-gray-700 font-semibold">{c.resolution_rate}% <span className="text-gray-400 font-normal">tasa</span></span>
+                      {c.avg_hours != null && <span className="text-violet-600 font-semibold">{c.avg_hours}h <span className="text-gray-400 font-normal">prom.</span></span>}
+                    </div>
+                    {expanded[c.name] ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
+                  </button>
+                  {expanded[c.name] && (
+                    <div className="border-t border-gray-100 overflow-x-auto">
+                      <table className="w-full text-sm min-w-[560px]">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100 text-xs text-gray-400">
+                            <th className="px-3 py-2 text-left">#</th>
+                            <th className="px-3 py-2 text-left">Título</th>
+                            <th className="px-3 py-2 text-left">Cliente</th>
+                            <th className="px-3 py-2 text-left hidden md:table-cell">Agente</th>
+                            <th className="px-3 py-2 text-left">Estado</th>
+                            <th className="px-3 py-2 text-left hidden sm:table-cell">Prioridad</th>
+                            <th className="px-3 py-2 text-right hidden md:table-cell">Hrs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {c.tickets.map(t => (
+                            <tr key={t.id} className="border-b border-gray-50 last:border-0">
+                              <td className="px-3 py-2 text-gray-400 font-mono text-xs">#{t.id}</td>
+                              <td className="px-3 py-2 text-gray-800 max-w-[220px] truncate" title={t.title}>{t.title}</td>
+                              <td className="px-3 py-2 text-gray-600 text-xs">{t.client || '—'}{t.client_company ? <span className="text-gray-400"> · {t.client_company}</span> : ''}</td>
+                              <td className="px-3 py-2 text-gray-600 text-xs hidden md:table-cell">{t.agent || <span className="text-gray-300">Sin asignar</span>}</td>
+                              <td className="px-3 py-2 text-gray-600 text-xs">{t.status || '—'}</td>
+                              <td className="px-3 py-2 hidden sm:table-cell"><span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${PRIO_COLOR[t.priority] || 'bg-gray-100 text-gray-600'}`}>{t.priority_label}</span></td>
+                              <td className="px-3 py-2 text-right text-gray-600 text-xs hidden md:table-cell">{t.resolution_hours != null ? `${t.resolution_hours}h` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Reports() {
   const { user } = useAuth()
@@ -1660,6 +1853,7 @@ export default function Reports() {
   const ALL_TABS = [
     { id: 'tickets',    label: 'Tickets',            short: 'Tickets',  icon: <FileText size={14} /> },
     { id: 'agentes',    label: 'Por Agente',         short: 'Agentes',  icon: <Users size={14} /> },
+    { id: 'categorias', label: 'Por Categoría',      short: 'Categoría', icon: <Tag size={14} /> },
     { id: 'cobrar',     label: 'Cuentas por Cobrar', short: 'Cobrar',   icon: <Banknote size={14} />,    moduleKey: 'facturas' },
     { id: 'pagar',      label: 'Cuentas por Pagar',  short: 'Pagar',    icon: <HandCoins size={14} />,   moduleKey: 'gastos' },
     { id: 'estado',     label: 'Estado de Cuenta',   short: 'Estado',   icon: <Filter size={14} />,      moduleKey: 'facturas' },
@@ -1712,6 +1906,7 @@ export default function Reports() {
 
       {/* Contenido por pestaña */}
       {activeTab === 'agentes'    && <AgenteReport />}
+      {activeTab === 'categorias' && <CategoriaReport />}
       {activeTab === 'cobrar'     && <CobrarReport />}
       {activeTab === 'pagar'      && <PagarReport />}
       {activeTab === 'estado'     && <EstadoCuentaReport />}

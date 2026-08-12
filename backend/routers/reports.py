@@ -338,6 +338,81 @@ def report_agents(
     return {"agents": result, "total_tickets": len(tickets)}
 
 
+@router.get("/categories")
+def report_categories(
+    date_from: Optional[datetime] = Query(None),
+    date_to:   Optional[datetime] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_staff),
+):
+    """Tickets agrupados por categoría: totales, tasa de resolución, tiempo promedio."""
+    q = db.query(models.Ticket).filter(models.Ticket.deleted_at.is_(None))
+    if date_from:
+        q = q.filter(models.Ticket.created_at >= date_from)
+    if date_to:
+        q = q.filter(models.Ticket.created_at <= date_to)
+
+    tickets = q.options(
+        joinedload(models.Ticket.assigned_agent),
+        joinedload(models.Ticket.client),
+        joinedload(models.Ticket.status_rel),
+    ).all()
+
+    cats: dict = {}
+    for t in tickets:
+        name = (t.category or "").strip() or "Sin categoría"
+        if name not in cats:
+            cats[name] = {
+                "name": name, "tickets": [],
+                "by_priority": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+                "resolution_hours": [],
+            }
+        c = cats[name]
+        c["tickets"].append(t)
+        prio = t.priority or "low"
+        if prio in c["by_priority"]:
+            c["by_priority"][prio] += 1
+        if t.closed_at and t.created_at:
+            c["resolution_hours"].append((t.closed_at - t.created_at).total_seconds() / 3600)
+
+    result = []
+    for c in cats.values():
+        total    = len(c["tickets"])
+        resolved = len(c["resolution_hours"])
+        avg_h    = round(sum(c["resolution_hours"]) / resolved, 1) if resolved else None
+        ticket_list = sorted([
+            {
+                "id":               t.id,
+                "title":            t.title,
+                "client":           t.client.name if t.client else None,
+                "client_company":   t.client.company if t.client else None,
+                "agent":            t.assigned_agent.name if t.assigned_agent else None,
+                "status":           t.status_rel.name if t.status_rel else None,
+                "priority":         t.priority,
+                "priority_label":   PRIORITY_LABELS.get(t.priority, t.priority),
+                "created_at":       t.created_at.isoformat() if t.created_at else None,
+                "closed_at":        t.closed_at.isoformat()  if t.closed_at  else None,
+                "resolution_hours": round((t.closed_at - t.created_at).total_seconds() / 3600, 1)
+                                    if t.closed_at and t.created_at else None,
+            }
+            for t in c["tickets"]
+        ], key=lambda x: x["created_at"] or "", reverse=True)
+        result.append({
+            "name":            c["name"],
+            "total":           total,
+            "resolved":        resolved,
+            "open":            total - resolved,
+            "resolution_rate": round(resolved / total * 100) if total else 0,
+            "avg_hours":       avg_h,
+            "critical_high":   c["by_priority"]["critical"] + c["by_priority"]["high"],
+            "by_priority":     c["by_priority"],
+            "tickets":         ticket_list,
+        })
+
+    result.sort(key=lambda c: c["total"], reverse=True)
+    return {"categories": result, "total_tickets": len(tickets)}
+
+
 @router.get("/summary")
 def report_summary(
     date_from: Optional[datetime] = Query(None),

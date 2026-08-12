@@ -456,6 +456,7 @@ export const getVentasDashboard = () => api.get('/ventas/dashboard')
 export const getReportTickets = (params) => api.get('/reports/tickets', { params })
 export const getReportSummary = (params) => api.get('/reports/summary', { params })
 export const getReportAgents  = (params) => api.get('/reports/agents',  { params })
+export const getReportCategories = (params) => api.get('/reports/categories', { params })
 const _apiBase = () => (import.meta.env.BASE_URL || '/') + 'api'
 
 export const downloadReportCSV = (params) => {
