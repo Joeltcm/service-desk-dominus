@@ -27,28 +27,6 @@ import storage
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-
-@router.get("/_conntest")
-def _conntest():
-    """DIAGNÓSTICO TEMPORAL: prueba conectividad TCP saliente a puertos SMTP desde el servidor."""
-    import socket, time
-    targets = [
-        ("smtp.gmail.com", 587), ("smtp.gmail.com", 465),
-        ("smtp-relay.brevo.com", 587),
-        ("cp7112.webempresa.eu", 587), ("cp7112.webempresa.eu", 465), ("cp7112.webempresa.eu", 25),
-    ]
-    out = []
-    for h, p in targets:
-        t = time.time()
-        try:
-            s = socket.create_connection((h, p), timeout=8)
-            s.close()
-            out.append({"target": f"{h}:{p}", "ok": True, "ms": int((time.time() - t) * 1000)})
-        except Exception as e:
-            out.append({"target": f"{h}:{p}", "ok": False, "error": f"{type(e).__name__}: {e}", "ms": int((time.time() - t) * 1000)})
-    return {"results": out}
-
-
 SMTP_KEYS = ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from", "smtp_tls", "brevo_api_key", "admin_notification_email"]
 IMAP_KEYS = ["imap_host", "imap_port", "imap_user", "imap_password", "imap_ssl", "imap_enabled", "imap_poll_interval", "imap_create_tickets"]
 FORMAT_KEYS = ["fmt_tz", "fmt_date_format", "fmt_time_format"]
