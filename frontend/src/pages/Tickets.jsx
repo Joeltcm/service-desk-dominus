@@ -9,11 +9,19 @@ import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
 import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown, QrCode } from 'lucide-react'
 import TicketScanner from '../components/TicketScanner'
-import { format } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { fmtDT, fmtD } from '../utils/fmt'
+import { fmtDT, fmtD, toUTC } from '../utils/fmt'
+import { LayoutGrid, Table as TableIcon } from 'lucide-react'
 import { getSLAInfo, fmtSlaRemaining, SLA_TOTAL } from '../utils/sla'
 import toast from 'react-hot-toast'
+
+// "Creado hace 3 horas" — tiempo relativo estilo Freshdesk
+function relTime(value) {
+  const d = toUTC(value)
+  if (!d || isNaN(d)) return ''
+  return formatDistanceToNow(d, { addSuffix: true, locale: es })
+}
 
 export default function Tickets() {
   const [tickets, setTickets] = useState([])
@@ -29,6 +37,10 @@ export default function Tickets() {
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortKey, setSortKey] = useState('created_at_desc')
+  // Vista de la lista en desktop: 'card' (estilo Freshdesk, por defecto) | 'table'.
+  // En móvil siempre son tarjetas (no hay espacio para tabla).
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('ticketsViewMode') || 'card')
+  const setView = (m) => { setViewMode(m); localStorage.setItem('ticketsViewMode', m) }
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [agents, setAgents] = useState([])
@@ -349,6 +361,17 @@ export default function Tickets() {
           <p className="text-sm text-gray-500 mt-0.5">{displayedTickets.length}{filterSla ? ` / ${tickets.length}` : ''} ticket(s) encontrado(s)</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Toggle de diseño (solo desktop; móvil siempre es tarjeta) */}
+          <div className="hidden md:inline-flex items-center rounded-lg border border-gray-200 overflow-hidden" title="Diseño de la lista">
+            <button onClick={() => setView('card')} title="Vista de tarjeta"
+              className={`flex items-center justify-center w-9 h-9 transition-colors ${viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+              <LayoutGrid size={16} />
+            </button>
+            <button onClick={() => setView('table')} title="Vista de tabla"
+              className={`flex items-center justify-center w-9 h-9 transition-colors ${viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+              <TableIcon size={16} />
+            </button>
+          </div>
           <button onClick={() => setShowScanner(true)} title="Escanear QR de un ticket" className="flex items-center gap-2 text-sm font-medium bg-slate-700 text-white rounded-lg px-3 py-2 hover:bg-slate-800 transition-colors">
             <QrCode size={16} />
             <span className="hidden sm:inline">Escanear</span>
@@ -547,7 +570,68 @@ export default function Tickets() {
             })}
           </div>
 
+          {/* Desktop: vista de tarjetas (estilo Freshdesk) */}
+          {viewMode === 'card' && (
+          <div className="hidden md:block divide-y divide-gray-100">
+            {displayedTickets.map((t) => {
+              const isChecked = selected.has(t.id)
+              const slaInfo = getSLAInfo(t)
+              const slaBreached = slaInfo?.breached && !slaInfo?.resolved
+              return (
+                <div key={t.id}
+                  className={`px-5 py-4 cursor-pointer transition-colors border-l-4 ${isChecked ? 'bg-red-50 border-red-400' : slaBreached ? 'bg-red-50/60 border-red-400 hover:bg-red-50' : 'border-transparent hover:bg-gray-50'}`}
+                  onClick={() => navigate(`/tickets/${t.id}`)}>
+                  <div className="flex items-start justify-between gap-4">
+                    {/* Izquierda: estado, asunto, solicitante, tiempos */}
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div onClick={(e) => toggleOne(t.id, e)} className="pt-1 flex-shrink-0">
+                        <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer" checked={isChecked} onChange={() => {}} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <StatusBadge status={t.status_rel} />
+                          {t.category && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 max-w-[160px] truncate">{t.category}</span>}
+                        </div>
+                        <p className="font-semibold text-gray-900 leading-snug line-clamp-2">
+                          {t.title} <span className="text-gray-400 font-normal font-mono text-sm">#{t.id}</span>
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-gray-500">
+                          <span className="font-medium text-gray-600">{t.client?.name || 'Sin contacto'}</span>
+                          {t.client?.company && <><span className="text-gray-300">·</span><span className="truncate">{t.client.company}</span></>}
+                          <span className="text-gray-300">·</span>
+                          <span>Creado {relTime(t.created_at)}</span>
+                          {t.scheduled_at && (
+                            <><span className="text-gray-300">·</span>
+                            <span className="flex items-center gap-1 text-blue-600"><Calendar size={11} />{fmtDT(t.scheduled_at, 'dd/MM hh:mm aa')}</span></>
+                          )}
+                        </div>
+                        {t.tags && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {t.tags.split(',').filter(Boolean).map((tag) => (
+                              <span key={tag} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 cursor-pointer"
+                                onClick={(e) => { e.stopPropagation(); setFilter('tag', tag.trim()) }}>#{tag.trim()}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Derecha: prioridad, agente, SLA */}
+                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0 text-right">
+                      <PriorityBadge priority={t.priority} />
+                      <span className="text-xs text-gray-500 max-w-[160px] truncate">
+                        {t.assigned_agent?.name || <span className="text-gray-300">Sin asignar</span>}
+                      </span>
+                      <SlaBadge ticket={t} />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          )}
+
           {/* Desktop: table */}
+          {viewMode === 'table' && (
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -624,6 +708,7 @@ export default function Tickets() {
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 
