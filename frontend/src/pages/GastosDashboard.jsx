@@ -236,7 +236,7 @@ export default function GastosDashboard() {
     <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
 
       {/* Header */}
-      <div className="bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0">
+      <div className="bg-white border-b border-gray-100 px-5 py-4 flex items-center gap-3 flex-shrink-0 md:pr-14 lg:pr-28">
         <button onClick={() => navigate(-1)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
           <ArrowLeft size={18} />
         </button>

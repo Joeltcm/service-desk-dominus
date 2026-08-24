@@ -168,7 +168,7 @@ export default function Dashboard() {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-7xl mx-auto">
 
       {/* ── Encabezado: título, fecha y botones de acción ── */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 md:pr-14 lg:pr-28">
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">

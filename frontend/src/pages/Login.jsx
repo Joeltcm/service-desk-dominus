@@ -43,6 +43,10 @@ export default function Login() {
   const [forgotSent, setForgotSent]   = useState(false)
   const [forgotLoading, setForgotLoading] = useState(false)
 
+  // Consentimiento de términos (obligatorio al crear cuenta)
+  const [acceptTerms, setAcceptTerms] = useState(false)
+  const [showTerms, setShowTerms]     = useState(false)
+
   const { login } = useAuth()
   const navigate  = useNavigate()
 
@@ -107,6 +111,7 @@ export default function Login() {
     if (!regName.trim()) return setErrorMsg('Ingresa tu nombre completo')
     if (regPassword.length < 6) return setErrorMsg('La contraseña debe tener al menos 6 caracteres')
     if (regPassword !== regConfirm) return setErrorMsg('Las contraseñas no coinciden')
+    if (!acceptTerms) return setErrorMsg('Debes aceptar los Términos de Uso y el Tratamiento de Datos Personales')
     if (!captcha) return setErrorMsg('Espera a que cargue el captcha')
     if (!captchaAnswer.trim()) return setErrorMsg('Debes completar la verificación de seguridad')
     setLoading(true)
@@ -119,6 +124,7 @@ export default function Login() {
         company: regCompany.trim() || null,
         captcha_id: captcha.id,
         captcha_answer: captchaAnswer,
+        accept_terms: acceptTerms,
       })
       login(res.data.access_token, res.data.user)
       toast.success('¡Cuenta creada exitosamente!')
@@ -449,9 +455,29 @@ export default function Login() {
 
                 {captchaBlock}
 
+                <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={acceptTerms}
+                    onChange={e => setAcceptTerms(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 shrink-0"
+                  />
+                  <span>
+                    He leído y acepto los{' '}
+                    <button
+                      type="button"
+                      onClick={() => setShowTerms(true)}
+                      className="font-semibold underline hover:opacity-80"
+                      style={{ color: sidebarColor || '#1a3353' }}
+                    >
+                      Términos de Uso y el Tratamiento de mis Datos Personales
+                    </button>.
+                  </span>
+                </label>
+
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || !acceptTerms}
                   className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 shadow-sm mt-2" style={{ backgroundColor: sidebarColor || '#1a3353' }}
                 >
                   {loading ? 'Creando cuenta...' : 'Crear cuenta'}
@@ -472,6 +498,73 @@ export default function Login() {
           )}
         </div>
       </div>
+
+      {/* Modal Términos de Uso / Tratamiento de Datos */}
+      {showTerms && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+            <div className="px-6 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Términos de Uso y Tratamiento de Datos Personales</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Versión 2026-08-17 · {brandName}</p>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto text-sm text-gray-600 space-y-3">
+              <p>Al crear una cuenta en la plataforma de <b>{brandName}</b> aceptas los siguientes términos sobre el uso del servicio y el tratamiento de tus datos personales, conforme a la <b>Ley 81 de 2019</b> de protección de datos personales de la República de Panamá.</p>
+              <div>
+                <p className="font-semibold text-gray-800">1. Responsable del tratamiento</p>
+                <p><b>{brandName}</b> es responsable de los datos personales que registras en la plataforma. Para cualquier consulta sobre tus datos puedes escribir a los canales de soporte de {brandName}.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">2. Datos que recopilamos</p>
+                <p>Nombre, correo electrónico, teléfono y empresa, así como la información que incluyas en tus tickets, pedidos, solicitudes y comunicaciones dentro de la plataforma.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">3. Finalidad</p>
+                <p>Usamos tus datos únicamente para: crear y administrar tu cuenta, brindarte soporte técnico, procesar y dar seguimiento a tus tickets, pedidos y garantías, y comunicarnos contigo sobre tus solicitudes.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">4. Base legal</p>
+                <p>El tratamiento se realiza con base en tu consentimiento —otorgado al crear la cuenta— y en la ejecución del servicio que solicitas.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">5. Conservación</p>
+                <p>Conservamos tus datos mientras tu cuenta esté activa y durante el tiempo necesario para cumplir obligaciones legales o resolver reclamos.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">6. Compartir con terceros</p>
+                <p>No vendemos ni cedemos tus datos. Solo se comparten con los proveedores tecnológicos que hacen posible el servicio (alojamiento en la nube y envío de correo), quienes los tratan bajo estrictas condiciones de confidencialidad.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">7. Seguridad</p>
+                <p>Aplicamos medidas técnicas y organizativas razonables para proteger tu información contra accesos no autorizados, pérdida o alteración.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">8. Tus derechos</p>
+                <p>Puedes ejercer tus derechos de <b>acceso, rectificación, cancelación (supresión) y oposición</b> sobre tus datos personales, escribiendo a los canales de soporte de {brandName}.</p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">9. Aceptación</p>
+                <p>Al marcar la casilla y crear tu cuenta, confirmas que leíste y aceptas estos términos y el tratamiento de tus datos aquí descrito.</p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowTerms(false)}
+                className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAcceptTerms(true); setShowTerms(false) }}
+                className="flex-1 py-2.5 text-white rounded-lg text-sm font-semibold transition-colors" style={{ backgroundColor: sidebarColor || '#1a3353' }}
+              >
+                Acepto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal recuperación */}
       {showForgot && (

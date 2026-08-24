@@ -304,7 +304,7 @@ export default function Projects() {
       >
         {/* Header */}
         <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 md:pr-14 lg:pr-28">
             <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
               <FolderKanban size={20} className="text-indigo-500" /> Proyectos
             </h1>

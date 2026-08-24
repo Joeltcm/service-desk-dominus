@@ -1930,7 +1930,7 @@ export default function Facturas() {
       </div>
 
       {/* Detail / Edit */}
-      <div className={`${mobileDetailOpen ? 'flex' : 'hidden sm:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50`} {...(editing ? {} : detailSwipe)}>
+      <div className={`${mobileDetailOpen ? 'flex' : 'hidden sm:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50 md:pr-14 lg:pr-28`} {...(editing ? {} : detailSwipe)}>
         {editing ? (
           <form onSubmit={handleSave} className="p-4 sm:p-6 max-w-3xl mx-auto w-full space-y-5">
             <button type="button" onClick={cancelEdit} className="sm:hidden flex items-center gap-2 text-sm text-gray-500 -mb-2">

@@ -7,7 +7,7 @@ import { useCompany } from '../context/CompanyContext'
 import { useModuleAccess } from '../context/RoleFeaturesContext'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
-import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown, QrCode } from 'lucide-react'
+import { Plus, Search, Calendar, Trash2, X, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff, Clock, CheckCircle, CircleDot, ChevronRight, Tag, ArrowUpDown, QrCode, UserCheck } from 'lucide-react'
 import TicketScanner from '../components/TicketScanner'
 import { format, formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -37,13 +37,14 @@ export default function Tickets() {
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const [sortKey, setSortKey] = useState('created_at_desc')
-  // Vista de la lista en desktop: 'card' (estilo Freshdesk, por defecto) | 'table'.
+  // Vista de la lista en desktop: 'table' (clásica, por defecto) | 'card' (estilo Freshdesk).
   // En móvil siempre son tarjetas (no hay espacio para tabla).
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('ticketsViewMode') || 'card')
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('ticketsViewMode') || 'table')
   const setView = (m) => { setViewMode(m); localStorage.setItem('ticketsViewMode', m) }
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [agents, setAgents] = useState([])
+  const [assigningId, setAssigningId] = useState(null)
   const PER_PAGE = 50
 
   const filterStatus     = searchParams.get('status')           || '__open__'
@@ -146,6 +147,7 @@ export default function Tickets() {
           return info && !info.breached && !info.paused && (info.remaining_min / total) < 0.20
         }
         if (filterSla === 'unassigned') return !t.assigned_agent
+        if (filterSla === 'mine') return t.assigned_agent?.id === user?.id
         return true
       })
     : sortedTickets
@@ -160,6 +162,23 @@ export default function Tickets() {
   }).length
   const unassignedCount = tickets.filter((t) => !t.assigned_agent).length
   const someSelected = selected.size > 0
+
+  // Asignar/reasignar el agente directo desde la tabla, sin abrir el ticket.
+  const handleAssignAgent = async (ticketId, agentId, e) => {
+    e?.stopPropagation()
+    const aid = agentId ? parseInt(agentId) : null
+    setAssigningId(ticketId)
+    try {
+      await updateTicket(ticketId, { assigned_to_id: aid })
+      const agent = agents.find((a) => a.id === aid) || null
+      setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, assigned_agent: agent } : t)))
+    } catch {
+      toast.error('No se pudo asignar el agente')
+    } finally {
+      setAssigningId(null)
+    }
+  }
+  const myAssignedCount = user ? tickets.filter((t) => t.assigned_agent?.id === user.id).length : 0
 
   const toggleAll = () => {
     if (allSelected) {
@@ -222,7 +241,7 @@ export default function Tickets() {
           className="rounded-2xl p-5 sm:p-6 mb-5 text-white shadow-sm"
           style={{ background: `linear-gradient(135deg, ${company_sidebar_color || '#1a3353'} 0%, ${company_accent_color || '#3b82f6'} 100%)` }}
         >
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 md:pr-14 lg:pr-28">
             <div className="min-w-0">
               <h1 className="text-xl sm:text-2xl font-bold leading-tight">
                 Hola{user?.name ? `, ${user.name.split(' ')[0]}` : ''} <span className="align-middle">👋</span>
@@ -355,7 +374,7 @@ export default function Tickets() {
   // ── Vista agente / admin ────────────────────────────────
   return (
     <div className="p-4 sm:p-6">
-      <div className="flex items-center justify-between mb-4 sm:mb-6">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 md:pr-14 lg:pr-28">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Tickets</h1>
           <p className="text-sm text-gray-500 mt-0.5">{displayedTickets.length}{filterSla ? ` / ${tickets.length}` : ''} ticket(s) encontrado(s)</p>
@@ -451,8 +470,15 @@ export default function Tickets() {
       )}
 
       {/* Chips SLA */}
-      {(slaBreachedCount > 0 || slaWarningCount > 0 || unassignedCount > 0) && (
+      {(slaBreachedCount > 0 || slaWarningCount > 0 || unassignedCount > 0 || (isAgentOrAdmin && user)) && (
         <div className="flex flex-wrap gap-2 mb-3">
+          {isAgentOrAdmin && user && (
+            <button
+              onClick={() => setFilter('sla', filterSla === 'mine' ? '' : 'mine')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${filterSla === 'mine' ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>
+              <UserCheck size={11} /> Mis asignados <span className="font-bold">{myAssignedCount}</span>
+            </button>
+          )}
           {slaBreachedCount > 0 && (
             <button
               onClick={() => setFilter('sla', filterSla === 'breached' ? '' : 'breached')}
@@ -553,6 +579,23 @@ export default function Tickets() {
                           </span>
                         )}
                       </div>
+                      {canEditTickets && agents.length > 0 && (
+                        <div className="mt-2 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <UserCheck size={13} className="text-gray-400 flex-shrink-0" />
+                          <select
+                            value={t.assigned_agent?.id || ''}
+                            disabled={assigningId === t.id}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleAssignAgent(t.id, e.target.value, e)}
+                            className={`flex-1 text-xs border rounded-md px-2 py-1.5 bg-white disabled:opacity-50 ${t.assigned_agent ? 'border-gray-200 text-gray-700' : 'border-amber-300 text-amber-700'}`}
+                            style={{ fontSize: 16 }}
+                            title="Asignar agente"
+                          >
+                            <option value="">Sin asignar</option>
+                            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        </div>
+                      )}
                       {t.tags && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {t.tags.split(',').filter(Boolean).map((tag) => (
@@ -689,7 +732,23 @@ export default function Tickets() {
                       )}
                       <td className="px-4 py-3 text-gray-500 text-sm max-w-[140px] truncate">{t.client?.company || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.client?.name}</td>
-                      <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{t.assigned_agent?.name || <span className="text-gray-300">Sin asignar</span>}</td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        {canEditTickets && agents.length > 0 ? (
+                          <select
+                            value={t.assigned_agent?.id || ''}
+                            disabled={assigningId === t.id}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleAssignAgent(t.id, e.target.value, e)}
+                            className={`text-xs border rounded-md px-1.5 py-1 max-w-[130px] bg-white cursor-pointer focus:ring-1 focus:ring-blue-400 focus:outline-none disabled:opacity-50 ${t.assigned_agent ? 'border-gray-200 text-gray-700' : 'border-amber-300 text-amber-700'}`}
+                            title="Asignar agente"
+                          >
+                            <option value="">Sin asignar</option>
+                            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-gray-600 text-sm">{t.assigned_agent?.name || <span className="text-gray-300">Sin asignar</span>}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3"><PriorityBadge priority={t.priority} /></td>
                       <td className="px-4 py-3"><StatusBadge status={t.status_rel} /></td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{fmtD(t.created_at)}</td>

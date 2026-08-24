@@ -668,7 +668,7 @@ export default function Contacts() {
       </div>
 
       {/* Detail panel */}
-      <div className={`${mobileDetailOpen ? 'flex' : 'hidden sm:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50`} {...detailSwipe}>
+      <div className={`${mobileDetailOpen ? 'flex' : 'hidden sm:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50 md:pr-14 lg:pr-28`} {...detailSwipe}>
         {selectedCompany ? (
           <div className="p-4 sm:p-6 max-w-2xl mx-auto space-y-5 w-full">
             <button onClick={() => setMobileDetailOpen(false)} className="sm:hidden flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 -mb-1">

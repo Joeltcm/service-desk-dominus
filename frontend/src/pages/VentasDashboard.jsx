@@ -231,7 +231,7 @@ export default function VentasDashboard() {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 md:pr-14 lg:pr-28">
           <div className="min-w-0">
             <h1 className="text-xl font-bold text-gray-900">Dashboard de Ventas</h1>
             <p className="text-sm text-gray-500 mt-0.5 hidden sm:block">Cotizaciones · Pedidos · Despachos · Facturas</p>

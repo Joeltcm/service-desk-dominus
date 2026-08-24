@@ -3,7 +3,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime, timezone
 from database import get_db
+
+# Versión vigente de los Términos de Uso / Tratamiento de Datos que el cliente
+# acepta al crear cuenta. Subir esta fecha cuando cambie el texto legal.
+TERMS_VERSION = "2026-08-17"
 import models, schemas, auth as auth_module
 import secrets, time, smtplib, random, base64, json, os, urllib.request, urllib.error, threading
 from email.mime.text import MIMEText
@@ -109,6 +114,7 @@ class RegisterRequest(BaseModel):
     company: Optional[str] = None
     captcha_id: str
     captcha_answer: str
+    accept_terms: bool = False
 
 
 @router.post("/register", response_model=schemas.Token)
@@ -122,6 +128,12 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
     if len(data.password) < 6:
         raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres")
+
+    if not data.accept_terms:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes aceptar los Términos de Uso y el Tratamiento de Datos Personales para crear tu cuenta",
+        )
 
     existing = db.query(models.User).filter(
         models.User.email == data.email.strip().lower()
@@ -137,6 +149,8 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         phone=data.phone or None,
         company=data.company or None,
         is_active=True,
+        terms_accepted_at=datetime.now(timezone.utc),
+        terms_version=TERMS_VERSION,
     )
     db.add(user)
     db.commit()

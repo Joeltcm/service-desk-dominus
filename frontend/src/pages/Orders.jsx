@@ -850,7 +850,7 @@ export default function Orders() {
       </div>
 
       {/* Right panel */}
-      <div className={`${mobileDetailOpen ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-gray-50 overflow-y-auto overscroll-contain min-h-0`} {...detailSwipe}>
+      <div className={`${mobileDetailOpen ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-gray-50 overflow-y-auto overscroll-contain min-h-0 md:pr-14 lg:pr-28`} {...detailSwipe}>
         {showForm ? (
           <OrderForm
             form={form} setForm={setForm}

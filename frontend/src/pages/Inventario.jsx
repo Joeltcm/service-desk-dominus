@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, updateInventoryPending, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV } from '../services/api'
-import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock, CalendarClock } from 'lucide-react'
+import { fmtDT } from '../utils/fmt'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem, getInventoryTransactions, withdrawInventoryItem, receiveInventoryItem, adjustInventoryItem, updateInventoryPending, getAllInventoryTransactions, getInventoryReportPdf, getSuppliers, createSupplier, importInventoryCSV, getReceiptsPendingReview, getOversoldReport } from '../services/api'
+import { Package, Plus, Search, Edit, Trash2, X, AlertTriangle, ChevronDown, ChevronUp, History, TrendingDown, TrendingUp, Minus, ArrowDownCircle, ArrowUpCircle, List, ExternalLink, Upload, Download, FileText, PackagePlus, Scale, Lock, CalendarClock, ClipboardList, Undo2 } from 'lucide-react'
+import ReceiptOrders from '../components/ReceiptOrders'
+import ReceiptOrdersPanel from '../components/ReceiptOrdersPanel'
+import SupplierReturnsPanel from '../components/SupplierReturnsPanel'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -119,6 +123,19 @@ export default function Inventario() {
   const fileInputRef = React.useRef(null)
   const [suppliers, setSuppliers] = useState([])
   const [importing, setImporting] = useState(false)
+  const [showReceipts, setShowReceipts] = useState(false)
+  const [pendingReview, setPendingReview] = useState({ orders: 0, items: 0 })
+  const [oversold, setOversold] = useState([])
+  const [showOversold, setShowOversold] = useState(false)
+  const loadOversold = useCallback(() => {
+    getOversoldReport().then(r => setOversold(r.data || [])).catch(() => {})
+  }, [])
+  const loadPending = useCallback(() => {
+    getReceiptsPendingReview().then(r => setPendingReview(r.data || { orders: 0, items: 0 })).catch(() => {})
+  }, [])
+  useEffect(() => { loadPending(); loadOversold() }, [loadPending, loadOversold])
+  // Al cerrar el modal de órdenes, recalcular pendientes (por si se revisaron ítems)
+  useEffect(() => { if (!showReceipts) loadPending() }, [showReceipts, loadPending])
   // Tooltip flotante (portal) para los íconos de acción — evita que la tabla con overflow lo recorte
   const [tip, setTip] = useState(null) // { text, x, y }
   const showTip = useCallback((e) => {
@@ -191,7 +208,8 @@ export default function Inventario() {
       .then(r => setItems(r.data))
       .catch(() => toast.error('Error cargando inventario'))
       .finally(() => setLoading(false))
-  }, [])
+    loadOversold()
+  }, [loadOversold])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { getSuppliers().then(r => setSuppliers(r.data)).catch(() => {}) }, [])
@@ -442,6 +460,25 @@ export default function Inventario() {
     if (t === 'movimientos' && allTxns.length === 0) loadAllTxns()
   }
 
+  // ── Órdenes de recibo: modal (crear/editar) + panel (tab) ──
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [receiptsInitial, setReceiptsInitial] = useState(null)
+  const [receiptsTick, setReceiptsTick] = useState(0)
+  const [returnsTick, setReturnsTick] = useState(0)
+  const openReceiptEditor = useCallback((id, edit = false) => {
+    setReceiptsInitial({ mode: id ? 'edit' : 'new', id, edit })
+    setShowReceipts(true)
+  }, [])
+  // FAB / enlace externo: crear orden de recibo con ?action=new-receipt
+  useEffect(() => {
+    if (searchParams.get('action') === 'new-receipt') {
+      setTab('ordenes')
+      openReceiptEditor(null)
+      const sp = new URLSearchParams(searchParams); sp.delete('action')
+      setSearchParams(sp, { replace: true })
+    }
+  }, []) // eslint-disable-line
+
   const filteredTxns = useMemo(() => {
     return allTxns.filter(t => {
       const delta = parseFloat(t.qty_delta || '0')
@@ -679,6 +716,7 @@ export default function Inventario() {
   }
 
   const lowStock = (it) => parseFloat(it.quantity || '0') <= 5 && parseFloat(it.quantity || '0') >= 0
+  const negStock = (it) => (parseFloat(it.quantity || '0') || 0) < 0
 
   return (
     <div className="p-4 sm:p-6 w-full max-w-7xl mx-auto">
@@ -692,7 +730,7 @@ export default function Inventario() {
         </div>,
         document.body
       )}
-      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap lg:pr-28">
         <div className="flex items-center gap-2">
           <Package size={22} className="text-emerald-600" />
           <h1 className="text-xl font-bold text-gray-900">Inventario</h1>
@@ -720,6 +758,12 @@ export default function Inventario() {
               </button>
             )}
             {canEdit && (
+              <button onClick={() => handleTabChange('ordenes')} title="Órdenes de recibo de inventario" className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors font-medium whitespace-nowrap">
+                <ClipboardList size={15} /> Órdenes de recibo
+                {pendingReview.items > 0 && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">{pendingReview.items}</span>}
+              </button>
+            )}
+            {canEdit && (
               <button onClick={openNew} className="btn-primary flex items-center gap-2">
                 <Plus size={15} /> <span className="hidden sm:inline">Nuevo artículo</span><span className="sm:hidden">Nuevo</span>
               </button>
@@ -733,27 +777,64 @@ export default function Inventario() {
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 border-b border-gray-200">
+      {/* Tabs — barra desplazable en móvil para no empujar la página (scroll horizontal) */}
+      <div className="flex gap-1 mb-5 border-b border-gray-200 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => handleTabChange('items')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'items' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'items' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
         >
           <span className="flex items-center gap-1.5"><Package size={14} /> Artículos <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{stockItems.length}</span></span>
         </button>
         <button
           onClick={() => handleTabChange('movimientos')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'movimientos' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'movimientos' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
         >
           <span className="flex items-center gap-1.5"><List size={14} /> Movimientos</span>
         </button>
         <button
           onClick={() => handleTabChange('reportes')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'reportes' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'reportes' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
         >
           <span className="flex items-center gap-1.5"><FileText size={14} /> Reportes</span>
         </button>
+        <button
+          onClick={() => handleTabChange('ordenes')}
+          className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'ordenes' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          <span className="flex items-center gap-1.5">
+            <ClipboardList size={14} /> <span className="sm:hidden">Órdenes</span><span className="hidden sm:inline">Órdenes de recibo</span>
+            {pendingReview.items > 0 && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-semibold">{pendingReview.items}</span>}
+          </span>
+        </button>
+        <button
+          onClick={() => handleTabChange('devoluciones')}
+          className={`shrink-0 whitespace-nowrap px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === 'devoluciones' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+        >
+          <span className="flex items-center gap-1.5"><Undo2 size={14} /> Devoluciones</span>
+        </button>
       </div>
+
+      {/* Banner: órdenes de recibo con artículos pendientes por revisar */}
+      {pendingReview.items > 0 && (
+        <div className="mb-4 flex items-center gap-3 flex-wrap bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+          <div className="flex-1 min-w-[200px] text-sm text-amber-800">
+            <b>{pendingReview.items}</b> artículo(s) de <b>{pendingReview.orders}</b> orden(es) de recibo ingresadas al inventario están <b>pendientes por revisar</b>.
+          </div>
+          <button onClick={() => handleTabChange('ordenes')} className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap">Revisar órdenes</button>
+        </div>
+      )}
+
+      {/* Banner: artículos vendidos sin stock (existencia negativa) */}
+      {oversold.length > 0 && (
+        <div className="mb-4 flex items-center gap-3 flex-wrap bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <AlertTriangle size={18} className="text-red-600 shrink-0" />
+          <div className="flex-1 min-w-[200px] text-sm text-red-800">
+            <b>{oversold.length}</b> artículo(s) con <b>existencia negativa</b> (vendidos sin stock, por reponer).
+          </div>
+          <button onClick={() => setShowOversold(true)} className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 whitespace-nowrap">Ver detalle</button>
+        </div>
+      )}
 
       {/* ── Movimientos tab ─────────────────────────── */}
       {tab === 'movimientos' && (
@@ -1040,6 +1121,18 @@ export default function Inventario() {
         </div>
       )}
 
+      {/* ── Órdenes de recibo tab ─────────────────── */}
+      {tab === 'ordenes' && (
+        <ReceiptOrdersPanel
+          suppliers={suppliers}
+          onOpenEditor={openReceiptEditor}
+          onChanged={() => { load(); loadPending(); setReturnsTick(t => t + 1) }}
+          refreshTick={receiptsTick}
+        />
+      )}
+
+      {tab === 'devoluciones' && <SupplierReturnsPanel refreshTick={returnsTick} />}
+
       {/* ── Artículos tab ─────────────────────────── */}
       {tab === 'items' && <>
 
@@ -1197,7 +1290,10 @@ export default function Inventario() {
               )}
               {filtered.map(it => (
                 <tr key={it.id} className="border-t border-gray-50 hover:bg-gray-50 transition-colors group">
-                  <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">{it.code}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-blue-700 font-semibold">
+                    {it.code}
+                    {it.needs_code && <span className="block mt-0.5 text-[9px] font-sans font-semibold text-orange-600 bg-orange-50 border border-orange-200 rounded px-1 py-0.5 whitespace-nowrap" title="Artículo creado desde una orden de recibo; asígnale un código real">⚠ Sin código</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-900 font-medium">{it.name}
                     {it.description && <p className="text-xs text-gray-400 truncate max-w-xs">{it.description}</p>}
                     <div className="flex flex-wrap items-center gap-1.5 mt-1 lg:hidden">
@@ -1223,8 +1319,8 @@ export default function Inventario() {
                   <td className="px-4 py-3 text-gray-600 hidden lg:table-cell text-xs">{it.location || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3 text-gray-500 hidden md:table-cell text-xs">{it.unit || 'unidad'}</td>
                   <td className="px-4 py-3 text-right">
-                    <span className={`font-semibold ${lowStock(it) ? 'text-orange-600' : 'text-gray-900'} flex items-center justify-end gap-1`}>
-                      {lowStock(it) && <AlertTriangle size={12} />}
+                    <span className={`font-semibold ${negStock(it) ? 'text-red-600' : lowStock(it) ? 'text-orange-600' : 'text-gray-900'} flex items-center justify-end gap-1`} title={negStock(it) ? 'Vendido sin stock · por reponer' : undefined}>
+                      {(negStock(it) || lowStock(it)) && <AlertTriangle size={12} />}
                       {fmtQty(it.quantity)}
                     </span>
                   </td>
@@ -1797,6 +1893,63 @@ export default function Inventario() {
             </div>
           </div>
         </div>
+      )}
+
+      {showReceipts && (
+        <ReceiptOrders
+          suppliers={suppliers}
+          initial={receiptsInitial}
+          onClose={() => { setShowReceipts(false); setReceiptsInitial(null); setReceiptsTick(t => t + 1) }}
+          onApplied={() => { load(); loadPending() }}
+        />
+      )}
+
+      {/* Reporte: artículos vendidos sin stock (trazabilidad) */}
+      {showOversold && createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-3" onClick={() => setShowOversold(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={18} className="text-red-600" />
+                <h2 className="text-base font-bold text-gray-900">Vendidos sin stock</h2>
+                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-semibold">{oversold.length}</span>
+              </div>
+              <button onClick={() => setShowOversold(false)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {oversold.length === 0 ? (
+                <p className="text-center text-gray-400 py-10 text-sm">No hay artículos con stock negativo.</p>
+              ) : oversold.map((it) => (
+                <div key={it.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                    <div className="min-w-0">
+                      <span className="font-semibold text-gray-800">{it.name}</span>
+                      <span className="text-xs text-gray-400 ml-2 font-mono">{it.code}</span>
+                    </div>
+                    <span className="text-sm font-bold text-red-600 whitespace-nowrap">{it.quantity} {it.unit || ''}</span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {(it.sales || []).length === 0 ? (
+                      <div className="px-4 py-2 text-xs text-gray-400">Sin ventas registradas.</div>
+                    ) : it.sales.map((s, i) => (
+                      <div key={i} className="px-4 py-2 flex items-center justify-between gap-3 text-sm">
+                        <div className="min-w-0">
+                          <span className="font-medium text-gray-700">{s.client_name || 'Cliente —'}</span>
+                          {s.dispatch_number && <span className="text-xs text-blue-600 ml-2">{s.dispatch_number}</span>}
+                        </div>
+                        <div className="flex items-center gap-3 whitespace-nowrap">
+                          <span className="text-red-600 font-medium">{s.qty}</span>
+                          <span className="text-xs text-gray-400">{s.created_at ? fmtDT(s.created_at) : ''}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

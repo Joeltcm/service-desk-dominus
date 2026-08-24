@@ -26,7 +26,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN python -m playwright install chromium
+# Chromium es opcional: si la descarga falla no debe tumbar el build. El generador
+# de PDF cae a WeasyPrint (ya instalado con sus libs) cuando Chromium no está.
+RUN python -m playwright install chromium || true
 
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

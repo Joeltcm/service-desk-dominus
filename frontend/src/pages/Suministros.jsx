@@ -1301,7 +1301,7 @@ export default function Suministros() {
   return (
     <div className="flex flex-col gap-4 p-4 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 md:pr-14 lg:pr-28">
         <div className="flex items-center gap-2">
           <Package size={22} className="text-violet-600" />
           <h1 className="text-xl font-bold text-gray-800">Suministros</h1>

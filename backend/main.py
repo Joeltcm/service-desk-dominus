@@ -20,7 +20,11 @@ models.Base.metadata.create_all(bind=engine)
 def _migrate():
     from sqlalchemy import text
     with engine.connect() as conn:
-        for col, typedef in [("address", "VARCHAR(500)")]:
+        for col, typedef in [
+            ("address", "VARCHAR(500)"),
+            ("terms_accepted_at", "TIMESTAMPTZ"),
+            ("terms_version", "VARCHAR(20)"),
+        ]:
             try:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typedef}"))
                 conn.commit()
@@ -470,6 +474,67 @@ def _migrate_pg():
                 conn.commit()
             except Exception:
                 pass
+        # ── Consentimiento de Términos/Datos (Ley 81 de 2019) ──
+        for col, typedef in [
+            ("terms_accepted_at", "TIMESTAMP WITH TIME ZONE"),
+            ("terms_version",     "VARCHAR(20)"),
+        ]:
+            try:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typedef}"))
+                conn.commit()
+            except Exception:
+                pass
+        # ── Estado de revisión por item en órdenes de recibo ──
+        try:
+            conn.execute(text("ALTER TABLE inventory_receipt_items ADD COLUMN IF NOT EXISTS review_status VARCHAR(20) DEFAULT 'pendiente'"))
+            conn.commit()
+        except Exception:
+            pass
+        # ── Artículos sin código (creados desde órdenes de recibo) ──
+        try:
+            conn.execute(text("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS needs_code BOOLEAN DEFAULT FALSE"))
+            conn.commit()
+        except Exception:
+            pass
+        # ── Devolución a proveedor: técnico que revisó los equipos ──
+        try:
+            conn.execute(text("ALTER TABLE supplier_returns ADD COLUMN IF NOT EXISTS reviewed_by_id INTEGER REFERENCES users(id)"))
+            conn.execute(text("ALTER TABLE supplier_returns ADD COLUMN IF NOT EXISTS reviewed_by_name VARCHAR(200)"))
+            conn.commit()
+        except Exception:
+            pass
+        # ── Auditoría de edición de órdenes de recibo (re-firma) ──
+        try:
+            conn.execute(text("ALTER TABLE inventory_receipts ADD COLUMN IF NOT EXISTS last_edited_by_name VARCHAR(200)"))
+            conn.execute(text("ALTER TABLE inventory_receipts ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMP WITH TIME ZONE"))
+            conn.commit()
+        except Exception:
+            pass
+        # ── Trazabilidad de borrado: quién eliminó pedidos / órdenes de recibo ──
+        try:
+            conn.execute(text("ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS deleted_by_id INTEGER REFERENCES users(id)"))
+            conn.execute(text("ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS deleted_by_name VARCHAR(200)"))
+            conn.execute(text("ALTER TABLE inventory_receipts ADD COLUMN IF NOT EXISTS deleted_by_id INTEGER REFERENCES users(id)"))
+            conn.execute(text("ALTER TABLE inventory_receipts ADD COLUMN IF NOT EXISTS deleted_by_name VARCHAR(200)"))
+            conn.commit()
+        except Exception:
+            pass
+        # ── Ticket: quién lo levantó (created_by) + backfill desde la línea de tiempo ──
+        try:
+            conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_by_id INTEGER REFERENCES users(id)"))
+            conn.execute(text("""
+                UPDATE tickets t SET created_by_id = sub.user_id
+                FROM (
+                    SELECT DISTINCT ON (ticket_id) ticket_id, user_id
+                    FROM ticket_timeline
+                    WHERE content = 'Ticket creado'
+                    ORDER BY ticket_id, created_at ASC
+                ) sub
+                WHERE t.id = sub.ticket_id AND t.created_by_id IS NULL
+            """))
+            conn.commit()
+        except Exception:
+            pass
         try:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS audit_log (
@@ -2135,6 +2200,8 @@ app.include_router(invoices.router,      dependencies=[Depends(require_module("f
 app.include_router(ventas.router,        dependencies=[Depends(require_module("dashboard_ventas"))])
 app.include_router(expenses.router,      dependencies=[Depends(require_module("gastos")), Depends(require_module_write("gastos"))])
 app.include_router(despacho.router,      dependencies=[Depends(require_module("pedidos")), Depends(require_module_write("pedidos"))])
+app.include_router(inventory.receipts_router, dependencies=[Depends(require_module("inventario")), Depends(require_module_write("inventario"))])
+app.include_router(inventory.returns_router, dependencies=[Depends(require_module("inventario")), Depends(require_module_write("inventario"))])
 app.include_router(inventory.router,     dependencies=[Depends(require_module("inventario")), Depends(require_module_write("inventario"))])
 app.include_router(part_requests.router, dependencies=[Depends(require_module("tickets"))])
 app.include_router(notifications.router)

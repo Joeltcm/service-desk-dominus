@@ -118,25 +118,71 @@ def _iter_dispatch_coded_items(d: models.Dispatch):
             yield code, qty
 
 
+def _next_backorder_code(db: Session) -> str:
+    """Código temporal para un artículo vendido que no estaba en inventario (SP-0001)."""
+    rows = db.query(models.InventoryItem.code).filter(models.InventoryItem.code.like("SP-%")).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    n = (max(nums) + 1) if nums else 1
+    return f"SP-{n:04d}"
+
+
 def _apply_inventory_from_dispatch(d: models.Dispatch, db: Session):
+    """Descuenta el stock por cada artículo del pedido. Permite quedar en NEGATIVO
+    (venta sin stock / backorder). Si el artículo no está en inventario, lo CREA
+    (código temporal si no trae código) para dejar trazable el faltante."""
     if d.inventory_applied:
         return
-    for code, qty in _iter_dispatch_coded_items(d):
-        inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
-        if not inv:
+    try:
+        items = json.loads(d.items or "[]")
+    except Exception:
+        items = []
+    client = (d.client_name or "—").strip() or "—"
+    changed = False
+    for it in items:
+        try:
+            qty = float(it.get("qty") or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if qty <= 0:
             continue
+        code = (it.get("code") or "").strip()
+        desc = (it.get("description") or "").strip()
+        if not code and not desc:
+            continue  # línea vacía
+        inv = None
+        if code:
+            inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first()
+        if not inv:
+            # Artículo no catalogado: se crea (con código dado o temporal) en existencia 0,
+            # marcado 'por reponer' (needs_code cuando el código es temporal).
+            new_code = code or _next_backorder_code(db)
+            try:
+                up = str(it.get("unit_price") or "0")
+            except Exception:
+                up = "0"
+            inv = models.InventoryItem(
+                code=new_code, name=(desc or new_code)[:300], quantity="0",
+                cost_price="0.00", unit_price=up, warehouse="principal",
+                is_active=True, needs_code=(not code),
+            )
+            db.add(inv)
+            db.flush()
+            it["code"] = new_code
+            code = new_code
+            changed = True
         try:
             current = float(inv.quantity or "0")
         except (ValueError, TypeError):
             current = 0.0
-        new_qty = max(0.0, current - qty)
-        delta = current - new_qty
+        new_qty = current - qty   # SIN tope en 0: puede quedar negativo
         inv.quantity = f"{new_qty:.4f}".rstrip("0").rstrip(".") or "0"
         db.add(models.InventoryTransaction(
-            item_code=code, qty_delta=f"-{delta:.4f}".rstrip("0").rstrip("."),
+            item_code=code, qty_delta=f"-{qty:.4f}".rstrip("0").rstrip("."),
             source_type="dispatch", source_id=d.id,
-            notes=f"Pedido {d.dispatch_number or d.id} · {d.status}",
+            notes=f"Pedido {d.dispatch_number or d.id} · {client}"[:300],
         ))
+    if changed:
+        d.items = json.dumps(items)   # persistir los códigos generados
     d.inventory_applied = True
 
 
@@ -314,6 +360,63 @@ def create_client_dispatch(
     return d
 
 
+from pydantic import BaseModel
+
+
+class _StockCheckItem(BaseModel):
+    code: Optional[str] = None
+    description: Optional[str] = None
+    qty: float = 0
+
+
+class _StockCheckIn(BaseModel):
+    items: List[_StockCheckItem] = []
+
+
+@router.post("/stock-check")
+def dispatch_stock_check(data: _StockCheckIn, db: Session = Depends(get_db), _=Depends(require_staff)):
+    """Devuelve los artículos del pedido que quedarían SIN STOCK (negativos) o que no
+    están en inventario. Se usa para advertir/confirmar antes de procesar el pedido."""
+    shortages = []
+    for it in data.items:
+        try:
+            qty = float(it.qty or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if qty <= 0:
+            continue
+        code = (it.code or "").strip()
+        desc = (it.description or "").strip()
+        if not code and not desc:
+            continue
+        inv = db.query(models.InventoryItem).filter(models.InventoryItem.code == code).first() if code else None
+        if inv:
+            try:
+                avail = float(inv.quantity or "0")
+            except (ValueError, TypeError):
+                avail = 0.0
+            if qty > avail:
+                shortages.append({"code": inv.code, "name": inv.name, "in_inventory": True,
+                                  "available": avail, "requested": qty, "shortfall": qty - avail})
+        else:
+            shortages.append({"code": code or None, "name": desc or code, "in_inventory": False,
+                              "available": 0, "requested": qty, "shortfall": qty})
+    return {"shortages": shortages}
+
+
+@router.get("/assigned-counts")
+def dispatch_assigned_counts(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Conteo de pedidos ACTIVOS (no Entregado/Cancelado): 'mine' = asignados a mí, 'all' = todos.
+    Para el badge del menú (agente ve los suyos; admin/supervisor ven el global)."""
+    base = db.query(models.Dispatch).filter(
+        models.Dispatch.deleted_at.is_(None),
+        ~models.Dispatch.status.in_(("Entregado", "Cancelado")),
+    )
+    all_active = base.count()
+    mine_active = base.filter(models.Dispatch.assigned_to_id == current_user.id).count()
+    return {"mine": mine_active, "all": all_active}
+
+
 @router.get("/{dispatch_id}", response_model=schemas.DispatchOut)
 def get_dispatch(
     dispatch_id: int,
@@ -383,7 +486,7 @@ def update_dispatch(
 def cancel_dispatch(
     dispatch_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_staff),
+    current_user: models.User = Depends(require_staff),
 ):
     """Cancela un pedido: elimina el certificado de garantía vinculado (si existe) y
     devuelve al inventario los artículos que había descontado."""
@@ -406,6 +509,8 @@ def cancel_dispatch(
     _sync_dispatch_inventory(d, db)
     # 3) Devuelve al inventario las partes que el técnico había instalado.
     _revert_dispatch_parts(d, db)
+    from audit_helper import log_action
+    log_action(db, current_user, "update", "pedido", d.id, f"Cancelado · {d.dispatch_number or d.title}")
     db.commit()
     db.refresh(d)
 
@@ -422,7 +527,7 @@ def cancel_dispatch(
 def delete_dispatch(
     dispatch_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_staff),
+    current_user: models.User = Depends(require_staff),
 ):
     d = db.query(models.Dispatch).filter(
         models.Dispatch.id == dispatch_id,
@@ -434,6 +539,10 @@ def delete_dispatch(
     _revert_inventory_from_dispatch(d, db)  # repone stock si estaba aplicado
     _revert_dispatch_parts(d, db)           # devuelve las partes instaladas al inventario
     d.deleted_at = datetime.now(timezone.utc)
+    d.deleted_by_id = current_user.id
+    d.deleted_by_name = current_user.name
+    from audit_helper import log_action
+    log_action(db, current_user, "delete", "pedido", d.id, d.dispatch_number or d.title)
     db.commit()
     if order_id:
         order = db.query(models.Order).filter(models.Order.id == order_id).first()

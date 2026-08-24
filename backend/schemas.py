@@ -220,6 +220,7 @@ class TicketOut(BaseModel):
     status_rel: StatusOut
     client: UserOut
     assigned_agent: Optional[UserOut]
+    created_by: Optional[UserOut] = None
     contact_id: Optional[int] = None
     contact: Optional["ContactOut"] = None
     category: Optional[str]
@@ -1392,6 +1393,7 @@ class InventoryItemOut(BaseModel):
     condition: Optional[str] = None
     item_status: Optional[str] = None
     location: Optional[str] = None
+    needs_code: Optional[bool] = False
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -1990,3 +1992,176 @@ class PartRequestOut(BaseModel):
     approved_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
+
+
+# ── Orden de Recibo de Inventario ──────────────────────────────────────────────
+class ReceiptItemIn(BaseModel):
+    item_id: Optional[int] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    quantity: float
+    unit_cost: float = 0
+    review_status: Optional[str] = None   # pendiente | revisado
+
+
+class ReceiptCreate(BaseModel):
+    supplier_id: Optional[int] = None
+    notes: Optional[str] = None
+    delivered_by: Optional[str] = None
+    items: List[ReceiptItemIn] = []
+
+
+class ReceiptUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    notes: Optional[str] = None
+    delivered_by: Optional[str] = None
+    delivery_signature: Optional[str] = None   # firma requerida al editar una orden ya Recibida
+    items: Optional[List[ReceiptItemIn]] = None
+
+
+class ReceiptFinalize(BaseModel):
+    delivered_by: str
+    delivery_signature: str            # data URI de la firma de quien entrega
+    items: Optional[List[ReceiptItemIn]] = None  # permite el ajuste final del mensajero
+    notes: Optional[str] = None
+
+
+class ReceiptItemOut(BaseModel):
+    id: int
+    item_id: Optional[int] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    quantity: Optional[str] = None
+    unit_cost: Optional[str] = None
+    review_status: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReceiptReviewItem(BaseModel):
+    id: int                 # id del InventoryReceiptItem
+    review_status: str      # pendiente | revisado
+
+
+class ReceiptReviewIn(BaseModel):
+    items: List[ReceiptReviewItem] = []
+
+
+class ReceiptOut(BaseModel):
+    id: int
+    receipt_number: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+    supplier_email: Optional[str] = None
+    status: Optional[str] = None
+    delivered_by: Optional[str] = None
+    delivery_signature: Optional[str] = None
+    received_by_id: Optional[int] = None
+    received_by_name: Optional[str] = None
+    notes: Optional[str] = None
+    received_at: Optional[datetime] = None
+    last_edited_by_name: Optional[str] = None
+    last_edited_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    items: List[ReceiptItemOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ReceiptListItem(BaseModel):
+    id: int
+    receipt_number: Optional[str] = None
+    supplier_name: Optional[str] = None
+    status: Optional[str] = None
+    delivered_by: Optional[str] = None
+    received_by_name: Optional[str] = None
+    received_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    item_count: int = 0
+    pending_review: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class ReceiptEmail(BaseModel):
+    email: Optional[str] = None        # si se omite, usa el correo del proveedor
+
+
+# ── Devolución a proveedor ─────────────────────────────────────────────────────
+class ReturnItemIn(BaseModel):
+    item_id: Optional[int] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    quantity: float
+    unit_cost: float = 0
+    reason: Optional[str] = None
+
+
+class ReturnCreate(BaseModel):
+    receipt_id: Optional[int] = None
+    supplier_id: Optional[int] = None
+    notes: Optional[str] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    items: List[ReturnItemIn] = []
+
+
+class ReturnUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    notes: Optional[str] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    items: Optional[List[ReturnItemIn]] = None
+
+
+class ReturnItemOut(BaseModel):
+    id: int
+    item_id: Optional[int] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    quantity: Optional[str] = None
+    unit_cost: Optional[str] = None
+    reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReturnOut(BaseModel):
+    id: int
+    return_number: Optional[str] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+    supplier_email: Optional[str] = None
+    receipt_id: Optional[int] = None
+    receipt_number: Optional[str] = None
+    notes: Optional[str] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    items: List[ReturnItemOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class ReturnListItem(BaseModel):
+    id: int
+    return_number: Optional[str] = None
+    receipt_id: Optional[int] = None
+    receipt_number: Optional[str] = None
+    supplier_name: Optional[str] = None
+    created_by_name: Optional[str] = None
+    item_count: int = 0
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ReturnEmail(BaseModel):
+    email: Optional[str] = None

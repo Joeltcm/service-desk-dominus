@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import {
   getDispatches, createDispatch, updateDispatch, deleteDispatch, cancelDispatch, getNextDispatchNumber,
+  dispatchStockCheck,
   getOrders, getQuotes, getContacts, getCompanies, getAgents,
   uploadDispatchAttachment, deleteDispatchAttachment, dispatchAttachmentDownloadUrl,
   downloadWithAuth,
@@ -18,7 +19,7 @@ import {
   XCircle, Printer, Receipt, Download, Upload, FileCheck, Save,
   Ticket as TicketIcon, Building2, FilePlus2, Calendar, ExternalLink, CalendarDays, Share2,
   Tag, ShieldCheck, AlertTriangle,
-  User, MessageSquare, CheckSquare, Square, History as HistoryIcon, ListChecks, Wrench,
+  User, UserCheck, MessageSquare, CheckSquare, Square, History as HistoryIcon, ListChecks, Wrench,
 } from 'lucide-react'
 import { fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { toZonedTime, fromZonedTime } from 'date-fns-tz'
@@ -266,6 +267,7 @@ export default function Despacho() {
   const NounPl = itMode ? 'Pedidos' : 'Despachos'
   const { canWrite } = useModuleAccess()
   const canEditPedidos = canWrite('pedidos')
+  const { user } = useAuth()
   const { modules } = useModules()
   const [dispatches, setDispatches] = useState([])
   const [search, setSearch] = useState('')
@@ -276,6 +278,9 @@ export default function Despacho() {
   const [saving, setSaving] = useState(false)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
+  const [onlyMine, setOnlyMine] = useState(false)
+  const [assigningId, setAssigningId] = useState(null)
+  const [confirmShortages, setConfirmShortages] = useState(null)   // { shortages, onConfirm }
   const [orders, setOrders] = useState([])
   const [quotes, setQuotes] = useState([])
   const [agents, setAgents] = useState([])
@@ -408,14 +413,34 @@ export default function Despacho() {
     setShowForm(true)
   }
 
-  const handleStatusChange = async (newStatus) => {
+  // Advertencia de venta sin stock: revisa qué artículos quedarían en negativo y,
+  // si los hay, pide confirmar antes de procesar (descontar) el pedido.
+  const runWithStockGuard = async (items, needsDeduct, proceed) => {
+    if (!needsDeduct) return proceed()
     try {
-      const res = await updateDispatch(selected.id, { status: newStatus })
-      setSelected(res.data)
-      load()
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Error actualizando estado', { duration: 6000 })
+      const payload = (items || [])
+        .filter((it) => it.description?.trim() || it.code?.trim())
+        .map((it) => ({ code: it.code || null, description: it.description || null, qty: parseFloat(it.qty) || 0 }))
+      const res = await dispatchStockCheck(payload)
+      const shortages = res.data?.shortages || []
+      if (shortages.length) { setConfirmShortages({ shortages, onConfirm: proceed }); return }
+    } catch { /* si el chequeo falla, no bloquear el flujo */ }
+    return proceed()
+  }
+
+  const handleStatusChange = async (newStatus) => {
+    const proceed = async () => {
+      try {
+        const res = await updateDispatch(selected.id, { status: newStatus })
+        setSelected(res.data)
+        load()
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Error actualizando estado', { duration: 6000 })
+      }
     }
+    const firstDeduct = newStatus !== 'Borrador' && newStatus !== 'Cancelado'
+      && (selected.status === 'Borrador' || selected.status === 'Cancelado')
+    runWithStockGuard(parseItems(selected.items), firstDeduct, proceed)
   }
 
   const handleAssignChange = async (dispatch, techId) => {
@@ -426,6 +451,23 @@ export default function Despacho() {
       toast.success(techId ? 'Técnico asignado' : 'Asignación quitada')
     } catch {
       toast.error('Error al asignar técnico')
+    }
+  }
+
+  // Asignar técnico directo desde la tabla, sin abrir el detalle.
+  const handleAssignInline = async (dispatch, techId, e) => {
+    e?.stopPropagation()
+    const tid = techId ? Number(techId) : null
+    setAssigningId(dispatch.id)
+    try {
+      await updateDispatch(dispatch.id, { assigned_to_id: tid })
+      const tech = agents.find((a) => a.id === tid)
+      setDispatches((prev) => prev.map((d) => (d.id === dispatch.id ? { ...d, assigned_to_id: tid, assigned_to_name: tech ? tech.name : null } : d)))
+      toast.success(tid ? 'Técnico asignado' : 'Asignación quitada')
+    } catch {
+      toast.error('Error al asignar técnico')
+    } finally {
+      setAssigningId(null)
     }
   }
 
@@ -479,9 +521,13 @@ export default function Despacho() {
       itbms_amount: form.itbms_enabled ? `$${fmtMoney(itbmsAmt)}` : null,
       total: `$${fmtMoney(total)}`,
     }
+    const isEdit = !!(selected && showForm)
+    const willDeduct = form.status !== 'Borrador' && form.status !== 'Cancelado'
+    const firstDeduct = willDeduct && (!isEdit || selected.status === 'Borrador' || selected.status === 'Cancelado')
+    const doSave = async () => {
     setSaving(true)
     try {
-      if (selected && showForm) {
+      if (isEdit) {
         const res = await updateDispatch(selected.id, payload)
         setSelected(res.data)
         toast.success(`${Noun} actualizado`)
@@ -505,6 +551,8 @@ export default function Despacho() {
     } finally {
       setSaving(false)
     }
+    }
+    runWithStockGuard(validItems, firstDeduct, doSave)
   }
 
   const handleDelete = async (d) => {
@@ -535,13 +583,18 @@ export default function Despacho() {
     await sharePdfFromHtml(`${Noun} ${d.dispatch_number || d.id}`, buildDispatchHTML(d, items, origin), filename)
   }
 
-  const displayedDispatches = onlyUnassigned ? dispatches.filter((d) => !d.assigned_to_id) : dispatches
+  const myDispatchCount = user ? dispatches.filter((d) => d.assigned_to_id === user.id).length : 0
+  const displayedDispatches = onlyMine
+    ? dispatches.filter((d) => d.assigned_to_id === user?.id)
+    : onlyUnassigned
+      ? dispatches.filter((d) => !d.assigned_to_id)
+      : dispatches
 
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Vista lista: tabla full-width (estilo Tickets) */}
       <div className={`${(!selected && !showForm) ? 'flex' : 'hidden'} flex-1 flex-col bg-gray-50 overflow-hidden`}>
-        <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap flex-shrink-0">
+        <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap flex-shrink-0 md:pr-14 lg:pr-28">
           <div>
             <h1 className="text-xl font-bold text-gray-900">{NounPl}</h1>
             <p className="text-xs text-gray-400 mt-0.5">{dispatches.length} {nounPl}</p>
@@ -562,8 +615,16 @@ export default function Despacho() {
             <option value="">Todos los estados</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          {canEditPedidos && user && (
+            <button
+              onClick={() => { setOnlyMine((v) => !v); setOnlyUnassigned(false) }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${onlyMine ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'}`}
+            >
+              <UserCheck size={12} /> Mis asignados <span className="font-bold">{myDispatchCount}</span>
+            </button>
+          )}
           <button
-            onClick={() => setOnlyUnassigned((v) => !v)}
+            onClick={() => { setOnlyUnassigned((v) => !v); setOnlyMine(false) }}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${onlyUnassigned ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
           >
             <User size={12} /> Sin asignar <span className="font-bold">{dispatches.filter((d) => !d.assigned_to_id).length}</span>
@@ -600,10 +661,24 @@ export default function Despacho() {
                         <p className="font-medium text-gray-900 truncate" title={d.title}>{d.title}</p>
                       </td>
                       <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate hidden sm:table-cell">{d.client_name || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 max-w-[150px] truncate">
-                        {d.assigned_to_name
-                          ? <span className="inline-flex items-center gap-1 text-gray-700"><User size={12} className="text-gray-400" /> {d.assigned_to_name}</span>
-                          : <span className="inline-flex items-center gap-1 text-amber-600"><User size={12} /> Sin asignar</span>}
+                      <td className="px-4 py-3 max-w-[160px]" onClick={(e) => e.stopPropagation()}>
+                        {canEditPedidos && agents.length > 0 ? (
+                          <select
+                            value={d.assigned_to_id || ''}
+                            disabled={assigningId === d.id}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleAssignInline(d, e.target.value, e)}
+                            className={`text-xs border rounded-md px-1.5 py-1 max-w-[140px] bg-white cursor-pointer focus:ring-1 focus:ring-blue-400 focus:outline-none disabled:opacity-50 ${d.assigned_to_id ? 'border-gray-200 text-gray-700' : 'border-amber-300 text-amber-700'}`}
+                            title="Asignar técnico"
+                          >
+                            <option value="">Sin asignar</option>
+                            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        ) : (
+                          d.assigned_to_name
+                            ? <span className="inline-flex items-center gap-1 text-gray-700"><User size={12} className="text-gray-400" /> {d.assigned_to_name}</span>
+                            : <span className="inline-flex items-center gap-1 text-amber-600"><User size={12} /> Sin asignar</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {d.tasks_total > 0
@@ -664,6 +739,44 @@ export default function Despacho() {
           </div>
         )}
       </div>
+
+      {/* Confirmación: venta sin stock (deja inventario en negativo) */}
+      {confirmShortages && (
+        <div className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-3" onClick={() => setConfirmShortages(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <AlertTriangle size={18} className="text-amber-500" />
+              <h2 className="text-base font-bold text-gray-900">Procesando venta sin stock</h2>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                Este {noun} incluye <b>{confirmShortages.shortages.length} artículo(s) sin stock suficiente</b>. Al continuar, el inventario quedará en <b>negativo</b> (por reponer) y se dejará trazabilidad de a quién se vendió.
+              </p>
+              <div className="border border-amber-200 bg-amber-50/50 rounded-lg divide-y divide-amber-100 max-h-52 overflow-y-auto">
+                {confirmShortages.shortages.map((s, i) => (
+                  <div key={i} className="px-3 py-2 text-sm flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-medium text-gray-800">{s.name || s.code || '—'}</span>
+                      {s.code && <span className="text-xs text-gray-400 ml-1">{s.code}</span>}
+                      {!s.in_inventory && <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap">no catalogado</span>}
+                    </div>
+                    <span className="text-xs text-amber-700 whitespace-nowrap">
+                      pide {s.requested}{s.in_inventory ? ` · hay ${s.available}` : ''} → −{s.shortfall}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex gap-2 justify-end">
+              <button onClick={() => setConfirmShortages(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={() => { const cb = confirmShortages.onConfirm; setConfirmShortages(null); cb && cb() }}
+                className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700">
+                Continuar de todos modos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -283,7 +283,7 @@ export default function Suppliers() {
 
       {/* Left panel */}
       <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
-        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100 md:pr-14 lg:pr-28">
           <div>
             <h1 className="text-lg font-bold text-gray-900">Proveedores</h1>
             <p className="text-xs text-gray-400">{suppliers.length} proveedor{suppliers.length !== 1 ? 'es' : ''}</p>

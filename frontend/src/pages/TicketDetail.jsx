@@ -1894,6 +1894,10 @@ export default function TicketDetail() {
                 </span>
               </div>
             )}
+            {/* Quién levantó el ticket, solo si lo creó un agente (staff) */}
+            {isAgentOrAdmin && ticket.created_by && ticket.created_by.role !== 'client' && (
+              <Detail label="Levantado por" value={ticket.created_by.name} />
+            )}
 
             {/* Técnico asignado — editable */}
             <div>

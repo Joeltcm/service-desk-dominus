@@ -76,6 +76,29 @@ def _resume_sla_from_trash(ticket: models.Ticket, db: Session) -> None:
     ticket.sla_last_resume = now
 
 
+_RESOLVED_STATUS_NAMES = {"resuelto", "resolved", "cerrado", "closed"}
+
+
+def _is_resolved_status(name) -> bool:
+    return (name or "").strip().lower() in _RESOLVED_STATUS_NAMES
+
+
+def _maybe_autoassign(db: Session, ticket: models.Ticket, current_user: models.User, reason: str) -> None:
+    """Auto-asigna el ticket al staff que actúa (responde/resuelve), SOLO si está sin asignar.
+    Nunca 'roba' un ticket ya asignado ni asigna a un cliente. Deja traza en la línea de tiempo."""
+    if current_user.role == models.UserRole.client:
+        return
+    if ticket.assigned_to_id is not None:
+        return
+    ticket.assigned_to_id = current_user.id
+    db.add(models.TicketTimeline(
+        ticket_id=ticket.id,
+        user_id=current_user.id,
+        content=f"Ticket autoasignado a {current_user.name} al {reason}",
+        entry_type="assignment",
+    ))
+
+
 # ── Categories ────────────────────────────────────────
 @router.get("/categories", response_model=List[schemas.CategoryOut])
 def list_categories(db: Session = Depends(get_db), _=Depends(get_current_user)):
@@ -265,6 +288,7 @@ def create_ticket(
         if client and client.address:
             ticket_data["location"] = client.address
     ticket = models.Ticket(**ticket_data)
+    ticket.created_by_id = current_user.id
     db.add(ticket)
     db.flush()
 
@@ -327,6 +351,20 @@ def create_ticket(
     background_tasks.add_task(_push_new_ticket, ticket.id, ticket.client.name if ticket.client else "Cliente", ticket.title, current_user.id)
 
     return ticket
+
+
+@router.get("/assigned-counts")
+def assigned_counts(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Conteo de tickets ABIERTOS (no resueltos/cerrados): 'mine' = asignados a mí, 'all' = todos.
+    Se usa para el badge del menú (agente ve los suyos; admin/supervisor ven el global)."""
+    resolved_ids = [s.id for s in db.query(models.TicketStatus).filter(
+        func.lower(models.TicketStatus.name).in_(_RESOLVED_STATUS_NAMES)).all()]
+    base = db.query(models.Ticket).filter(models.Ticket.deleted_at.is_(None))
+    if resolved_ids:
+        base = base.filter(~models.Ticket.status_id.in_(resolved_ids))
+    all_open = base.count()
+    mine_open = base.filter(models.Ticket.assigned_to_id == current_user.id).count()
+    return {"mine": mine_open, "all": all_open}
 
 
 @router.get("/{ticket_id}", response_model=schemas.TicketOut)
@@ -416,6 +454,10 @@ def update_ticket(
     for k, v in update_data.items():
         setattr(ticket, k, v)
 
+    # 'assigned_to_id' explícito a null debe DESASIGNAR (exclude_none lo omitiría).
+    if 'assigned_to_id' in data.model_fields_set and current_user.role != models.UserRole.client:
+        ticket.assigned_to_id = data.assigned_to_id
+
     # Track status change for post-commit email
     _old_status_name = None
     _new_status_name = None
@@ -435,6 +477,8 @@ def update_ticket(
         db.add(entry)
         if new_status and new_status.name.lower() in ["resuelto", "resolved", "cerrado", "closed"]:
             ticket.closed_at = datetime.now(timezone.utc)
+            # Auto-asignación al resolver: si está sin asignar, el que resuelve lo toma.
+            _maybe_autoassign(db, ticket, current_user, "resolver")
 
         # SLA: pausar o reanudar según el nuevo estado
         now = datetime.utcnow()
@@ -600,6 +644,14 @@ def add_timeline_entry(
             entry.metadata_json = json.dumps(meta)
 
     db.add(entry)
+
+    # Auto-asignación: si el staff responde (comentario público) o resuelve, y el ticket
+    # está sin asignar, se le asigna. No reasigna si ya tiene agente.
+    is_public_comment = (data.entry_type == "comment" and not entry.is_internal)
+    resolved_now = status_changed and _is_resolved_status(new_status_name)
+    if is_public_comment or resolved_now:
+        _maybe_autoassign(db, ticket, current_user, "resolver" if resolved_now else "responder")
+
     db.commit()
     db.refresh(entry)
 

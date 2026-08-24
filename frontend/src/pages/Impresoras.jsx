@@ -792,7 +792,7 @@ export default function Impresoras() {
     <div className="flex flex-1 overflow-hidden">
       <div className={`${mobileDetailOpen ? 'hidden' : 'flex'} md:flex flex-col w-full md:w-80 lg:w-96 border-r border-gray-200 bg-white flex-shrink-0`}>
         <div className="px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between md:pr-14 lg:pr-28">
             <div>
               <h1 className="text-lg font-bold text-gray-900">{itMode ? 'Equipos' : 'Flota'}</h1>
               <p className="text-xs text-sky-500 font-medium mt-0.5">{filtered.length} impresora{filtered.length !== 1 ? 's' : ''}</p>

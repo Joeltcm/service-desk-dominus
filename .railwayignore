@@ -1,0 +1,16 @@
+# Excluir del snapshot de subida de `railway up` lo pesado/innecesario.
+# El Dockerfile regenera node_modules (npm ci) y dist (npm build) dentro del build,
+# así que NO hay que subirlos. Sin esto, la subida (~291MB por node_modules) agota
+# el "Snapshot code" de Railway.
+.git/
+frontend/node_modules/
+frontend/dist/
+graphify-out/
+**/__pycache__/
+**/*.pyc
+backend/venv/
+backend/uploads/
+*.log
+*.db
+.DS_Store
+Thumbs.db

@@ -5,7 +5,7 @@ import dgsLogo from '../assets/dgs-logo.png'
 import { NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useAuth } from '../context/AuthContext'
-import { getDashboard, getTrialStatus } from '../services/api'
+import { getTrialStatus, getTicketAssignedCounts, getDispatchAssignedCounts } from '../services/api'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
@@ -113,6 +113,7 @@ const FAB_ITEMS = [
   { label: 'Nueva Cotización', to: '/quotes?action=new',     Icon: ClipboardList, bg: 'bg-indigo-500', roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'cotizaciones' },
   { label: 'Nueva Factura',    to: '/facturas?action=new',   Icon: Receipt,       bg: 'bg-rose-500',   roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'facturas' },
   { label: 'Nuevo Pedido',     to: '/pedidos?action=new',    Icon: ShoppingCart,  bg: 'bg-sky-500',    roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'pedidos' },
+  { label: 'Orden de recibo',  to: '/inventario?action=new-receipt', Icon: PackageCheck, bg: 'bg-emerald-600', roles: ['admin','supervisor','agent','supplies','superadmin'], moduleKey: 'inventario' },
   { label: 'Nuevo Contacto',   to: '/contacts?action=new',   Icon: ContactRound,  bg: 'bg-cyan-500',   roles: ['admin','supervisor','agent','superadmin'],          moduleKey: 'contactos' },
   { label: 'Nuevo Gasto',      to: '/gastos?action=new',     Icon: TrendingDown,  bg: 'bg-red-500',    roles: ['admin','supervisor','agent','superadmin'],          moduleKey: 'gastos' },
   { label: 'Nueva Garantía',   to: '/warranties?action=new', Icon: ShieldCheck,   bg: 'bg-lime-500',   roles: ['admin','supervisor','agent','superadmin'],          moduleKey: 'garantias' },
@@ -129,6 +130,7 @@ export default function Layout({ children }) {
   const [fabOpen, setFabOpen] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
   const [openTickets, setOpenTickets] = useState(0)
+  const [openPedidos, setOpenPedidos] = useState(0)
   const [trial, setTrial] = useState({ active: false, expired: false, days_remaining: null })
   const [trialLoading, setTrialLoading] = useState(true)
   const [trialOverlay, setTrialOverlay] = useState(false)
@@ -157,13 +159,14 @@ export default function Layout({ children }) {
   }, [])
 
   useEffect(() => {
-    if (!['admin', 'agent'].includes(user?.role)) return
+    // Badges de carga: agente ve LOS SUYOS asignados; admin/supervisor ven el global.
+    const staffRoles = ['admin', 'supervisor', 'agent', 'superadmin', 'ventas', 'supplies']
+    if (!staffRoles.includes(user?.role)) return
+    const isAgent = user?.role === 'agent'
+    const pick = (data) => (isAgent ? (data?.mine || 0) : (data?.all || 0))
     const fetchCounts = () => {
-      getDashboard().then((r) => {
-        const total = r.data?.total_tickets || 0
-        const resolved = r.data?.resolved_tickets || 0
-        setOpenTickets(total - resolved)
-      }).catch(() => {})
+      getTicketAssignedCounts().then((r) => setOpenTickets(pick(r.data))).catch(() => {})
+      getDispatchAssignedCounts().then((r) => setOpenPedidos(pick(r.data))).catch(() => {})
     }
     fetchCounts()
     const interval = setInterval(fetchCounts, 5 * 60 * 1000)
@@ -277,7 +280,7 @@ export default function Layout({ children }) {
 
       const sgVisible = mobileOpen || item.group !== 'comercial' || !item.subgroup || openSubgroups[item.subgroup] !== false
       if (sgVisible)
-        nodes.push(<NavItem key={item.to} item={item} collapsed={!sidebarOpen} onNavigate={closeMobile} badge={item.to === '/tickets' ? openTickets : 0} />)
+        nodes.push(<NavItem key={item.to} item={item} collapsed={!sidebarOpen} onNavigate={closeMobile} badge={item.to === '/tickets' ? openTickets : item.to === '/pedidos' ? openPedidos : 0} />)
     }
     return nodes
   }
@@ -428,6 +431,16 @@ export default function Layout({ children }) {
             <span className="font-bold text-sm text-white tracking-tight">{companyName || 'Service Desk'}</span>
           </div>
           <div className="ml-auto flex items-center gap-1">
+            {modules?.knowledge_base !== false && (
+              <button
+                onClick={() => guardNavigate('/knowledge-base')}
+                title="Ayuda · Guías de uso"
+                aria-label="Ayuda"
+                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-white/10 text-slate-200"
+              >
+                <HelpCircle size={20} />
+              </button>
+            )}
             <NotificationBell align="right" />
             <button
               className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-blue-400/30"
@@ -490,7 +503,7 @@ export default function Layout({ children }) {
           onClick={() => navigate('/knowledge-base')}
           title="Ayuda · Guías de uso"
           aria-label="Ayuda"
-          className="fixed top-3 right-3 z-30 flex items-center gap-1.5 pl-2.5 pr-3 h-9 rounded-full bg-white/95 backdrop-blur shadow-md border border-gray-200 text-blue-600 hover:bg-blue-50 hover:shadow-lg active:scale-95 transition-all text-sm font-semibold"
+          className="fixed top-3 right-3 z-30 hidden md:flex items-center gap-1.5 pl-2.5 pr-3 h-9 rounded-full bg-white/95 backdrop-blur shadow-md border border-gray-200 text-blue-600 hover:bg-blue-50 hover:shadow-lg active:scale-95 transition-all text-sm font-semibold"
         >
           <HelpCircle size={17} />
           <span className="hidden lg:inline">Ayuda</span>

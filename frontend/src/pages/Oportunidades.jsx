@@ -1075,7 +1075,7 @@ export default function Oportunidades() {
           </div>
 
           {/* Right panel */}
-          <div className={`${mobileDetailOpen ? 'flex' : 'hidden md:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50`} {...detailSwipe}>
+          <div className={`${mobileDetailOpen ? 'flex' : 'hidden md:flex'} flex-1 flex-col overflow-y-auto overscroll-contain min-h-0 bg-gray-50 md:pr-14 lg:pr-28`} {...detailSwipe}>
             {mobileDetailOpen && (
               <button
                 onClick={() => { setMobileDetailOpen(false); navigate(-1) }}

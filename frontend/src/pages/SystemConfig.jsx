@@ -158,7 +158,7 @@ export default function SystemConfig() {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 md:pr-14 lg:pr-28">
         <div>
           <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <Settings2 size={18} className="text-violet-500" /> Configuración del sistema

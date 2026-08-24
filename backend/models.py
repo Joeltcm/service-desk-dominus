@@ -36,6 +36,9 @@ class User(Base):
     client_category_id = Column(Integer, ForeignKey("client_categories.id"), nullable=True)
     signature = Column(Text, nullable=True)
     profile_photo = Column(Text, nullable=True)
+    # Consentimiento de Términos de Uso / Tratamiento de Datos (Ley 81 de 2019)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -94,6 +97,7 @@ class Ticket(Base):
     status_id = Column(Integer, ForeignKey("ticket_statuses.id"), nullable=False)
     client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     assigned_to_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # quién levantó el ticket
     category = Column(String(100), nullable=True)
     location = Column(String(255), nullable=True)
     charger = Column(String(30), nullable=True)  # 'Con cargador' | 'Con cargador genérico' | 'Sin cargador' (it_support)
@@ -125,6 +129,7 @@ class Ticket(Base):
     status_rel = relationship("TicketStatus", back_populates="tickets")
     client = relationship("User", foreign_keys=[client_id], back_populates="tickets_created")
     assigned_agent = relationship("User", foreign_keys=[assigned_to_id], back_populates="tickets_assigned")
+    created_by = relationship("User", foreign_keys=[created_by_id])
     contact = relationship("Contact", foreign_keys=[contact_id])
     timeline = relationship("TicketTimeline", back_populates="ticket", order_by="TicketTimeline.created_at")
     attachments = relationship("TicketAttachment", back_populates="ticket")
@@ -356,6 +361,8 @@ class Dispatch(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)   # quién eliminó el pedido
+    deleted_by_name = Column(String(200), nullable=True)
     title = Column(String(300), nullable=False)
     dispatch_number = Column(String(50), nullable=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
@@ -729,6 +736,9 @@ class InventoryItem(Base):
     condition = Column(String(20), nullable=True, default="nuevo")       # nuevo | funcional | dañado | incompleto
     item_status = Column(String(20), nullable=True, default="ingresado")  # ingresado | revisado | por_devolver
     location = Column(String(150), nullable=True)                         # ubicación física dentro de la bodega
+    # True si el artículo se creó automáticamente (ej. desde una orden de recibo) sin
+    # código interno real; muestra alerta en Inventario hasta asignarle un código.
+    needs_code = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -1092,3 +1102,86 @@ class SupplyDispatch(Base):
     delivery = relationship("SupplyDelivery", back_populates="lines")
     lot = relationship("SupplyLot", back_populates="dispatch_lines")
     printer = relationship("Printer", foreign_keys=[printer_id])
+
+
+# ── Orden de Recibo de Inventario ──────────────────────────────────────────────
+class InventoryReceipt(Base):
+    __tablename__ = "inventory_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receipt_number = Column(String(30), unique=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    status = Column(String(20), default="Borrador")  # Borrador | Recibida | Cancelada
+    delivered_by = Column(String(200), nullable=True)      # nombre de quien entrega (mensajero)
+    delivery_signature = Column(Text, nullable=True)        # data URI de la firma de quien entrega
+    received_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # usuario del sistema que recibe
+    received_by_name = Column(String(200), nullable=True)   # snapshot del nombre
+    notes = Column(Text, nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=True)   # cuándo se finalizó (aplicó stock)
+    last_edited_by_name = Column(String(200), nullable=True)   # quién editó por última vez (orden Recibida)
+    last_edited_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)   # quién eliminó la orden
+    deleted_by_name = Column(String(200), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    supplier = relationship("Supplier")
+    received_by = relationship("User", foreign_keys=[received_by_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    items = relationship("InventoryReceiptItem", back_populates="receipt",
+                         cascade="all, delete-orphan")
+
+
+class InventoryReceiptItem(Base):
+    __tablename__ = "inventory_receipt_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receipt_id = Column(Integer, ForeignKey("inventory_receipts.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("inventory.id"), nullable=True)  # null si el artículo no está catalogado aún
+    code = Column(String(100), nullable=True)   # snapshot del código
+    name = Column(String(300), nullable=True)   # snapshot del nombre
+    quantity = Column(String(50), default="0")
+    unit_cost = Column(String(50), default="0")
+    # Estado de revisión del item (ambos implican recibido): pendiente | revisado
+    review_status = Column(String(20), default="pendiente")
+
+    receipt = relationship("InventoryReceipt", back_populates="items")
+
+
+# ── Devolución a proveedor ─────────────────────────────────────────────────────
+class SupplierReturn(Base):
+    __tablename__ = "supplier_returns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    return_number = Column(String(30), unique=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    receipt_id = Column(Integer, ForeignKey("inventory_receipts.id"), nullable=True)  # orden de recibo origen
+    notes = Column(Text, nullable=True)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)   # técnico que revisó los equipos
+    reviewed_by_name = Column(String(200), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_name = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    supplier = relationship("Supplier")
+    receipt = relationship("InventoryReceipt")
+    items = relationship("SupplierReturnItem", back_populates="return_doc",
+                         cascade="all, delete-orphan")
+
+
+class SupplierReturnItem(Base):
+    __tablename__ = "supplier_return_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    return_id = Column(Integer, ForeignKey("supplier_returns.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("inventory.id"), nullable=True)
+    code = Column(String(100), nullable=True)
+    name = Column(String(300), nullable=True)
+    quantity = Column(String(50), default="0")
+    unit_cost = Column(String(50), default="0")
+    reason = Column(Text, nullable=True)   # motivo de la devolución de ESTE equipo
+
+    return_doc = relationship("SupplierReturn", back_populates="items")

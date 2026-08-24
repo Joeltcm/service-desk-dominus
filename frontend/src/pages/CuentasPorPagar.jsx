@@ -170,7 +170,7 @@ export default function CuentasPorPagar() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap md:pr-14 lg:pr-28">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center">
             <HandCoins size={18} className="text-red-600" />

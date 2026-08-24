@@ -346,7 +346,7 @@ export default function KnowledgeBase() {
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="flex items-center justify-between mb-4 sm:mb-6">
+      <div className="flex items-center justify-between mb-4 sm:mb-6 md:pr-14 lg:pr-28">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Base de Conocimientos</h1>
           <p className="text-sm text-gray-500 mt-1">{articles.length} artículo(s)</p>

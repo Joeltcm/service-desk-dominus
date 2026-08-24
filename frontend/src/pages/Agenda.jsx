@@ -270,7 +270,7 @@ export default function Agenda() {
   return (
     <div className="p-4 sm:p-6 space-y-4">
       {/* ── Header ── */}
-      <div className="flex items-start sm:items-center justify-between flex-wrap gap-3">
+      <div className="flex items-start sm:items-center justify-between flex-wrap gap-3 md:pr-14 lg:pr-28">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Agenda</h1>
           <p className="text-sm text-gray-500 mt-0.5">

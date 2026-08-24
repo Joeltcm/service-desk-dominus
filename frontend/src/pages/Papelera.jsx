@@ -11,6 +11,8 @@ const ENTITY_LABELS = {
   contacto:   'Contacto',
   empresa:    'Empresa',
   pedido:     'Pedido',
+  despacho:   'Pedido',
+  contrato:   'Contrato',
 }
 
 const ENTITY_COLORS = {
@@ -21,6 +23,8 @@ const ENTITY_COLORS = {
   contacto:   'bg-purple-100 text-purple-700',
   empresa:    'bg-teal-100 text-teal-700',
   pedido:     'bg-indigo-100 text-indigo-700',
+  despacho:   'bg-indigo-100 text-indigo-700',
+  contrato:   'bg-slate-100 text-slate-700',
 }
 
 export default function Papelera() {

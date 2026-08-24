@@ -19,6 +19,7 @@ ENTITIES = {
     "contacto":   (models.Contact, "Contacto",    "name"),
     "empresa":    (models.Company, "Empresa",     "name"),
     "pedido":     (models.Order,   "Pedido",      "title"),
+    "despacho":   (models.Dispatch, "Pedido",     "dispatch_number"),
     "contrato":   (models.Contract, "Contrato",   "contract_number"),
 }
 
@@ -76,6 +77,12 @@ def restore_item(
     if entity_type == "ticket":
         from routers.tickets import _resume_sla_from_trash
         _resume_sla_from_trash(obj, db)
+    elif entity_type == "despacho":
+        obj.deleted_by_id = None
+        obj.deleted_by_name = None
+        # Al restaurar, re-descontar el stock si el pedido está en un estado que lo aplica.
+        from routers.despacho import _sync_dispatch_inventory
+        _sync_dispatch_inventory(obj, db)
     log_action(db, current_user, "restore", entity_type, obj.id, _entity_name(obj, name_field))
     db.commit()
     return {"ok": True, "message": f"{display_name} restaurado"}
@@ -136,11 +143,24 @@ def _purge_contract_dependents(db: Session, cid: int):
     db.query(models.SupplyDelivery).filter(models.SupplyDelivery.contract_id == cid).update({"contract_id": None}, synchronize_session=False)
 
 
+def _purge_despacho_dependents(db: Session, did: int):
+    db.query(models.DispatchTimeline).filter(models.DispatchTimeline.dispatch_id == did).delete(synchronize_session=False)
+    db.query(models.DispatchTask).filter(models.DispatchTask.dispatch_id == did).delete(synchronize_session=False)
+    db.query(models.DispatchPart).filter(models.DispatchPart.dispatch_id == did).delete(synchronize_session=False)
+    db.query(models.DispatchAttachment).filter(models.DispatchAttachment.dispatch_id == did).delete(synchronize_session=False)
+    # Movimientos de inventario ligados al pedido (no son FK; se limpian por prolijidad).
+    db.query(models.InventoryTransaction).filter(
+        models.InventoryTransaction.source_type.in_(("dispatch", "dispatch_revert")),
+        models.InventoryTransaction.source_id == did,
+    ).delete(synchronize_session=False)
+
+
 # entity_type → función de limpieza de dependientes (evita 500 por FK NOT NULL).
 # 'empresa' no aparece: ninguna tabla referencia companies.id.
 _PURGE = {
     "ticket":     _purge_ticket_dependents,
     "pedido":     _purge_order_dependents,
+    "despacho":   _purge_despacho_dependents,
     "factura":    _purge_invoice_dependents,
     "cotizacion": _purge_quote_dependents,
     "gasto":      _purge_expense_dependents,

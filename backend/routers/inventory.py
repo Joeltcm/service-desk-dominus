@@ -3,8 +3,8 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
-from datetime import datetime, date, timedelta
-import csv, io
+from datetime import datetime, date, timedelta, timezone
+import csv, io, re
 import models, schemas
 from database import get_db
 from auth import require_staff, require_agent_or_admin, require_supplies_or_above
@@ -66,6 +66,13 @@ def _log_inventory_txn(db: Session, item_code: str, qty_delta: float, source_typ
 
 
 router = APIRouter(prefix="/api/inventory", tags=["inventory"])
+# Router separado para las órdenes de recibo: su prefijo debe resolverse ANTES que
+# la ruta genérica GET /api/inventory/{item_id} (que si no captura "/receipts" e
+# intenta int("receipts") → 422). Se incluye antes que `router` en main.py.
+receipts_router = APIRouter(prefix="/api/inventory/receipts", tags=["inventory"])
+# Router de devoluciones a proveedor: mismo motivo que receipts_router — se incluye
+# antes que el genérico /api/inventory/{item_id} para no chocar con "/returns".
+returns_router = APIRouter(prefix="/api/inventory/returns", tags=["inventory"])
 
 
 @router.get("", response_model=List[schemas.InventoryItemOut])
@@ -462,6 +469,43 @@ def report_movements_pdf(
                     headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
 
+@router.get("/oversold")
+def oversold_report(db: Session = Depends(get_db), _=Depends(require_staff)):
+    """Artículos con existencia NEGATIVA (vendidos sin stock) y a quién se les vendió,
+    tomado de los movimientos de tipo 'dispatch' (pedido + cliente)."""
+    def _f(v):
+        try:
+            return float(v or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    items = db.query(models.InventoryItem).filter(
+        models.InventoryItem.is_active == True).all()
+    negatives = [i for i in items if _f(i.quantity) < 0]
+    out = []
+    for it in negatives:
+        txns = (db.query(models.InventoryTransaction)
+                .filter(models.InventoryTransaction.item_code == it.code,
+                        models.InventoryTransaction.source_type == "dispatch")
+                .order_by(models.InventoryTransaction.created_at.desc()).all())
+        sales = []
+        for t in txns:
+            d = db.query(models.Dispatch).filter(models.Dispatch.id == t.source_id).first() if t.source_id else None
+            sales.append({
+                "dispatch_id": t.source_id,
+                "dispatch_number": (d.dispatch_number if d else None),
+                "client_name": (d.client_name if d else None),
+                "qty": t.qty_delta,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            })
+        out.append({
+            "id": it.id, "code": it.code, "name": it.name,
+            "quantity": it.quantity, "unit": getattr(it, "unit", None),
+            "sales": sales,
+        })
+    return out
+
+
 @router.get("/{item_id}", response_model=schemas.InventoryItemOut)
 def get_inventory_item(item_id: int, db: Session = Depends(get_db), _=Depends(require_staff)):
     item = db.query(models.InventoryItem).filter(models.InventoryItem.id == item_id).first()
@@ -824,3 +868,1013 @@ def delete_inventory_item(
     item.is_active = False
     db.commit()
     return {"ok": True, "message": "Artículo dado de baja"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Orden de Recibo de Inventario
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _next_receipt_number(db: Session) -> str:
+    rows = db.query(models.InventoryReceipt.receipt_number).filter(
+        models.InventoryReceipt.receipt_number.like("REC-%")).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    n = (max(nums) + 1) if nums else 1
+    return f"REC-{n:04d}"
+
+
+def _resolve_item(db: Session, line) -> Optional[models.InventoryItem]:
+    if getattr(line, "item_id", None):
+        it = db.query(models.InventoryItem).filter(models.InventoryItem.id == line.item_id).first()
+        if it:
+            return it
+    if getattr(line, "code", None):
+        return db.query(models.InventoryItem).filter(models.InventoryItem.code == line.code).first()
+    return None
+
+
+def _sync_receipt_items(db: Session, receipt: models.InventoryReceipt, items_in):
+    """Reemplaza los items de la orden (solo en Borrador). Toma snapshot de código/nombre."""
+    for it in list(receipt.items):
+        db.delete(it)
+    receipt.items = []
+    for line in (items_in or []):
+        item = _resolve_item(db, line)
+        code = (line.code or (item.code if item else None))
+        name = (line.name or (item.name if item else None))
+        qty = f"{float(line.quantity or 0):.4f}".rstrip("0").rstrip(".") or "0"
+        cost = f"{float(line.unit_cost or 0):.2f}"
+        rev = (line.review_status or "").strip().lower()
+        rev = rev if rev in ("pendiente", "revisado") else "pendiente"
+        receipt.items.append(models.InventoryReceiptItem(
+            item_id=item.id if item else None, code=code, name=name,
+            quantity=qty, unit_cost=cost, review_status=rev,
+        ))
+
+
+def _receipt_out(r: models.InventoryReceipt, db: Session) -> schemas.ReceiptOut:
+    out = schemas.ReceiptOut.model_validate(r)
+    if r.supplier:
+        out.supplier_name = r.supplier.name
+        out.supplier_email = r.supplier.email
+    return out
+
+
+def _next_sin_codigo_code(db: Session) -> str:
+    """Código temporal secuencial para artículos nuevos sin código real (S/C-0001)."""
+    rows = db.query(models.InventoryItem.code).filter(models.InventoryItem.code.like("S/C-%")).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    n = (max(nums) + 1) if nums else 1
+    return f"S/C-{n:04d}"
+
+
+def _apply_receipt_stock(db: Session, receipt: models.InventoryReceipt):
+    """Suma al stock cada item de la orden con promedio ponderado y deja el movimiento
+    ligado a la orden (source_type='recepcion', source_id=receipt.id). Un item nuevo
+    (sin código/no catalogado) se CREA en el inventario con código temporal S/C-000x
+    y needs_code=True (alerta hasta asignarle código)."""
+    for line in receipt.items:
+        try:
+            qty = float(line.quantity or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if qty <= 0:
+            continue
+        try:
+            cost = float(line.unit_cost or 0)
+        except (ValueError, TypeError):
+            cost = 0.0
+        item = None
+        if line.item_id:
+            item = db.query(models.InventoryItem).filter(models.InventoryItem.id == line.item_id).first()
+        if not item and line.code:
+            item = db.query(models.InventoryItem).filter(models.InventoryItem.code == line.code).first()
+        if not item:
+            # Artículo nuevo: crearlo con código temporal y marca de "sin código".
+            name = (line.name or "").strip()
+            if not name:
+                continue
+            temp_code = _next_sin_codigo_code(db)
+            item = models.InventoryItem(
+                code=temp_code, name=name[:300], quantity="0",
+                cost_price=f"{cost:.2f}", unit_price="0.00",
+                warehouse="principal", is_active=True, needs_code=True,
+                supplier_id=receipt.supplier_id,
+            )
+            db.add(item)
+            db.flush()   # asigna id y hace visible el código para el siguiente S/C-000x
+            line.item_id = item.id
+            line.code = temp_code
+        try:
+            cur_q = float(item.quantity or 0)
+        except (ValueError, TypeError):
+            cur_q = 0.0
+        try:
+            cur_c = float(item.cost_price or 0)
+        except (ValueError, TypeError):
+            cur_c = 0.0
+        new_q = cur_q + qty
+        avg = ((cur_q * cur_c + qty * cost) / new_q) if new_q > 0 else cost
+        item.quantity = str(round(new_q, 4))
+        item.cost_price = f"{avg:.2f}"
+        # Reduce lo pendiente por recibir si aplica
+        try:
+            pending = float(item.pending_qty or 0)
+        except (ValueError, TypeError):
+            pending = 0.0
+        if pending > 0:
+            remaining = max(0.0, pending - qty)
+            item.pending_qty = (f"{remaining:.4f}".rstrip("0").rstrip(".") or None) if remaining > 0 else None
+            if remaining <= 0:
+                item.pending_eta = None
+        _log_inventory_txn(db, item.code, qty, source_type="recepcion",
+                           source_id=receipt.id, supplier_id=receipt.supplier_id,
+                           notes=f"Orden de recibo {receipt.receipt_number}"[:300], unit_cost=cost)
+
+
+def _to_f(v) -> float:
+    try:
+        return float(v or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _create_sin_codigo_item(db: Session, line, receipt: models.InventoryReceipt) -> Optional[models.InventoryItem]:
+    """Crea un artículo nuevo (no catalogado) con código temporal S/C-000x y needs_code=True."""
+    name = (line.name or "").strip()
+    if not name:
+        return None
+    temp_code = _next_sin_codigo_code(db)
+    item = models.InventoryItem(
+        code=temp_code, name=name[:300], quantity="0",
+        cost_price=f"{_to_f(line.unit_cost):.2f}", unit_price="0.00",
+        warehouse="principal", is_active=True, needs_code=True,
+        supplier_id=receipt.supplier_id,
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def _receipt_edit_apply_delta(db: Session, receipt: models.InventoryReceipt, new_lines):
+    """Ajusta el stock por la DIFERENCIA entre los items actuales de la orden (ya aplicados)
+    y los nuevos. Solo para órdenes ya Recibidas. Registra un movimiento de ajuste por cambio.
+    Debe llamarse ANTES de reemplazar los items (lee receipt.items como estado anterior)."""
+    # Efecto anterior: cantidad por artículo resuelto
+    old = {}
+    for it in receipt.items:
+        item = _resolve_item(db, it)
+        key = item.id if item else f"code:{it.code or ''}"
+        old[key] = old.get(key, 0.0) + _to_f(it.quantity)
+    # Efecto nuevo: resuelve o crea artículos
+    new = {}
+    for line in new_lines:
+        item = _resolve_item(db, line)
+        if not item:
+            item = _create_sin_codigo_item(db, line, receipt)
+            if item:
+                line.item_id = item.id
+                line.code = item.code
+        key = item.id if item else f"code:{line.code or ''}"
+        q, _c, _obj = new.get(key, (0.0, 0.0, None))
+        new[key] = (q + _to_f(line.quantity), _to_f(line.unit_cost), item)
+    # Aplica delta por artículo
+    for key in set(old) | set(new):
+        old_q = old.get(key, 0.0)
+        new_q, cost, item = new.get(key, (0.0, 0.0, None))
+        if item is None:
+            continue
+        delta = new_q - old_q
+        if abs(delta) < 1e-9:
+            continue
+        cur_q = _to_f(item.quantity)
+        cur_c = _to_f(item.cost_price)
+        nq = cur_q + delta
+        if delta > 0 and nq > 0:
+            item.cost_price = f"{(cur_q * cur_c + delta * cost) / nq:.2f}"
+        item.quantity = str(round(max(0.0, nq), 4))
+        _log_inventory_txn(db, item.code, delta, source_type="ajuste_recepcion",
+                           source_id=receipt.id, supplier_id=receipt.supplier_id,
+                           notes=f"Ajuste por edición de orden {receipt.receipt_number}"[:300],
+                           unit_cost=cost)
+
+
+@receipts_router.get("/next-number")
+def receipt_next_number(db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    return {"number": _next_receipt_number(db)}
+
+
+@receipts_router.get("/pending-review")
+def receipts_pending_review(db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    """Órdenes ya Recibidas que aún tienen artículos con revisión pendiente."""
+    rows = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.status == "Recibida",
+        models.InventoryReceipt.deleted_at.is_(None),
+    ).all()
+    orders, total_items = [], 0
+    for r in rows:
+        pend = sum(1 for it in r.items if (it.review_status or "pendiente") == "pendiente")
+        if pend > 0:
+            orders.append({"id": r.id, "receipt_number": r.receipt_number, "pending": pend})
+            total_items += pend
+    return {"orders": len(orders), "items": total_items, "list": orders}
+
+
+@receipts_router.get("", response_model=List[schemas.ReceiptListItem])
+def list_receipts(
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    q = db.query(models.InventoryReceipt).filter(models.InventoryReceipt.deleted_at.is_(None))
+    if status:
+        q = q.filter(models.InventoryReceipt.status == status)
+    rows = q.order_by(models.InventoryReceipt.id.desc()).all()
+    out = []
+    for r in rows:
+        li = schemas.ReceiptListItem.model_validate(r)
+        li.supplier_name = r.supplier.name if r.supplier else None
+        li.item_count = len(r.items)
+        li.pending_review = sum(1 for it in r.items if (it.review_status or "pendiente") == "pendiente") if r.status == "Recibida" else 0
+        out.append(li)
+    return out
+
+
+@receipts_router.post("", response_model=schemas.ReceiptOut)
+def create_receipt(
+    data: schemas.ReceiptCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_supplies_or_above),
+):
+    receipt = models.InventoryReceipt(
+        receipt_number=_next_receipt_number(db),
+        supplier_id=data.supplier_id,
+        status="Borrador",
+        delivered_by=(data.delivered_by or None),
+        notes=(data.notes or None),
+        created_by_id=current_user.id,
+    )
+    db.add(receipt)
+    db.flush()
+    _sync_receipt_items(db, receipt, data.items)
+    db.commit()
+    db.refresh(receipt)
+    return _receipt_out(receipt, db)
+
+
+@receipts_router.get("/{receipt_id}", response_model=schemas.ReceiptOut)
+def get_receipt(receipt_id: int, db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    return _receipt_out(r, db)
+
+
+@receipts_router.put("/{receipt_id}", response_model=schemas.ReceiptOut)
+def update_receipt(
+    receipt_id: int,
+    data: schemas.ReceiptUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_supplies_or_above),
+):
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    if r.status == "Cancelada":
+        raise HTTPException(status_code=400, detail="No se puede editar una orden cancelada")
+
+    is_received = (r.status == "Recibida")
+    # Seguridad: editar una orden ya recibida exige volver a firmar.
+    if is_received and not (data.delivery_signature or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Debes capturar nuevamente la firma para editar una orden ya recibida")
+
+    if data.supplier_id is not None:
+        r.supplier_id = data.supplier_id
+    if data.notes is not None:
+        r.notes = data.notes or None
+    if data.delivered_by is not None:
+        r.delivered_by = data.delivered_by or None
+
+    if data.items is not None:
+        if is_received:
+            # Ajusta el stock por la diferencia ANTES de reemplazar los items.
+            _receipt_edit_apply_delta(db, r, data.items)
+        _sync_receipt_items(db, r, data.items)
+
+    if is_received:
+        r.delivery_signature = data.delivery_signature
+        r.last_edited_by_name = current_user.name
+        r.last_edited_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(r)
+    return _receipt_out(r, db)
+
+
+@receipts_router.post("/{receipt_id}/finalize", response_model=schemas.ReceiptOut)
+def finalize_receipt(
+    receipt_id: int,
+    data: schemas.ReceiptFinalize,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_supplies_or_above),
+):
+    """El mensajero valida cantidades (opcionalmente ajusta items), firma, y se aplica el
+    stock. Recepción = usuario del sistema logueado."""
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    if r.status == "Recibida":
+        raise HTTPException(status_code=400, detail="La orden ya fue recibida")
+    if not (data.delivered_by or "").strip():
+        raise HTTPException(status_code=400, detail="El nombre de quien entrega es obligatorio")
+    if not (data.delivery_signature or "").strip():
+        raise HTTPException(status_code=400, detail="La firma de quien entrega es obligatoria")
+    if data.notes is not None:
+        r.notes = data.notes or None
+    if data.items is not None:
+        _sync_receipt_items(db, r, data.items)
+        db.flush()
+    if not r.items:
+        raise HTTPException(status_code=400, detail="La orden no tiene artículos")
+    r.delivered_by = data.delivered_by.strip()
+    r.delivery_signature = data.delivery_signature
+    r.received_by_id = current_user.id
+    r.received_by_name = current_user.name
+    r.received_at = datetime.now(timezone.utc)
+    _apply_receipt_stock(db, r)
+    r.status = "Recibida"
+    db.commit()
+    db.refresh(r)
+    return _receipt_out(r, db)
+
+
+@receipts_router.delete("/{receipt_id}")
+def delete_receipt(receipt_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_supplies_or_above)):
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    if r.status == "Recibida":
+        raise HTTPException(status_code=400, detail="No se puede eliminar una orden ya recibida (afectó el stock)")
+    r.deleted_at = datetime.now(timezone.utc)
+    r.deleted_by_id = current_user.id
+    r.deleted_by_name = current_user.name
+    from audit_helper import log_action
+    log_action(db, current_user, "delete", "orden_recibo", r.id, r.receipt_number)
+    db.commit()
+    return {"ok": True}
+
+
+@receipts_router.patch("/{receipt_id}/review", response_model=schemas.ReceiptOut)
+def review_receipt_items(
+    receipt_id: int,
+    data: schemas.ReceiptReviewIn,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    """Actualiza SOLO el estado de revisión (pendiente|revisado) por item. Permitido
+    tanto en Borrador como en una orden ya Recibida (no toca cantidades ni stock)."""
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    by_id = {it.id: it for it in r.items}
+    for upd in (data.items or []):
+        it = by_id.get(upd.id)
+        if not it:
+            continue
+        rev = (upd.review_status or "").strip().lower()
+        if rev in ("pendiente", "revisado"):
+            it.review_status = rev
+    db.commit()
+    db.refresh(r)
+    return _receipt_out(r, db)
+
+
+# ── PDF + correo de la Orden de Recibo ─────────────────────────────────────────
+
+def _fmt_money(v) -> str:
+    try:
+        return f"{float(v or 0):,.2f}"
+    except (ValueError, TypeError):
+        return "0.00"
+
+
+def _fmt_dt_pa(dt) -> str:
+    if not dt:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        loc = dt.astimezone(ZoneInfo("America/Panama"))
+        return loc.strftime("%d/%m/%Y %I:%M %p")
+    except Exception:
+        try:
+            return dt.strftime("%d/%m/%Y")
+        except Exception:
+            return ""
+
+
+def _esc_html(s) -> str:
+    s = "" if s is None else str(s)
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;"))
+
+
+def _build_receipt_html(r: models.InventoryReceipt, db: Session) -> str:
+    from routers.settings import _get_setting
+    logo = _brand_logo_tag(db)
+    co_name = _get_setting(db, "company_name") or "Dominus Tech"
+    co_addr = _get_setting(db, "company_address") or ""
+    co_phone = _get_setting(db, "company_phone") or ""
+    co_email = _get_setting(db, "company_email") or ""
+    accent = _get_setting(db, "company_sidebar_color") or "#032539"
+
+    sup = r.supplier
+    sup_name = _esc_html(sup.name) if sup else "—"
+    sup_contact = _esc_html(sup.contact_name) if sup and sup.contact_name else ""
+    sup_email = _esc_html(sup.email) if sup and sup.email else ""
+    sup_phone = _esc_html(sup.phone) if sup and sup.phone else ""
+
+    rows = ""
+    total = 0.0
+    for i, it in enumerate(r.items, 1):
+        try:
+            q = float(it.quantity or 0)
+        except (ValueError, TypeError):
+            q = 0.0
+        try:
+            c = float(it.unit_cost or 0)
+        except (ValueError, TypeError):
+            c = 0.0
+        sub = q * c
+        total += sub
+        bg = "#ffffff" if i % 2 else "#f7f9fc"
+        revd = (it.review_status or "pendiente") == "revisado"
+        rev_lbl = "Revisado" if revd else "Revisión pendiente"
+        rev_bg, rev_fg = ("#e7f6ec", "#15803d") if revd else ("#fef9c3", "#854d0e")
+        rev_cell = (f'<span style="display:inline-block;padding:2px 7px;border-radius:8px;'
+                    f'background:{rev_bg};color:{rev_fg};font-size:7.5pt;font-weight:bold">{rev_lbl}</span>')
+        rows += (
+            f'<tr style="background:{bg}">'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{_esc_html(it.code or "—")}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{_esc_html(it.name or "—")}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{rev_cell}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">{it.quantity or "0"}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">${_fmt_money(it.unit_cost)}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">${_fmt_money(sub)}</td>'
+            f'</tr>'
+        )
+
+    sig_img = (f'<img src="{r.delivery_signature}" alt="firma" '
+               f'style="max-height:70px;max-width:220px;object-fit:contain" />'
+               if r.delivery_signature else '<div style="height:70px"></div>')
+
+    status_badge = _esc_html(r.status or "Borrador")
+
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:26px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2b3d">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <tr>
+      <td style="vertical-align:middle;width:60px">{logo}</td>
+      <td style="vertical-align:middle;padding-left:12px">
+        <div style="font-size:13pt;font-weight:bold;color:{accent}">{_esc_html(co_name)}</div>
+        <div style="font-size:8pt;color:#5c6b80">{_esc_html(co_addr)}{(' · ' + _esc_html(co_phone)) if co_phone else ''}{(' · ' + _esc_html(co_email)) if co_email else ''}</div>
+      </td>
+      <td style="vertical-align:middle;text-align:right">
+        <div style="font-size:12pt;font-weight:bold;color:{accent}">ORDEN DE RECIBO</div>
+        <div style="font-size:11pt;font-weight:bold">{_esc_html(r.receipt_number or '')}</div>
+        <div style="font-size:8pt;color:#5c6b80">{status_badge}</div>
+      </td>
+    </tr>
+  </table>
+  <div style="height:3px;background:{accent};margin-bottom:14px"></div>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:9pt">
+    <tr>
+      <td style="vertical-align:top;width:50%">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.05em;color:#8595a8;font-weight:bold">Proveedor</div>
+        <div style="font-weight:bold;font-size:10pt">{sup_name}</div>
+        {f'<div>{sup_contact}</div>' if sup_contact else ''}
+        {f'<div>{sup_email}</div>' if sup_email else ''}
+        {f'<div>{sup_phone}</div>' if sup_phone else ''}
+      </td>
+      <td style="vertical-align:top;width:50%;text-align:right">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.05em;color:#8595a8;font-weight:bold">Fecha</div>
+        <div>Creada: {_fmt_dt_pa(r.created_at)}</div>
+        {f'<div>Recibida: {_fmt_dt_pa(r.received_at)}</div>' if r.received_at else ''}
+      </td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <thead>
+      <tr style="background:{accent};color:#fff">
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Código</th>
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Descripción</th>
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Estado</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Cant.</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Costo unit.</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>{rows or '<tr><td colspan="6" style="padding:12px;text-align:center;color:#8595a8;font-size:9pt">Sin artículos</td></tr>'}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="padding:8px 10px;text-align:right;font-weight:bold;font-size:9.5pt;border-top:2px solid {accent}">Total</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:bold;font-size:9.5pt;border-top:2px solid {accent}">${_fmt_money(total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  {f'<div style="margin-bottom:14px;font-size:9pt"><b>Notas:</b> {_esc_html(r.notes)}</div>' if r.notes else ''}
+
+  <table style="width:100%;border-collapse:collapse;margin-top:26px">
+    <tr>
+      <td style="width:50%;vertical-align:bottom;padding-right:16px;text-align:center">
+        {sig_img}
+        <div style="border-top:1.5px solid #1f2b3d;margin-top:4px;padding-top:5px;font-size:9pt">
+          <b>{_esc_html(r.delivered_by or '')}</b><br>
+          <span style="font-size:7.5pt;color:#5c6b80;text-transform:uppercase;letter-spacing:.05em">Entrega (proveedor)</span>
+        </div>
+      </td>
+      <td style="width:50%;vertical-align:bottom;padding-left:16px;text-align:center">
+        <div style="height:70px"></div>
+        <div style="border-top:1.5px solid #1f2b3d;margin-top:4px;padding-top:5px;font-size:9pt">
+          <b>{_esc_html(r.received_by_name or '')}</b><br>
+          <span style="font-size:7.5pt;color:#5c6b80;text-transform:uppercase;letter-spacing:.05em">Recepción ({_esc_html(co_name)})</span>
+        </div>
+      </td>
+    </tr>
+  </table>
+  {f'<div style="margin-top:14px;font-size:7.5pt;color:#8595a8">Editada por {_esc_html(r.last_edited_by_name)} el {_fmt_dt_pa(r.last_edited_at)} (re-firmada).</div>' if r.last_edited_by_name else ''}
+</body></html>"""
+
+
+@receipts_router.get("/{receipt_id}/pdf")
+def receipt_pdf(receipt_id: int, db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    from routers.settings import _html_to_pdf
+    pdf = _html_to_pdf(_build_receipt_html(r, db))
+    if not pdf:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+    fname = f"{r.receipt_number or 'orden-recibo'}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+def _split_recipients(raw: str):
+    """Divide una cadena de correos (separados por , o ;) en (destinatario_principal, cc).
+    El primero va como 'to' y el resto como 'cc' — así se soporta enviar a varios."""
+    parts = [p.strip() for p in re.split(r"[,;]+", raw or "") if p.strip()]
+    if not parts:
+        return "", None
+    return parts[0], (", ".join(parts[1:]) if len(parts) > 1 else None)
+
+
+@receipts_router.post("/{receipt_id}/send-email")
+def receipt_send_email(
+    receipt_id: int,
+    data: schemas.ReceiptEmail,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    r = db.query(models.InventoryReceipt).filter(
+        models.InventoryReceipt.id == receipt_id,
+        models.InventoryReceipt.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Orden de recibo no encontrada")
+    raw_to = (data.email or (r.supplier.email if r.supplier else None) or "").strip()
+    to_email, cc_email = _split_recipients(raw_to)
+    if not to_email:
+        raise HTTPException(status_code=400, detail="No hay correo del proveedor. Indícalo o agrégalo al proveedor.")
+
+    from routers.settings import _html_to_pdf, _smtp_cfg, _send_with_logo, _get_setting
+    cfg = _smtp_cfg(db)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Correo no configurado. Configúralo en Ajustes → Email.")
+
+    pdf = _html_to_pdf(_build_receipt_html(r, db))
+    if not pdf:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+
+    co_name = _get_setting(db, "company_name") or "Dominus Tech"
+    fname = f"{r.receipt_number or 'orden-recibo'}.pdf"
+    subject = f"Orden de Recibo {r.receipt_number or ''} · {co_name}"
+    body = (f"<p>Adjunto la orden de recibo <b>{_esc_html(r.receipt_number or '')}</b> "
+            f"de {_esc_html(co_name)}.</p>"
+            f"<p>Gracias por su atención.</p>")
+    try:
+        _send_with_logo(
+            cfg["host"], cfg["port"], cfg["user"], cfg["password"],
+            cfg["from_addr"], cfg["use_tls"],
+            to=to_email, subject=subject, html=body, cc=cc_email,
+            api_key=cfg.get("api_key"),
+            file_attachments=[(fname, pdf, "application/pdf")],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error enviando correo: {exc}")
+    return {"ok": True, "to": to_email, "cc": cc_email}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Devolución a proveedor
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _next_return_number(db: Session) -> str:
+    rows = db.query(models.SupplierReturn.return_number).filter(
+        models.SupplierReturn.return_number.like("DEV-%")).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    n = (max(nums) + 1) if nums else 1
+    return f"DEV-{n:04d}"
+
+
+def _serialize_return(r: models.SupplierReturn, db: Session) -> schemas.ReturnOut:
+    out = schemas.ReturnOut.model_validate(r)
+    if r.supplier:
+        out.supplier_name = r.supplier.name
+        out.supplier_email = r.supplier.email
+    if r.receipt:
+        out.receipt_number = r.receipt.receipt_number
+    return out
+
+
+def _apply_return_stock(db: Session, ret: models.SupplierReturn):
+    """Descuenta del inventario cada equipo devuelto; deja movimiento trazado."""
+    for line in ret.items:
+        item = None
+        if line.item_id:
+            item = db.query(models.InventoryItem).filter(models.InventoryItem.id == line.item_id).first()
+        if not item and line.code:
+            item = db.query(models.InventoryItem).filter(models.InventoryItem.code == line.code).first()
+        if not item:
+            continue
+        try:
+            qty = float(line.quantity or 0)
+        except (ValueError, TypeError):
+            qty = 0.0
+        if qty <= 0:
+            continue
+        try:
+            cur = float(item.quantity or 0)
+        except (ValueError, TypeError):
+            cur = 0.0
+        new = max(0.0, cur - qty)
+        removed = cur - new
+        item.quantity = str(round(new, 4))
+        note = f"Devolución {ret.return_number}"
+        if line.reason:
+            note += f" · {line.reason.strip()}"
+        _log_inventory_txn(db, item.code, -removed, source_type="devolucion",
+                           source_id=ret.id, supplier_id=ret.supplier_id,
+                           notes=note[:300], unit_cost=line.unit_cost)
+
+
+def _return_edit_apply_delta(db: Session, ret: models.SupplierReturn, new_lines):
+    """Ajusta el stock por la DIFERENCIA entre lo devuelto antes (ya descontado) y lo nuevo.
+    delta > 0 → se devolvió más (descuenta extra); delta < 0 → se reingresa al stock.
+    Debe llamarse ANTES de reemplazar los items."""
+    old = {}
+    for it in ret.items:
+        item = _resolve_item(db, it)
+        key = item.id if item else f"code:{it.code or ''}"
+        old[key] = old.get(key, 0.0) + _to_f(it.quantity)
+    new = {}
+    for line in new_lines:
+        item = _resolve_item(db, line)
+        key = item.id if item else f"code:{line.code or ''}"
+        q, _obj = new.get(key, (0.0, None))
+        new[key] = (q + _to_f(line.quantity), item)
+    for key in set(old) | set(new):
+        old_q = old.get(key, 0.0)
+        new_q, item = new.get(key, (0.0, None))
+        if item is None:
+            continue
+        extra = new_q - old_q          # positivo: descuenta más; negativo: reingresa
+        if abs(extra) < 1e-9:
+            continue
+        cur = _to_f(item.quantity)
+        nq = max(0.0, cur - extra)
+        applied = cur - nq             # lo realmente movido
+        item.quantity = str(round(nq, 4))
+        _log_inventory_txn(db, item.code, -applied, source_type="ajuste_devolucion",
+                           source_id=ret.id, supplier_id=ret.supplier_id,
+                           notes=f"Ajuste por edición de devolución {ret.return_number}"[:300])
+
+
+@returns_router.get("/next-number")
+def return_next_number(db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    return {"number": _next_return_number(db)}
+
+
+@returns_router.get("", response_model=List[schemas.ReturnListItem])
+def list_returns(
+    receipt_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    q = db.query(models.SupplierReturn).filter(models.SupplierReturn.deleted_at.is_(None))
+    if receipt_id:
+        q = q.filter(models.SupplierReturn.receipt_id == receipt_id)
+    rows = q.order_by(models.SupplierReturn.id.desc()).all()
+    out = []
+    for r in rows:
+        li = schemas.ReturnListItem.model_validate(r)
+        li.item_count = len(r.items)
+        li.receipt_number = r.receipt.receipt_number if r.receipt else None
+        li.supplier_name = r.supplier.name if r.supplier else None
+        out.append(li)
+    return out
+
+
+@returns_router.post("", response_model=schemas.ReturnOut)
+def create_return(
+    data: schemas.ReturnCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_supplies_or_above),
+):
+    if not data.items:
+        raise HTTPException(status_code=400, detail="Selecciona al menos un equipo a devolver")
+    if not data.reviewed_by_id:
+        raise HTTPException(status_code=400, detail="Indica el técnico que revisó los equipos")
+    receipt = None
+    if data.receipt_id:
+        receipt = db.query(models.InventoryReceipt).filter(
+            models.InventoryReceipt.id == data.receipt_id,
+            models.InventoryReceipt.deleted_at.is_(None)).first()
+    supplier_id = data.supplier_id or (receipt.supplier_id if receipt else None)
+
+    reviewer = db.query(models.User).filter(models.User.id == data.reviewed_by_id).first()
+    if not reviewer:
+        raise HTTPException(status_code=400, detail="Técnico revisor no válido")
+
+    ret = models.SupplierReturn(
+        return_number=_next_return_number(db),
+        supplier_id=supplier_id,
+        receipt_id=data.receipt_id,
+        notes=(data.notes or None),
+        reviewed_by_id=reviewer.id,
+        reviewed_by_name=reviewer.name,
+        created_by_id=current_user.id,
+        created_by_name=current_user.name,
+    )
+    db.add(ret)
+    db.flush()
+    for line in data.items:
+        item = _resolve_item(db, line)
+        code = (line.code or (item.code if item else None))
+        name = (line.name or (item.name if item else None))
+        qty = f"{float(line.quantity or 0):.4f}".rstrip("0").rstrip(".") or "0"
+        cost = f"{float(line.unit_cost or 0):.2f}"
+        ret.items.append(models.SupplierReturnItem(
+            item_id=item.id if item else None, code=code, name=name,
+            quantity=qty, unit_cost=cost, reason=(line.reason or None),
+        ))
+    db.flush()
+    _apply_return_stock(db, ret)
+    # Marca como 'revisado' los items de la orden origen que se devolvieron.
+    if receipt:
+        ret_ids = {it.item_id for it in ret.items if it.item_id}
+        ret_codes = {it.code for it in ret.items if it.code}
+        for ri in receipt.items:
+            if (ri.item_id and ri.item_id in ret_ids) or (ri.code and ri.code in ret_codes):
+                ri.review_status = "revisado"
+    db.commit()
+    db.refresh(ret)
+    return _serialize_return(ret, db)
+
+
+@returns_router.get("/{return_id}", response_model=schemas.ReturnOut)
+def get_return(return_id: int, db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    r = db.query(models.SupplierReturn).filter(
+        models.SupplierReturn.id == return_id,
+        models.SupplierReturn.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    return _serialize_return(r, db)
+
+
+@returns_router.put("/{return_id}", response_model=schemas.ReturnOut)
+def update_return(
+    return_id: int,
+    data: schemas.ReturnUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_supplies_or_above),
+):
+    r = db.query(models.SupplierReturn).filter(
+        models.SupplierReturn.id == return_id,
+        models.SupplierReturn.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+
+    if data.reviewed_by_id is not None:
+        reviewer = db.query(models.User).filter(models.User.id == data.reviewed_by_id).first()
+        if not reviewer:
+            raise HTTPException(status_code=400, detail="Técnico revisor no válido")
+        r.reviewed_by_id = reviewer.id
+        r.reviewed_by_name = reviewer.name
+    if data.supplier_id is not None:
+        r.supplier_id = data.supplier_id
+    if data.notes is not None:
+        r.notes = data.notes or None
+
+    if data.items is not None:
+        if not data.items:
+            raise HTTPException(status_code=400, detail="La devolución debe tener al menos un equipo")
+        # Ajusta el stock por la diferencia ANTES de reemplazar los items.
+        _return_edit_apply_delta(db, r, data.items)
+        for it in list(r.items):
+            db.delete(it)
+        r.items = []
+        for line in data.items:
+            item = _resolve_item(db, line)
+            code = (line.code or (item.code if item else None))
+            name = (line.name or (item.name if item else None))
+            qty = f"{_to_f(line.quantity):.4f}".rstrip("0").rstrip(".") or "0"
+            cost = f"{_to_f(line.unit_cost):.2f}"
+            r.items.append(models.SupplierReturnItem(
+                item_id=item.id if item else None, code=code, name=name,
+                quantity=qty, unit_cost=cost, reason=(line.reason or None),
+            ))
+        db.flush()
+        # Re-marca 'revisado' en la orden origen los equipos devueltos.
+        if r.receipt:
+            ret_ids = {it.item_id for it in r.items if it.item_id}
+            ret_codes = {it.code for it in r.items if it.code}
+            for ri in r.receipt.items:
+                if (ri.item_id and ri.item_id in ret_ids) or (ri.code and ri.code in ret_codes):
+                    ri.review_status = "revisado"
+
+    db.commit()
+    db.refresh(r)
+    return _serialize_return(r, db)
+
+
+def _build_return_html(r: models.SupplierReturn, db: Session) -> str:
+    from routers.settings import _get_setting
+    logo = _brand_logo_tag(db)
+    co_name = _get_setting(db, "company_name") or "Dominus Tech"
+    co_addr = _get_setting(db, "company_address") or ""
+    co_phone = _get_setting(db, "company_phone") or ""
+    co_email = _get_setting(db, "company_email") or ""
+    accent = _get_setting(db, "company_sidebar_color") or "#032539"
+
+    sup = r.supplier
+    sup_name = _esc_html(sup.name) if sup else "—"
+    sup_email = _esc_html(sup.email) if sup and sup.email else ""
+    sup_phone = _esc_html(sup.phone) if sup and sup.phone else ""
+    ref = _esc_html(r.receipt.receipt_number) if r.receipt else ""
+
+    rows = ""
+    total = 0.0
+    for i, it in enumerate(r.items, 1):
+        try:
+            q = float(it.quantity or 0)
+        except (ValueError, TypeError):
+            q = 0.0
+        try:
+            c = float(it.unit_cost or 0)
+        except (ValueError, TypeError):
+            c = 0.0
+        sub = q * c
+        total += sub
+        bg = "#ffffff" if i % 2 else "#f7f9fc"
+        rows += (
+            f'<tr style="background:{bg}">'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{_esc_html(it.code or "—")}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{_esc_html(it.name or "—")}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt">{_esc_html(it.reason or "—")}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">{it.quantity or "0"}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">${_fmt_money(it.unit_cost)}</td>'
+            f'<td style="padding:7px 10px;border-bottom:1px solid #e5e9f0;font-size:9pt;text-align:right">${_fmt_money(sub)}</td>'
+            f'</tr>'
+        )
+
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:26px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2b3d">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <tr>
+      <td style="vertical-align:middle;width:60px">{logo}</td>
+      <td style="vertical-align:middle;padding-left:12px">
+        <div style="font-size:13pt;font-weight:bold;color:{accent}">{_esc_html(co_name)}</div>
+        <div style="font-size:8pt;color:#5c6b80">{_esc_html(co_addr)}{(' · ' + _esc_html(co_phone)) if co_phone else ''}{(' · ' + _esc_html(co_email)) if co_email else ''}</div>
+      </td>
+      <td style="vertical-align:middle;text-align:right">
+        <div style="font-size:12pt;font-weight:bold;color:{accent}">DEVOLUCIÓN A PROVEEDOR</div>
+        <div style="font-size:11pt;font-weight:bold">{_esc_html(r.return_number or '')}</div>
+        {f'<div style="font-size:8pt;color:#5c6b80">Ref. orden {ref}</div>' if ref else ''}
+      </td>
+    </tr>
+  </table>
+  <div style="height:3px;background:{accent};margin-bottom:14px"></div>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:9pt">
+    <tr>
+      <td style="vertical-align:top;width:50%">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.05em;color:#8595a8;font-weight:bold">Proveedor</div>
+        <div style="font-weight:bold;font-size:10pt">{sup_name}</div>
+        {f'<div>{sup_email}</div>' if sup_email else ''}
+        {f'<div>{sup_phone}</div>' if sup_phone else ''}
+      </td>
+      <td style="vertical-align:top;width:50%;text-align:right">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:.05em;color:#8595a8;font-weight:bold">Fecha</div>
+        <div>{_fmt_dt_pa(r.created_at)}</div>
+        {f'<div>Revisado por: <b>{_esc_html(r.reviewed_by_name)}</b></div>' if r.reviewed_by_name else ''}
+        {f'<div>Registró: {_esc_html(r.created_by_name)}</div>' if r.created_by_name else ''}
+      </td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <thead>
+      <tr style="background:{accent};color:#fff">
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Código</th>
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Equipo</th>
+        <th style="padding:7px 10px;text-align:left;font-size:8pt">Motivo de la devolución</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Cant.</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Costo unit.</th>
+        <th style="padding:7px 10px;text-align:right;font-size:8pt">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>{rows or '<tr><td colspan="6" style="padding:12px;text-align:center;color:#8595a8;font-size:9pt">Sin equipos</td></tr>'}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="padding:8px 10px;text-align:right;font-weight:bold;font-size:9.5pt;border-top:2px solid {accent}">Total</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:bold;font-size:9.5pt;border-top:2px solid {accent}">${_fmt_money(total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  {f'<div style="margin-bottom:10px;font-size:9pt"><b>Notas:</b> {_esc_html(r.notes)}</div>' if r.notes else ''}
+  <div style="margin-top:26px;font-size:8pt;color:#8595a8">La presente nota formaliza la devolución al proveedor de los equipos detallados, por las causales indicadas tras su revisión técnica. Se solicita su reposición o la emisión de la nota de crédito correspondiente. Agradecemos gestionar el retiro de la mercancía y confirmar su recepción.</div>
+</body></html>"""
+
+
+@returns_router.get("/{return_id}/pdf")
+def return_pdf(return_id: int, db: Session = Depends(get_db), _=Depends(require_supplies_or_above)):
+    r = db.query(models.SupplierReturn).filter(
+        models.SupplierReturn.id == return_id,
+        models.SupplierReturn.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    from routers.settings import _html_to_pdf
+    pdf = _html_to_pdf(_build_return_html(r, db))
+    if not pdf:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+    fname = f"{r.return_number or 'devolucion'}.pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+@returns_router.post("/{return_id}/send-email")
+def return_send_email(
+    return_id: int,
+    data: schemas.ReturnEmail,
+    db: Session = Depends(get_db),
+    _=Depends(require_supplies_or_above),
+):
+    r = db.query(models.SupplierReturn).filter(
+        models.SupplierReturn.id == return_id,
+        models.SupplierReturn.deleted_at.is_(None)).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    raw_to = (data.email or (r.supplier.email if r.supplier else None) or "").strip()
+    to_email, cc_email = _split_recipients(raw_to)
+    if not to_email:
+        raise HTTPException(status_code=400, detail="No hay correo del proveedor. Indícalo o agrégalo al proveedor.")
+    from routers.settings import _html_to_pdf, _smtp_cfg, _send_with_logo, _get_setting
+    cfg = _smtp_cfg(db)
+    if not cfg:
+        raise HTTPException(status_code=400, detail="Correo no configurado. Configúralo en Ajustes → Email.")
+    pdf = _html_to_pdf(_build_return_html(r, db))
+    if not pdf:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+    co_name = _get_setting(db, "company_name") or "Dominus Tech"
+    fname = f"{r.return_number or 'devolucion'}.pdf"
+    subject = f"Devolución a proveedor {r.return_number or ''} · {co_name}"
+    body = (f"<p>Adjunto la devolución de mercancía <b>{_esc_html(r.return_number or '')}</b> "
+            f"de {_esc_html(co_name)}, con el detalle de los equipos devueltos y el motivo.</p>")
+    try:
+        _send_with_logo(
+            cfg["host"], cfg["port"], cfg["user"], cfg["password"],
+            cfg["from_addr"], cfg["use_tls"],
+            to=to_email, subject=subject, html=body, cc=cc_email,
+            api_key=cfg.get("api_key"),
+            file_attachments=[(fname, pdf, "application/pdf")],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error enviando correo: {exc}")
+    return {"ok": True, "to": to_email, "cc": cc_email}
