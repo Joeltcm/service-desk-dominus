@@ -390,6 +390,48 @@ def get_billing_config(
     }
 
 
+@router.put("/billing")
+def set_billing_date(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_superadmin),
+):
+    """Ajuste manual de la fecha del último pago recibido (corrección de baseline).
+    Recibe {"last_confirmed_at": "YYYY-MM-DD"}. El próximo corte = día 15 del mes
+    siguiente a esa fecha, y el estado se recalcula al instante."""
+    raw = (data.get("last_confirmed_at") or "").strip()
+    try:
+        d = date.fromisoformat(raw[:10])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Fecha inválida (usa YYYY-MM-DD)")
+    stored = f"{d.isoformat()}T12:00:00"
+    payload = json.dumps({"last_confirmed_at": stored})
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
+    if row:
+        row.value = payload
+    else:
+        db.add(models.AppSetting(key="billing", value=payload))
+    nrow = db.query(models.AppSetting).filter(
+        models.AppSetting.key == "billing_notice_sent_for"
+    ).first()
+    if nrow:
+        db.delete(nrow)
+    try:
+        from audit_helper import log_action
+        log_action(db, current_user, "ajustar_pago", "facturacion",
+                   details={"last_confirmed_at": stored})
+    except Exception:
+        pass
+    db.commit()
+    state = _billing_state(_get_billing(db))
+    return {
+        **state,
+        "cutoff_day": BILLING_CUTOFF_DAY,
+        "notice_days": BILLING_NOTICE_DAYS,
+        "suspend_days": BILLING_SUSPEND_DAYS,
+    }
+
+
 @router.post("/billing/confirm")
 def confirm_billing_payment(
     request: Request,

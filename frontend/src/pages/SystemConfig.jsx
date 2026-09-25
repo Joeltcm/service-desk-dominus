@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText, CreditCard, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment } from '../services/api'
+import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment, setBillingDate } from '../services/api'
 import { useModules } from '../context/ModulesContext'
 import { useCompany } from '../context/CompanyContext'
 import { RoleFeaturesPanel, AuditPanel } from './Settings'
@@ -87,12 +87,17 @@ export default function SystemConfig() {
 
   const [billing, setBilling] = useState(null)
   const [billingConfirming, setBillingConfirming] = useState(false)
+  const [billingDateInput, setBillingDateInput] = useState('')
+  const [billingDateSaving, setBillingDateSaving] = useState(false)
 
   useEffect(() => {
     getSystemModules().then(r => setModulesLocal(r.data)).catch(() => toast.error('Error cargando configuración'))
     getTrialConfig().then(r => setTrial(r.data)).catch(() => {})
     getMaxUsers().then(r => setUserLimit(r.data)).catch(() => {})
-    getBillingConfig().then(r => setBilling(r.data)).catch(() => {})
+    getBillingConfig().then(r => {
+      setBilling(r.data)
+      setBillingDateInput(r.data?.last_confirmed_at ? String(r.data.last_confirmed_at).slice(0, 10) : '')
+    }).catch(() => {})
   }, [])
 
   const handleConfirmPayment = async () => {
@@ -100,11 +105,26 @@ export default function SystemConfig() {
     try {
       const r = await confirmBillingPayment()
       setBilling(r.data)
+      setBillingDateInput(r.data?.last_confirmed_at ? String(r.data.last_confirmed_at).slice(0, 10) : '')
       toast.success('Pago confirmado. Plazo reiniciado.')
     } catch {
       toast.error('Error al confirmar el pago')
     } finally {
       setBillingConfirming(false)
+    }
+  }
+
+  const handleSaveBillingDate = async () => {
+    if (!billingDateInput) { toast.error('Elige una fecha'); return }
+    setBillingDateSaving(true)
+    try {
+      const r = await setBillingDate(billingDateInput)
+      setBilling(r.data)
+      toast.success('Fecha del último pago actualizada')
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Error al ajustar la fecha')
+    } finally {
+      setBillingDateSaving(false)
     }
   }
 
@@ -282,12 +302,36 @@ export default function SystemConfig() {
           </div>
         )}
 
+        {/* Ajuste manual de la fecha del último pago recibido (corrección de baseline) */}
+        <div className="border-t border-gray-100 pt-3 space-y-2">
+          <label className="text-xs font-medium text-gray-500 block">Ajustar fecha del último pago recibido</label>
+          <div className="flex items-end gap-2">
+            <input
+              type="date"
+              value={billingDateInput}
+              onChange={e => setBillingDateInput(e.target.value)}
+              className="input-field text-sm flex-1"
+            />
+            <button
+              onClick={handleSaveBillingDate}
+              disabled={billingDateSaving}
+              className="text-xs px-3 py-2.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            >
+              <Save size={12} /> {billingDateSaving ? 'Guardando...' : 'Guardar fecha'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400">
+            El próximo corte será el <strong>día {billing?.cutoff_day ?? 15}</strong> del mes siguiente a esta fecha.
+            Úsalo para corregir el historial (p. ej. si el pago del mes actual no se recibió, pon la fecha del pago anterior).
+          </p>
+        </div>
+
         <button
           onClick={handleConfirmPayment}
           disabled={billingConfirming}
           className="w-full text-sm px-3 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors font-medium"
         >
-          <CheckCircle2 size={15} /> {billingConfirming ? 'Confirmando...' : 'Confirmar pago del mes'}
+          <CheckCircle2 size={15} /> {billingConfirming ? 'Confirmando...' : 'Confirmar pago del mes (hoy)'}
         </button>
       </div>
 

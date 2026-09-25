@@ -539,5 +539,6 @@ export const updateTrial         = (data) => api.put('/system/trial', data)
 export const getBillingStatus    = ()     => api.get('/system/billing/status')
 export const getBillingConfig    = ()     => api.get('/system/billing')
 export const confirmBillingPayment = ()   => api.post('/system/billing/confirm')
+export const setBillingDate      = (date) => api.put('/system/billing', { last_confirmed_at: date })
 
 export default api
