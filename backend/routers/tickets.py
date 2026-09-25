@@ -475,7 +475,7 @@ def update_ticket(
             entry_type="status_change",
         )
         db.add(entry)
-        if new_status and new_status.name.lower() in ["resuelto", "resolved", "cerrado", "closed"]:
+        if new_status and new_status.name.lower() in ["resuelto", "resolved", "cerrado", "closed", "entregado"]:
             ticket.closed_at = datetime.now(timezone.utc)
             # Auto-asignación al resolver: si está sin asignar, el que resuelve lo toma.
             _maybe_autoassign(db, ticket, current_user, "resolver")

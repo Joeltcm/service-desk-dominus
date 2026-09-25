@@ -14,7 +14,7 @@ SLA_MINUTES = {
     'low':      2700,  # 5 días hábiles (1 semana)
 }
 
-PAUSE_STATUSES = frozenset({'Programado', 'Esperando Detalles', 'Resuelto'})
+PAUSE_STATUSES = frozenset({'Programado', 'Esperando Detalles', 'Resuelto', 'Entregado'})
 
 
 def _local(dt: datetime) -> datetime:

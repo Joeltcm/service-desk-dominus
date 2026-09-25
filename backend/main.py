@@ -1145,7 +1145,7 @@ def _migrate_pg():
         # ── ticket_statuses.is_closed ──
         try:
             conn.execute(text("ALTER TABLE ticket_statuses ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT FALSE"))
-            conn.execute(text("UPDATE ticket_statuses SET is_closed = TRUE WHERE name IN ('Resuelto', 'Cerrado')"))
+            conn.execute(text("UPDATE ticket_statuses SET is_closed = TRUE WHERE name IN ('Resuelto', 'Cerrado', 'Entregado')"))
             conn.commit()
         except Exception:
             pass
@@ -1253,6 +1253,27 @@ def _patch_statuses():
             pass
 
 _patch_statuses()
+
+
+def _patch_status_entregado():
+    # Estado de cierre 'Entregado' (equipo entregado al cliente). Cierra el ticket
+    # (is_closed) y pausa el SLA igual que 'Resuelto'. Idempotente; aplica a todos los verticales.
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            exists = conn.execute(text(
+                "SELECT 1 FROM ticket_statuses WHERE name = 'Entregado'"
+            )).fetchone()
+            if not exists:
+                conn.execute(text(
+                    "INSERT INTO ticket_statuses (name, color, icon, \"order\", is_default, is_active, is_closed) "
+                    "VALUES ('Entregado', '#14B8A6', 'package-check', 10, FALSE, TRUE, TRUE)"
+                ))
+                conn.commit()
+        except Exception:
+            pass
+
+_patch_status_entregado()
 
 
 def _patch_statuses_it_support():
@@ -2299,6 +2320,7 @@ def seed_database():
                 models.TicketStatus(name="Resuelto",            color="#10B981", icon="check-circle",   order=7),
                 models.TicketStatus(name="Por Coordinar",       color="#0EA5E9", icon="calendar-clock", order=8),
                 models.TicketStatus(name="Programado",          color="#F97316", icon="calendar-check", order=9),
+                models.TicketStatus(name="Entregado",           color="#14B8A6", icon="package-check",  order=10, is_closed=True),
             ]:
                 db.add(st)
             db.commit()

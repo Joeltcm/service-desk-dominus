@@ -431,7 +431,7 @@ const ENTRY_ICONS = {
 export default function TicketDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, isAgentOrAdmin } = useAuth()
+  const { user, isAgentOrAdmin, isInternalStaff } = useAuth()
   const { company_name, vertical } = useCompany()
   const itMode = vertical === 'it_support'
   const coName = company_name || 'Service Desk'
@@ -1335,11 +1335,13 @@ export default function TicketDetail() {
           <button onClick={handleShare} title="Compartir PDF" className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition-colors">
             <Share2 size={14} /> <span className="hidden sm:inline">Compartir</span>
           </button>
+          {isInternalStaff && (
+            <button onClick={handlePrintThermal} title="Imprimir comprobante en impresora térmica 80mm" className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
+              <Printer size={14} /> <span className="hidden sm:inline">80mm</span>
+            </button>
+          )}
           {isAgentOrAdmin && (
             <>
-              <button onClick={handlePrintThermal} title="Imprimir comprobante en impresora térmica 80mm" className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors">
-                <Printer size={14} /> <span className="hidden sm:inline">80mm</span>
-              </button>
               <button onClick={() => navigate(`/tickets/${id}/edit`)} className="btn-secondary flex items-center gap-1.5 text-sm">
                 <Edit size={14} /> <span className="hidden sm:inline">Editar</span>
               </button>

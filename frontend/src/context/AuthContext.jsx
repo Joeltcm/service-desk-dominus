@@ -66,9 +66,11 @@ export function AuthProvider({ children }) {
   const isAgentOrAdmin = isAdmin || isAgent
   const isAdminOrVentas = isAdmin || isVentas
   const isStaff = isAdmin || isAgent || isVentas
+  // Cualquier rol interno (todos menos el cliente): comparte utilidades operativas como imprimir 80mm.
+  const isInternalStaff = !!user && user.role !== 'client'
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin, isAgent, isVentas, isAgentOrAdmin, isAdminOrVentas, isStaff }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin, isAgent, isVentas, isAgentOrAdmin, isAdminOrVentas, isStaff, isInternalStaff }}>
       {children}
     </AuthContext.Provider>
   )
