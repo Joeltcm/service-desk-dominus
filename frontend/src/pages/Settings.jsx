@@ -426,7 +426,9 @@ function RoleAssignPanel({ currentUser }) {
 
   const fetchUsers = () =>
     getUsers()
-      .then(r => setUsers(r.data.filter(u => u.role !== 'client' && u.role !== 'superadmin')))
+      // Solo staff activo: excluye clientes, superadmin y usuarios desactivados
+      // (borrado = soft-delete, is_active=false) para no listarlos como equipo.
+      .then(r => setUsers(r.data.filter(u => u.role !== 'client' && u.role !== 'superadmin' && u.is_active !== false)))
       .catch(() => toast.error('Error cargando usuarios'))
       .finally(() => setLoading(false))
 
