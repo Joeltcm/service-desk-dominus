@@ -1,6 +1,7 @@
 import json
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -131,6 +132,67 @@ def _trial_days_remaining(trial: dict) -> Optional[int]:
         return None
 
 
+# ── Facturación / Corte mensual del portal ──────────────────────────────────────
+# El acceso del STAFF (nunca clientes, nunca superadmin) depende de la confirmación
+# mensual de pago que registra el superadmin. Corte el día 15 de cada mes; a los
+# 5 días sin confirmar aparece el aviso con cuenta regresiva; a los 15 días
+# (aviso + 10) se suspende el acceso. Fechas en horario de Panamá.
+BILLING_CUTOFF_DAY = 15       # día del corte mensual
+BILLING_NOTICE_DAYS = 5       # días tras el corte en que arranca el aviso
+BILLING_SUSPEND_DAYS = 15     # días tras el corte en que se suspende (aviso + 10)
+_TZ_PA = ZoneInfo("America/Panama")
+
+DEFAULT_BILLING = {"last_confirmed_at": None}
+
+
+def _today_pa() -> date:
+    return datetime.now(_TZ_PA).date()
+
+
+def _get_billing(db: Session) -> dict:
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
+    if not row or not row.value:
+        return dict(DEFAULT_BILLING)
+    try:
+        return {**DEFAULT_BILLING, **json.loads(row.value)}
+    except Exception:
+        return dict(DEFAULT_BILLING)
+
+
+def _next_due(confirmed: date) -> date:
+    """Próximo corte = el día 15 del mes SIGUIENTE al de la última confirmación."""
+    y, m = confirmed.year, confirmed.month
+    if m == 12:
+        y, m = y + 1, 1
+    else:
+        m += 1
+    return date(y, m, BILLING_CUTOFF_DAY)
+
+
+def _billing_state(billing: dict) -> dict:
+    """Estado calculado: al_dia | aviso | suspendido, con días restantes y próximo corte.
+    'active' False = sin baseline (no bloquea ni muestra contador)."""
+    raw = billing.get("last_confirmed_at")
+    if not raw:
+        return {"status": "al_dia", "days_left": None, "next_due": None,
+                "last_confirmed_at": None, "active": False}
+    try:
+        confirmed = date.fromisoformat(str(raw)[:10])
+    except Exception:
+        return {"status": "al_dia", "days_left": None, "next_due": None,
+                "last_confirmed_at": None, "active": False}
+    due = _next_due(confirmed)
+    days_late = (_today_pa() - due).days
+    if days_late < BILLING_NOTICE_DAYS:
+        status, days_left = "al_dia", None
+    elif days_late < BILLING_SUSPEND_DAYS:
+        status, days_left = "aviso", BILLING_SUSPEND_DAYS - days_late
+    else:
+        status, days_left = "suspendido", 0
+    return {"status": status, "days_left": days_left, "next_due": due.isoformat(),
+            "last_confirmed_at": raw, "active": True}
+
+
 # ── Dependency ────────────────────────────────────────────────────────────────
 
 def require_module(module_key: str) -> Callable:
@@ -141,6 +203,13 @@ def require_module(module_key: str) -> Callable:
     ) -> models.User:
         if current_user.role == models.UserRole.superadmin:
             return current_user
+        # Corte por falta de pago: solo afecta al STAFF (nunca a los clientes).
+        if current_user.role in STAFF_ROLES:
+            if _billing_state(_get_billing(db))["status"] == "suspendido":
+                raise HTTPException(
+                    status_code=402,
+                    detail="ACCESO_SUSPENDIDO: Realiza tu pago y contacta al administrador para reactivar el acceso al portal.",
+                )
         trial = _get_trial(db)
         remaining = _trial_days_remaining(trial)
         if remaining is not None and remaining < 0:
@@ -291,3 +360,68 @@ def set_max_users(
         db.add(models.AppSetting(key="max_users", value=str(val)))
     db.commit()
     return {"max_users": val, "staff_count": count_staff_users(db)}
+
+
+# ── Facturación: estado (staff) y confirmación (superadmin) ──────────────────────
+
+@router.get("/billing/status")
+def get_billing_status(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Contador/bloqueo del corte mensual. Solo el staff lo ve; superadmin y
+    clientes reciben estado inactivo (sin banner ni bloqueo)."""
+    if current_user.role not in STAFF_ROLES:
+        return {"active": False, "status": "al_dia", "days_left": None, "next_due": None}
+    return _billing_state(_get_billing(db))
+
+
+@router.get("/billing")
+def get_billing_config(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_superadmin),
+):
+    state = _billing_state(_get_billing(db))
+    return {
+        **state,
+        "cutoff_day": BILLING_CUTOFF_DAY,
+        "notice_days": BILLING_NOTICE_DAYS,
+        "suspend_days": BILLING_SUSPEND_DAYS,
+    }
+
+
+@router.post("/billing/confirm")
+def confirm_billing_payment(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_superadmin),
+):
+    """Registra el pago del mes: reinicia el ciclo (próximo corte = día 15 del mes
+    siguiente) y reactiva el acceso del staff si estaba suspendido."""
+    now_iso = datetime.now(_TZ_PA).isoformat()
+    payload = json.dumps({"last_confirmed_at": now_iso})
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
+    if row:
+        row.value = payload
+    else:
+        db.add(models.AppSetting(key="billing", value=payload))
+    # Limpia la marca de aviso enviado para que el próximo ciclo vuelva a avisar.
+    nrow = db.query(models.AppSetting).filter(
+        models.AppSetting.key == "billing_notice_sent_for"
+    ).first()
+    if nrow:
+        db.delete(nrow)
+    try:
+        from audit_helper import log_action
+        log_action(db, current_user, "confirmar_pago", "facturacion",
+                   details={"confirmed_at": now_iso})
+    except Exception:
+        pass
+    db.commit()
+    state = _billing_state(_get_billing(db))
+    return {
+        **state,
+        "cutoff_day": BILLING_CUTOFF_DAY,
+        "notice_days": BILLING_NOTICE_DAYS,
+        "suspend_days": BILLING_SUSPEND_DAYS,
+    }

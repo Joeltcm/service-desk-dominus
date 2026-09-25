@@ -5,11 +5,11 @@ import dgsLogo from '../assets/dgs-logo.png'
 import { NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useAuth } from '../context/AuthContext'
-import { getTrialStatus, getTicketAssignedCounts, getDispatchAssignedCounts } from '../services/api'
+import { getTrialStatus, getBillingStatus, getTicketAssignedCounts, getDispatchAssignedCounts } from '../services/api'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
-  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle, Home
+  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle, Home, AlertTriangle
 } from 'lucide-react'
 import TicketScanner from './TicketScanner'
 import NotificationBell from './NotificationBell'
@@ -134,6 +134,8 @@ export default function Layout({ children }) {
   const [trial, setTrial] = useState({ active: false, expired: false, days_remaining: null })
   const [trialLoading, setTrialLoading] = useState(true)
   const [trialOverlay, setTrialOverlay] = useState(false)
+  const [billing, setBilling] = useState({ active: false, status: 'al_dia', days_left: null })
+  const [billingOverlay, setBillingOverlay] = useState(false)
   const { canInstall, isInstalled, install } = useInstall()
 
   useEffect(() => { setFabOpen(false) }, [location.pathname])
@@ -150,12 +152,25 @@ export default function Layout({ children }) {
       })
       .catch(() => {})
       .finally(() => setTrialLoading(false))
+    // Corte mensual del portal: solo afecta al staff (el backend devuelve inactivo a clientes).
+    getBillingStatus()
+      .then(r => {
+        setBilling(r.data)
+        if (r.data.status === 'suspendido') setBillingOverlay(true)
+      })
+      .catch(() => {})
   }, [user?.id])
 
   useEffect(() => {
     const handler = () => setTrialOverlay(true)
     window.addEventListener('trial-expired', handler)
     return () => window.removeEventListener('trial-expired', handler)
+  }, [])
+
+  useEffect(() => {
+    const handler = () => setBillingOverlay(true)
+    window.addEventListener('billing-suspended', handler)
+    return () => window.removeEventListener('billing-suspended', handler)
   }, [])
 
   useEffect(() => {
@@ -468,6 +483,19 @@ export default function Layout({ children }) {
           </div>
         )}
 
+        {billing.status === 'aviso' && (
+          <div className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold flex-shrink-0 text-center ${
+            billing.days_left <= 3 ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
+          }`}>
+            <AlertTriangle size={13} className="flex-shrink-0" />
+            <span>
+              Tu plazo para el pago mensual venció. Confirma el pago en{' '}
+              <strong>{billing.days_left} día{billing.days_left !== 1 ? 's' : ''}</strong>{' '}
+              o se deshabilitará el acceso al portal.
+            </span>
+          </div>
+        )}
+
         {!trialLoading && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <PushPromptBanner />
@@ -485,6 +513,25 @@ export default function Layout({ children }) {
             <h2 className="text-xl font-bold text-gray-900">Período de prueba vencido</h2>
             <p className="text-sm text-gray-500 max-w-sm leading-relaxed">
               Tu acceso gratuito ha finalizado. Contacta al equipo de soporte para continuar usando la plataforma.
+            </p>
+            <button
+              onClick={handleLogout}
+              className="mt-2 flex items-center gap-2 text-sm text-red-600 hover:text-red-800 font-medium transition-colors"
+            >
+              <LogOut size={14} />
+              Cerrar sesión
+            </button>
+          </div>
+        )}
+
+        {billingOverlay && (
+          <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-center p-8">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+              <Lock size={28} className="text-red-500" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900">Acceso deshabilitado</h2>
+            <p className="text-sm text-gray-500 max-w-sm leading-relaxed">
+              Tu plazo para el pago mensual ha expirado. Realiza tu pago y contacta al administrador para reactivar el acceso al portal.
             </p>
             <button
               onClick={handleLogout}

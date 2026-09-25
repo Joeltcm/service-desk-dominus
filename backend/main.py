@@ -2167,6 +2167,84 @@ def _start_imap_poller():
 
 _start_imap_poller()
 
+
+def _seed_billing():
+    """Siembra la línea base de facturación en el primer arranque (fecha de hoy),
+    para que el corte mensual quede activo sin bloquear a nadie de inmediato.
+    Idempotente: si ya existe la clave, no la toca."""
+    from database import SessionLocal
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    db = SessionLocal()
+    try:
+        row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
+        if not row:
+            now_iso = _dt.now(_ZI("America/Panama")).isoformat()
+            db.add(models.AppSetting(key="billing", value=json.dumps({"last_confirmed_at": now_iso})))
+            db.commit()
+            logging.info("_seed_billing: línea base creada (%s)", now_iso)
+    except Exception as e:
+        db.rollback()
+        logging.warning("_seed_billing error: %s", e)
+    finally:
+        db.close()
+
+
+_seed_billing()
+
+
+def _start_billing_watcher():
+    """Barrido periódico del corte mensual: cuando el estado entra en 'aviso',
+    manda campana + push al staff UNA sola vez por ciclo. La suspensión en sí se
+    aplica en require_module; esto solo alcanza al staff aunque no haya entrado."""
+    import threading, time
+
+    def _loop():
+        time.sleep(90)  # espera a que la app termine de arrancar
+        while True:
+            try:
+                from routers.system import _get_billing, _billing_state, STAFF_ROLES
+                from database import SessionLocal
+                import notify
+                db = SessionLocal()
+                try:
+                    st = _billing_state(_get_billing(db))
+                    if st.get("status") == "aviso":
+                        marker = st.get("next_due") or ""
+                        srow = db.query(models.AppSetting).filter(
+                            models.AppSetting.key == "billing_notice_sent_for"
+                        ).first()
+                        if (srow.value if srow else None) != marker:
+                            dias = st.get("days_left")
+                            staff = db.query(models.User.id).filter(
+                                models.User.is_active == True,
+                                models.User.role.in_(STAFF_ROLES),
+                            ).all()
+                            for (uid,) in staff:
+                                notify.create_notification(
+                                    db, uid,
+                                    "Pago mensual pendiente",
+                                    f"Tu plazo para el pago mensual venció. Confirma el pago en {dias} día(s) "
+                                    "o se deshabilitará el acceso al portal.",
+                                    url="/", kind="billing",
+                                )
+                            if srow:
+                                srow.value = marker
+                            else:
+                                db.add(models.AppSetting(key="billing_notice_sent_for", value=marker))
+                            db.commit()
+                finally:
+                    db.close()
+            except Exception as exc:
+                logging.warning("billing watcher error: %s", exc)
+            time.sleep(6 * 3600)  # cada 6 horas
+
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+
+
+_start_billing_watcher()
+
 app = FastAPI(title="Service Desk", version="1.0.0")
 
 

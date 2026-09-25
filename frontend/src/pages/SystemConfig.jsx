@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText } from 'lucide-react'
+import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText, CreditCard, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers } from '../services/api'
+import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment } from '../services/api'
 import { useModules } from '../context/ModulesContext'
 import { useCompany } from '../context/CompanyContext'
 import { RoleFeaturesPanel, AuditPanel } from './Settings'
@@ -85,11 +85,42 @@ export default function SystemConfig() {
   const [userLimit, setUserLimit] = useState({ max_users: 0, staff_count: 0 })
   const [limitSaving, setLimitSaving] = useState(false)
 
+  const [billing, setBilling] = useState(null)
+  const [billingConfirming, setBillingConfirming] = useState(false)
+
   useEffect(() => {
     getSystemModules().then(r => setModulesLocal(r.data)).catch(() => toast.error('Error cargando configuración'))
     getTrialConfig().then(r => setTrial(r.data)).catch(() => {})
     getMaxUsers().then(r => setUserLimit(r.data)).catch(() => {})
+    getBillingConfig().then(r => setBilling(r.data)).catch(() => {})
   }, [])
+
+  const handleConfirmPayment = async () => {
+    setBillingConfirming(true)
+    try {
+      const r = await confirmBillingPayment()
+      setBilling(r.data)
+      toast.success('Pago confirmado. Plazo reiniciado.')
+    } catch {
+      toast.error('Error al confirmar el pago')
+    } finally {
+      setBillingConfirming(false)
+    }
+  }
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—'
+    try {
+      return new Date(String(iso).slice(0, 10) + 'T12:00:00')
+        .toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
+    } catch { return '—' }
+  }
+
+  const BILLING_UI = {
+    al_dia:     { label: 'Al día',     cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    aviso:      { label: 'En aviso',   cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    suspendido: { label: 'Suspendido', cls: 'bg-red-50 text-red-700 border-red-200' },
+  }
 
   const handleLimitSave = async () => {
     setLimitSaving(true)
@@ -208,6 +239,56 @@ export default function SystemConfig() {
         <p className="text-xs text-amber-700">
           <strong>Nota:</strong> Los cambios son inmediatos para todos los usuarios activos al recargar la página. Los módulos desactivados solo se ocultan del menú — los datos y APIs permanecen intactos.
         </p>
+      </div>
+
+      {/* Facturación / Acceso al portal */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+            <CreditCard size={14} className="text-emerald-500" /> Facturación · Acceso al portal
+          </h2>
+          {billing && (
+            <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${(BILLING_UI[billing.status] || BILLING_UI.al_dia).cls}`}>
+              {(BILLING_UI[billing.status] || BILLING_UI.al_dia).label}
+              {billing.status === 'aviso' && billing.days_left != null
+                ? ` · ${billing.days_left} día${billing.days_left !== 1 ? 's' : ''}`
+                : ''}
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-gray-400">
+          Corte el <strong>día {billing?.cutoff_day ?? 15}</strong> de cada mes. A los{' '}
+          <strong>{billing?.notice_days ?? 5} días</strong> sin confirmar aparece el aviso al staff, y a los{' '}
+          <strong>{billing?.suspend_days ?? 15} días</strong> se deshabilita su acceso. Los clientes no se ven afectados.
+        </p>
+
+        {billing && (
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="rounded-lg bg-gray-50 p-3">
+              <p className="text-gray-400 mb-0.5">Último pago confirmado</p>
+              <p className="font-semibold text-gray-700">{fmtDate(billing.last_confirmed_at)}</p>
+            </div>
+            <div className="rounded-lg bg-gray-50 p-3">
+              <p className="text-gray-400 mb-0.5">Próximo corte</p>
+              <p className="font-semibold text-gray-700">{fmtDate(billing.next_due)}</p>
+            </div>
+          </div>
+        )}
+
+        {billing?.status === 'suspendido' && (
+          <div className="rounded-lg bg-red-50 text-red-700 p-3 text-xs font-medium">
+            El acceso del staff está deshabilitado por falta de pago. Confirma el pago para reactivarlo.
+          </div>
+        )}
+
+        <button
+          onClick={handleConfirmPayment}
+          disabled={billingConfirming}
+          className="w-full text-sm px-3 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors font-medium"
+        >
+          <CheckCircle2 size={15} /> {billingConfirming ? 'Confirmando...' : 'Confirmar pago del mes'}
+        </button>
       </div>
 
       {/* Trial period */}

@@ -20,7 +20,12 @@ api.interceptors.response.use(
       if (hadToken) window.location.href = '/login'
     }
     if (err.response?.status === 402) {
-      window.dispatchEvent(new CustomEvent('trial-expired'))
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'string' && detail.startsWith('ACCESO_SUSPENDIDO')) {
+        window.dispatchEvent(new CustomEvent('billing-suspended'))
+      } else {
+        window.dispatchEvent(new CustomEvent('trial-expired'))
+      }
     }
     return Promise.reject(err)
   }
@@ -531,5 +536,8 @@ export const updateSystemModules = (data) => api.put('/system/modules', data)
 export const getTrialStatus      = ()     => api.get('/system/trial/status')
 export const getTrialConfig      = ()     => api.get('/system/trial')
 export const updateTrial         = (data) => api.put('/system/trial', data)
+export const getBillingStatus    = ()     => api.get('/system/billing/status')
+export const getBillingConfig    = ()     => api.get('/system/billing')
+export const confirmBillingPayment = ()   => api.post('/system/billing/confirm')
 
 export default api
