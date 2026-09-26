@@ -152,13 +152,6 @@ export default function Layout({ children }) {
       })
       .catch(() => {})
       .finally(() => setTrialLoading(false))
-    // Corte mensual del portal: solo afecta al staff (el backend devuelve inactivo a clientes).
-    getBillingStatus()
-      .then(r => {
-        setBilling(r.data)
-        if (r.data.status === 'suspendido') setBillingOverlay(true)
-      })
-      .catch(() => {})
   }, [user?.id])
 
   useEffect(() => {
@@ -172,6 +165,32 @@ export default function Layout({ children }) {
     window.addEventListener('billing-suspended', handler)
     return () => window.removeEventListener('billing-suspended', handler)
   }, [])
+
+  // Corte mensual del portal: solo afecta al staff (clientes y superadmin quedan fuera).
+  // Sondeo ligero + refresco al volver el foco, para que el aviso/bloqueo se apague
+  // en vivo cuando el superadmin confirma el pago, sin tener que recargar.
+  useEffect(() => {
+    if (!user || user.role === 'superadmin' || user.role === 'client') return
+    let cancelled = false
+    const refresh = () =>
+      getBillingStatus()
+        .then(r => {
+          if (cancelled) return
+          setBilling(r.data)
+          // Suspendido → overlay; cualquier otro estado (incl. reactivación) → lo quita.
+          setBillingOverlay(r.data.status === 'suspendido')
+        })
+        .catch(() => {})
+    refresh()
+    const id = setInterval(refresh, 5 * 60 * 1000)
+    const onVis = () => { if (document.visibilityState === 'visible') refresh() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [user?.id])
 
   useEffect(() => {
     // Badges de carga: agente ve LOS SUYOS asignados; admin/supervisor ven el global.
