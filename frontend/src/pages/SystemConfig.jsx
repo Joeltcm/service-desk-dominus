@@ -89,7 +89,7 @@ export default function SystemConfig() {
   const [billingConfirming, setBillingConfirming] = useState(false)
   const [billingDateInput, setBillingDateInput] = useState('')
   const [billingDateSaving, setBillingDateSaving] = useState(false)
-  const [billingCfg, setBillingCfg] = useState({ cutoff_day: 15, notice_days: 5, grace_days: 10 })
+  const [billingCfg, setBillingCfg] = useState({ cutoff_day: 15, notice_days: 5, suspend_days: 15 })
   const [billingCfgSaving, setBillingCfgSaving] = useState(false)
 
   // Sincroniza todo el estado local desde una respuesta de facturación del backend.
@@ -100,7 +100,7 @@ export default function SystemConfig() {
     setBillingCfg({
       cutoff_day: data.cutoff_day ?? 15,
       notice_days: data.notice_days ?? 5,
-      grace_days: data.grace_days ?? 10,
+      suspend_days: data.suspend_days ?? 15,
     })
   }
 
@@ -144,7 +144,7 @@ export default function SystemConfig() {
       const r = await setBillingConfig({
         cutoff_day: Number(billingCfg.cutoff_day),
         notice_days: Number(billingCfg.notice_days),
-        grace_days: Number(billingCfg.grace_days),
+        suspend_days: Number(billingCfg.suspend_days),
       })
       syncBilling(r.data)
       toast.success('Tiempos del corte actualizados')
@@ -306,8 +306,8 @@ export default function SystemConfig() {
 
         <p className="text-xs text-gray-400">
           Corte el <strong>día {billing?.cutoff_day ?? 15}</strong> de cada mes. A los{' '}
-          <strong>{billing?.notice_days ?? 5} días</strong> sin confirmar aparece el aviso al staff, que dura{' '}
-          <strong>{billing?.grace_days ?? 10} días</strong> antes de deshabilitar su acceso. Los clientes no se ven afectados.
+          <strong>{billing?.notice_days ?? 5} días</strong> sin confirmar aparece el aviso al staff, y a los{' '}
+          <strong>{billing?.suspend_days ?? 15} días</strong> se deshabilita su acceso. Los clientes no se ven afectados.
         </p>
 
         {billing && (
@@ -343,7 +343,7 @@ export default function SystemConfig() {
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Días para el aviso</label>
+              <label className="text-xs text-gray-400 block mb-1">Días tras el corte para el aviso</label>
               <input
                 type="number" min="0" max="60"
                 value={billingCfg.notice_days}
@@ -352,19 +352,19 @@ export default function SystemConfig() {
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Días de aviso antes de cortar</label>
+              <label className="text-xs text-gray-400 block mb-1">Días tras el corte para cortar acceso</label>
               <input
-                type="number" min="1" max="60"
-                value={billingCfg.grace_days}
-                onChange={e => setBillingCfg(c => ({ ...c, grace_days: e.target.value }))}
+                type="number" min="1" max="90"
+                value={billingCfg.suspend_days}
+                onChange={e => setBillingCfg(c => ({ ...c, suspend_days: e.target.value }))}
                 className="input-field text-sm w-full"
               />
             </div>
           </div>
           <p className="text-xs text-gray-400">
             El aviso aparece <strong>{billingCfg.notice_days || 0}</strong> día(s) después del corte y el acceso del staff
-            se deshabilita <strong>{billingCfg.grace_days || 0}</strong> día(s) después (total{' '}
-            <strong>{(Number(billingCfg.notice_days) || 0) + (Number(billingCfg.grace_days) || 0)}</strong> días tras el corte).
+            se deshabilita <strong>{billingCfg.suspend_days || 0}</strong> día(s) después del corte
+            {' '}(el aviso dura <strong>{Math.max(0, (Number(billingCfg.suspend_days) || 0) - (Number(billingCfg.notice_days) || 0))}</strong> día(s)).
           </p>
           <button
             onClick={handleSaveBillingCfg}

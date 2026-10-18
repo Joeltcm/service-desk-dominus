@@ -137,9 +137,9 @@ def _trial_days_remaining(trial: dict) -> Optional[int]:
 # mensual de pago que registra el superadmin. Los tiempos (día de corte, cuándo
 # aparece el aviso y cuánto dura antes de cortar el acceso) son configurables por
 # el superadmin; estos son solo los valores por defecto. Fechas en horario de Panamá.
-DEFAULT_CUTOFF_DAY = 15    # día del corte mensual
-DEFAULT_NOTICE_DAYS = 5    # días tras el corte en que arranca el aviso
-DEFAULT_GRACE_DAYS = 10    # días que dura el aviso antes de suspender el acceso
+DEFAULT_CUTOFF_DAY = 15     # día del corte mensual
+DEFAULT_NOTICE_DAYS = 5     # días tras el corte en que arranca el aviso
+DEFAULT_SUSPEND_DAYS = 15   # días tras el corte en que se suspende el acceso (absoluto)
 _TZ_PA = ZoneInfo("America/Panama")
 
 DEFAULT_BILLING = {"last_confirmed_at": None}
@@ -161,7 +161,8 @@ def _get_billing(db: Session) -> dict:
 
 def _billing_cfg(billing: dict) -> dict:
     """Tiempos configurables (con fallback a los valores por defecto y saneados):
-    cutoff_day 1–28, notice_days ≥ 0, grace_days ≥ 1."""
+    cutoff_day 1–28, notice_days ≥ 0, suspend_days (absoluto, días tras el corte)
+    estrictamente mayor que notice_days para que haya al menos 1 día de aviso."""
     def _int(key, default):
         try:
             return int(billing.get(key))
@@ -169,8 +170,15 @@ def _billing_cfg(billing: dict) -> dict:
             return default
     cutoff_day = min(28, max(1, _int("cutoff_day", DEFAULT_CUTOFF_DAY)))
     notice_days = max(0, _int("notice_days", DEFAULT_NOTICE_DAYS))
-    grace_days = max(1, _int("grace_days", DEFAULT_GRACE_DAYS))
-    return {"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days}
+    # Compatibilidad con la config antigua por 'grace_days' (días de aviso):
+    if "suspend_days" in billing:
+        suspend_days = _int("suspend_days", DEFAULT_SUSPEND_DAYS)
+    elif "grace_days" in billing:
+        suspend_days = notice_days + max(1, _int("grace_days", DEFAULT_SUSPEND_DAYS - DEFAULT_NOTICE_DAYS))
+    else:
+        suspend_days = DEFAULT_SUSPEND_DAYS
+    suspend_days = max(notice_days + 1, suspend_days)  # al menos 1 día de aviso
+    return {"cutoff_day": cutoff_day, "notice_days": notice_days, "suspend_days": suspend_days}
 
 
 def _next_due(confirmed: date, cutoff_day: int) -> date:
@@ -197,7 +205,7 @@ def _billing_state(billing: dict) -> dict:
         return {"status": "al_dia", "days_left": None, "next_due": None,
                 "last_confirmed_at": None, "active": False, **cfg}
     due = _next_due(confirmed, cfg["cutoff_day"])
-    suspend_after = cfg["notice_days"] + cfg["grace_days"]  # días tras el corte
+    suspend_after = cfg["suspend_days"]  # días tras el corte (absoluto)
     days_late = (_today_pa() - due).days
     if days_late < cfg["notice_days"]:
         status, days_left = "al_dia", None
@@ -415,7 +423,7 @@ def get_billing_config(
     db: Session = Depends(get_db),
     _: models.User = Depends(require_superadmin),
 ):
-    # _billing_state ya incluye cutoff_day / notice_days / grace_days.
+    # _billing_state ya incluye cutoff_day / notice_days / suspend_days.
     return _billing_state(_get_billing(db))
 
 
@@ -425,9 +433,10 @@ def set_billing_config(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_superadmin),
 ):
-    """Ajusta los tiempos del corte: día de corte (1–28), días para el aviso
-    (≥0) y días de aviso antes de cortar (≥1). Preserva la fecha del último
-    pago; el estado se recalcula al instante."""
+    """Ajusta los tiempos del corte: día de corte (1–28), días tras el corte
+    para el aviso (≥0) y días tras el corte para cortar el acceso (absoluto,
+    mayor que el del aviso). Preserva la fecha del último pago; el estado se
+    recalcula al instante."""
     def _req_int(key):
         try:
             return int(data.get(key))
@@ -435,20 +444,24 @@ def set_billing_config(
             raise HTTPException(status_code=400, detail=f"Valor inválido para {key}")
     cutoff_day = _req_int("cutoff_day")
     notice_days = _req_int("notice_days")
-    grace_days = _req_int("grace_days")
+    suspend_days = _req_int("suspend_days")
     if not (1 <= cutoff_day <= 28):
         raise HTTPException(status_code=400, detail="El día de corte debe estar entre 1 y 28")
     if notice_days < 0:
         raise HTTPException(status_code=400, detail="Los días para el aviso no pueden ser negativos")
-    if grace_days < 1:
-        raise HTTPException(status_code=400, detail="Debe haber al menos 1 día de aviso antes de cortar")
+    if suspend_days <= notice_days:
+        raise HTTPException(
+            status_code=400,
+            detail="Los días para cortar el acceso deben ser mayores que los días del aviso",
+        )
     billing = _get_billing(db)
-    billing.update({"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days})
+    billing.pop("grace_days", None)  # migra la config antigua al modelo absoluto
+    billing.update({"cutoff_day": cutoff_day, "notice_days": notice_days, "suspend_days": suspend_days})
     _save_billing(db, billing)
     try:
         from audit_helper import log_action
         log_action(db, current_user, "config_corte", "facturacion",
-                   details={"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days})
+                   details={"cutoff_day": cutoff_day, "notice_days": notice_days, "suspend_days": suspend_days})
     except Exception:
         pass
     db.commit()
