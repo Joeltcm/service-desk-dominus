@@ -134,12 +134,12 @@ def _trial_days_remaining(trial: dict) -> Optional[int]:
 
 # ── Facturación / Corte mensual del portal ──────────────────────────────────────
 # El acceso del STAFF (nunca clientes, nunca superadmin) depende de la confirmación
-# mensual de pago que registra el superadmin. Corte el día 15 de cada mes; a los
-# 5 días sin confirmar aparece el aviso con cuenta regresiva; a los 15 días
-# (aviso + 10) se suspende el acceso. Fechas en horario de Panamá.
-BILLING_CUTOFF_DAY = 15       # día del corte mensual
-BILLING_NOTICE_DAYS = 5       # días tras el corte en que arranca el aviso
-BILLING_SUSPEND_DAYS = 15     # días tras el corte en que se suspende (aviso + 10)
+# mensual de pago que registra el superadmin. Los tiempos (día de corte, cuándo
+# aparece el aviso y cuánto dura antes de cortar el acceso) son configurables por
+# el superadmin; estos son solo los valores por defecto. Fechas en horario de Panamá.
+DEFAULT_CUTOFF_DAY = 15    # día del corte mensual
+DEFAULT_NOTICE_DAYS = 5    # días tras el corte en que arranca el aviso
+DEFAULT_GRACE_DAYS = 10    # días que dura el aviso antes de suspender el acceso
 _TZ_PA = ZoneInfo("America/Panama")
 
 DEFAULT_BILLING = {"last_confirmed_at": None}
@@ -159,38 +159,54 @@ def _get_billing(db: Session) -> dict:
         return dict(DEFAULT_BILLING)
 
 
-def _next_due(confirmed: date) -> date:
-    """Próximo corte = el día 15 del mes SIGUIENTE al de la última confirmación."""
+def _billing_cfg(billing: dict) -> dict:
+    """Tiempos configurables (con fallback a los valores por defecto y saneados):
+    cutoff_day 1–28, notice_days ≥ 0, grace_days ≥ 1."""
+    def _int(key, default):
+        try:
+            return int(billing.get(key))
+        except (TypeError, ValueError):
+            return default
+    cutoff_day = min(28, max(1, _int("cutoff_day", DEFAULT_CUTOFF_DAY)))
+    notice_days = max(0, _int("notice_days", DEFAULT_NOTICE_DAYS))
+    grace_days = max(1, _int("grace_days", DEFAULT_GRACE_DAYS))
+    return {"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days}
+
+
+def _next_due(confirmed: date, cutoff_day: int) -> date:
+    """Próximo corte = el día de corte del mes SIGUIENTE al de la última confirmación."""
     y, m = confirmed.year, confirmed.month
     if m == 12:
         y, m = y + 1, 1
     else:
         m += 1
-    return date(y, m, BILLING_CUTOFF_DAY)
+    return date(y, m, cutoff_day)
 
 
 def _billing_state(billing: dict) -> dict:
     """Estado calculado: al_dia | aviso | suspendido, con días restantes y próximo corte.
     'active' False = sin baseline (no bloquea ni muestra contador)."""
+    cfg = _billing_cfg(billing)
     raw = billing.get("last_confirmed_at")
     if not raw:
         return {"status": "al_dia", "days_left": None, "next_due": None,
-                "last_confirmed_at": None, "active": False}
+                "last_confirmed_at": None, "active": False, **cfg}
     try:
         confirmed = date.fromisoformat(str(raw)[:10])
     except Exception:
         return {"status": "al_dia", "days_left": None, "next_due": None,
-                "last_confirmed_at": None, "active": False}
-    due = _next_due(confirmed)
+                "last_confirmed_at": None, "active": False, **cfg}
+    due = _next_due(confirmed, cfg["cutoff_day"])
+    suspend_after = cfg["notice_days"] + cfg["grace_days"]  # días tras el corte
     days_late = (_today_pa() - due).days
-    if days_late < BILLING_NOTICE_DAYS:
+    if days_late < cfg["notice_days"]:
         status, days_left = "al_dia", None
-    elif days_late < BILLING_SUSPEND_DAYS:
-        status, days_left = "aviso", BILLING_SUSPEND_DAYS - days_late
+    elif days_late < suspend_after:
+        status, days_left = "aviso", suspend_after - days_late
     else:
         status, days_left = "suspendido", 0
     return {"status": status, "days_left": days_left, "next_due": due.isoformat(),
-            "last_confirmed_at": raw, "active": True}
+            "last_confirmed_at": raw, "active": True, **cfg}
 
 
 # ── Dependency ────────────────────────────────────────────────────────────────
@@ -376,18 +392,67 @@ def get_billing_status(
     return _billing_state(_get_billing(db))
 
 
+def _save_billing(db: Session, billing: dict) -> None:
+    """Persiste el dict de facturación completo (preserva config + baseline)."""
+    payload = json.dumps(billing)
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
+    if row:
+        row.value = payload
+    else:
+        db.add(models.AppSetting(key="billing", value=payload))
+
+
+def _clear_notice_marker(db: Session) -> None:
+    nrow = db.query(models.AppSetting).filter(
+        models.AppSetting.key == "billing_notice_sent_for"
+    ).first()
+    if nrow:
+        db.delete(nrow)
+
+
 @router.get("/billing")
 def get_billing_config(
     db: Session = Depends(get_db),
     _: models.User = Depends(require_superadmin),
 ):
-    state = _billing_state(_get_billing(db))
-    return {
-        **state,
-        "cutoff_day": BILLING_CUTOFF_DAY,
-        "notice_days": BILLING_NOTICE_DAYS,
-        "suspend_days": BILLING_SUSPEND_DAYS,
-    }
+    # _billing_state ya incluye cutoff_day / notice_days / grace_days.
+    return _billing_state(_get_billing(db))
+
+
+@router.put("/billing/config")
+def set_billing_config(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_superadmin),
+):
+    """Ajusta los tiempos del corte: día de corte (1–28), días para el aviso
+    (≥0) y días de aviso antes de cortar (≥1). Preserva la fecha del último
+    pago; el estado se recalcula al instante."""
+    def _req_int(key):
+        try:
+            return int(data.get(key))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Valor inválido para {key}")
+    cutoff_day = _req_int("cutoff_day")
+    notice_days = _req_int("notice_days")
+    grace_days = _req_int("grace_days")
+    if not (1 <= cutoff_day <= 28):
+        raise HTTPException(status_code=400, detail="El día de corte debe estar entre 1 y 28")
+    if notice_days < 0:
+        raise HTTPException(status_code=400, detail="Los días para el aviso no pueden ser negativos")
+    if grace_days < 1:
+        raise HTTPException(status_code=400, detail="Debe haber al menos 1 día de aviso antes de cortar")
+    billing = _get_billing(db)
+    billing.update({"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days})
+    _save_billing(db, billing)
+    try:
+        from audit_helper import log_action
+        log_action(db, current_user, "config_corte", "facturacion",
+                   details={"cutoff_day": cutoff_day, "notice_days": notice_days, "grace_days": grace_days})
+    except Exception:
+        pass
+    db.commit()
+    return _billing_state(_get_billing(db))
 
 
 @router.put("/billing")
@@ -397,25 +462,18 @@ def set_billing_date(
     current_user: models.User = Depends(require_superadmin),
 ):
     """Ajuste manual de la fecha del último pago recibido (corrección de baseline).
-    Recibe {"last_confirmed_at": "YYYY-MM-DD"}. El próximo corte = día 15 del mes
-    siguiente a esa fecha, y el estado se recalcula al instante."""
+    Recibe {"last_confirmed_at": "YYYY-MM-DD"}. El próximo corte = día de corte del
+    mes siguiente a esa fecha, y el estado se recalcula al instante."""
     raw = (data.get("last_confirmed_at") or "").strip()
     try:
         d = date.fromisoformat(raw[:10])
     except Exception:
         raise HTTPException(status_code=400, detail="Fecha inválida (usa YYYY-MM-DD)")
     stored = f"{d.isoformat()}T12:00:00"
-    payload = json.dumps({"last_confirmed_at": stored})
-    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
-    if row:
-        row.value = payload
-    else:
-        db.add(models.AppSetting(key="billing", value=payload))
-    nrow = db.query(models.AppSetting).filter(
-        models.AppSetting.key == "billing_notice_sent_for"
-    ).first()
-    if nrow:
-        db.delete(nrow)
+    billing = _get_billing(db)
+    billing["last_confirmed_at"] = stored
+    _save_billing(db, billing)
+    _clear_notice_marker(db)
     try:
         from audit_helper import log_action
         log_action(db, current_user, "ajustar_pago", "facturacion",
@@ -423,13 +481,7 @@ def set_billing_date(
     except Exception:
         pass
     db.commit()
-    state = _billing_state(_get_billing(db))
-    return {
-        **state,
-        "cutoff_day": BILLING_CUTOFF_DAY,
-        "notice_days": BILLING_NOTICE_DAYS,
-        "suspend_days": BILLING_SUSPEND_DAYS,
-    }
+    return _billing_state(_get_billing(db))
 
 
 @router.post("/billing/confirm")
@@ -438,21 +490,14 @@ def confirm_billing_payment(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_superadmin),
 ):
-    """Registra el pago del mes: reinicia el ciclo (próximo corte = día 15 del mes
-    siguiente) y reactiva el acceso del staff si estaba suspendido."""
+    """Registra el pago del mes: reinicia el ciclo (próximo corte = día de corte del
+    mes siguiente) y reactiva el acceso del staff si estaba suspendido."""
     now_iso = datetime.now(_TZ_PA).isoformat()
-    payload = json.dumps({"last_confirmed_at": now_iso})
-    row = db.query(models.AppSetting).filter(models.AppSetting.key == "billing").first()
-    if row:
-        row.value = payload
-    else:
-        db.add(models.AppSetting(key="billing", value=payload))
+    billing = _get_billing(db)
+    billing["last_confirmed_at"] = now_iso
+    _save_billing(db, billing)
     # Limpia la marca de aviso enviado para que el próximo ciclo vuelva a avisar.
-    nrow = db.query(models.AppSetting).filter(
-        models.AppSetting.key == "billing_notice_sent_for"
-    ).first()
-    if nrow:
-        db.delete(nrow)
+    _clear_notice_marker(db)
     try:
         from audit_helper import log_action
         log_action(db, current_user, "confirmar_pago", "facturacion",
@@ -460,10 +505,4 @@ def confirm_billing_payment(
     except Exception:
         pass
     db.commit()
-    state = _billing_state(_get_billing(db))
-    return {
-        **state,
-        "cutoff_day": BILLING_CUTOFF_DAY,
-        "notice_days": BILLING_NOTICE_DAYS,
-        "suspend_days": BILLING_SUSPEND_DAYS,
-    }
+    return _billing_state(_get_billing(db))

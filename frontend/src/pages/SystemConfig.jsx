@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText, CreditCard, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment, setBillingDate } from '../services/api'
+import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment, setBillingDate, setBillingConfig } from '../services/api'
 import { useModules } from '../context/ModulesContext'
 import { useCompany } from '../context/CompanyContext'
 import { RoleFeaturesPanel, AuditPanel } from './Settings'
@@ -89,23 +89,33 @@ export default function SystemConfig() {
   const [billingConfirming, setBillingConfirming] = useState(false)
   const [billingDateInput, setBillingDateInput] = useState('')
   const [billingDateSaving, setBillingDateSaving] = useState(false)
+  const [billingCfg, setBillingCfg] = useState({ cutoff_day: 15, notice_days: 5, grace_days: 10 })
+  const [billingCfgSaving, setBillingCfgSaving] = useState(false)
+
+  // Sincroniza todo el estado local desde una respuesta de facturación del backend.
+  const syncBilling = (data) => {
+    if (!data) return
+    setBilling(data)
+    setBillingDateInput(data.last_confirmed_at ? String(data.last_confirmed_at).slice(0, 10) : '')
+    setBillingCfg({
+      cutoff_day: data.cutoff_day ?? 15,
+      notice_days: data.notice_days ?? 5,
+      grace_days: data.grace_days ?? 10,
+    })
+  }
 
   useEffect(() => {
     getSystemModules().then(r => setModulesLocal(r.data)).catch(() => toast.error('Error cargando configuración'))
     getTrialConfig().then(r => setTrial(r.data)).catch(() => {})
     getMaxUsers().then(r => setUserLimit(r.data)).catch(() => {})
-    getBillingConfig().then(r => {
-      setBilling(r.data)
-      setBillingDateInput(r.data?.last_confirmed_at ? String(r.data.last_confirmed_at).slice(0, 10) : '')
-    }).catch(() => {})
+    getBillingConfig().then(r => syncBilling(r.data)).catch(() => {})
   }, [])
 
   const handleConfirmPayment = async () => {
     setBillingConfirming(true)
     try {
       const r = await confirmBillingPayment()
-      setBilling(r.data)
-      setBillingDateInput(r.data?.last_confirmed_at ? String(r.data.last_confirmed_at).slice(0, 10) : '')
+      syncBilling(r.data)
       toast.success('Pago confirmado. Plazo reiniciado.')
     } catch {
       toast.error('Error al confirmar el pago')
@@ -119,12 +129,29 @@ export default function SystemConfig() {
     setBillingDateSaving(true)
     try {
       const r = await setBillingDate(billingDateInput)
-      setBilling(r.data)
+      syncBilling(r.data)
       toast.success('Fecha del último pago actualizada')
     } catch (e) {
       toast.error(e?.response?.data?.detail || 'Error al ajustar la fecha')
     } finally {
       setBillingDateSaving(false)
+    }
+  }
+
+  const handleSaveBillingCfg = async () => {
+    setBillingCfgSaving(true)
+    try {
+      const r = await setBillingConfig({
+        cutoff_day: Number(billingCfg.cutoff_day),
+        notice_days: Number(billingCfg.notice_days),
+        grace_days: Number(billingCfg.grace_days),
+      })
+      syncBilling(r.data)
+      toast.success('Tiempos del corte actualizados')
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Error al guardar la configuración')
+    } finally {
+      setBillingCfgSaving(false)
     }
   }
 
@@ -279,8 +306,8 @@ export default function SystemConfig() {
 
         <p className="text-xs text-gray-400">
           Corte el <strong>día {billing?.cutoff_day ?? 15}</strong> de cada mes. A los{' '}
-          <strong>{billing?.notice_days ?? 5} días</strong> sin confirmar aparece el aviso al staff, y a los{' '}
-          <strong>{billing?.suspend_days ?? 15} días</strong> se deshabilita su acceso. Los clientes no se ven afectados.
+          <strong>{billing?.notice_days ?? 5} días</strong> sin confirmar aparece el aviso al staff, que dura{' '}
+          <strong>{billing?.grace_days ?? 10} días</strong> antes de deshabilitar su acceso. Los clientes no se ven afectados.
         </p>
 
         {billing && (
@@ -301,6 +328,52 @@ export default function SystemConfig() {
             El acceso del staff está deshabilitado por falta de pago. Confirma el pago para reactivarlo.
           </div>
         )}
+
+        {/* Tiempos del corte (configurables por el superadmin) */}
+        <div className="border-t border-gray-100 pt-3 space-y-3">
+          <label className="text-xs font-medium text-gray-500 block">Tiempos del corte</label>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Día de corte</label>
+              <input
+                type="number" min="1" max="28"
+                value={billingCfg.cutoff_day}
+                onChange={e => setBillingCfg(c => ({ ...c, cutoff_day: e.target.value }))}
+                className="input-field text-sm w-full"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Días para el aviso</label>
+              <input
+                type="number" min="0" max="60"
+                value={billingCfg.notice_days}
+                onChange={e => setBillingCfg(c => ({ ...c, notice_days: e.target.value }))}
+                className="input-field text-sm w-full"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Días de aviso antes de cortar</label>
+              <input
+                type="number" min="1" max="60"
+                value={billingCfg.grace_days}
+                onChange={e => setBillingCfg(c => ({ ...c, grace_days: e.target.value }))}
+                className="input-field text-sm w-full"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-gray-400">
+            El aviso aparece <strong>{billingCfg.notice_days || 0}</strong> día(s) después del corte y el acceso del staff
+            se deshabilita <strong>{billingCfg.grace_days || 0}</strong> día(s) después (total{' '}
+            <strong>{(Number(billingCfg.notice_days) || 0) + (Number(billingCfg.grace_days) || 0)}</strong> días tras el corte).
+          </p>
+          <button
+            onClick={handleSaveBillingCfg}
+            disabled={billingCfgSaving}
+            className="text-xs px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+          >
+            <Save size={12} /> {billingCfgSaving ? 'Guardando...' : 'Guardar configuración'}
+          </button>
+        </div>
 
         {/* Ajuste manual de la fecha del último pago recibido (corrección de baseline) */}
         <div className="border-t border-gray-100 pt-3 space-y-2">
