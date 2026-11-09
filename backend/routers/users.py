@@ -2,6 +2,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from pydantic import BaseModel
 from database import get_db
@@ -267,6 +268,16 @@ def update_user(
     if not user or (user.role == models.UserRole.superadmin and _superadmin_hidden_from(current_user)):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+    # Email duplicado: rechazar con mensaje claro (otro usuario ya lo tiene, aunque
+    # esté inactivo). Evita el 500 por UniqueViolation con un error legible.
+    if data.email is not None and data.email != user.email:
+        clash = db.query(models.User).filter(
+            models.User.email == data.email,
+            models.User.id != user_id,
+        ).first()
+        if clash:
+            raise HTTPException(status_code=400, detail="Ese correo ya está registrado para otro usuario")
+
     _changed = [k for k in data.model_fields_set if k != 'password']
     if data.name is not None:
         user.name = data.name
@@ -289,7 +300,11 @@ def update_user(
     if 'client_category_id' in data.model_fields_set:
         user.client_category_id = data.client_category_id or None
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Ese correo ya está registrado para otro usuario")
     db.refresh(user)
     details = {"campos": _changed}
     if data.password:

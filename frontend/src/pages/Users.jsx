@@ -221,19 +221,21 @@ function UsersTab() {
                 <X size={18} className="text-gray-400" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1" autoComplete="off">
               <div>
                 <label className="label">Nombre *</label>
-                <input name="name" className="input" style={{fontSize:'16px'}} value={form.name} onChange={handleChange} required />
+                <input name="name" className="input" style={{fontSize:'16px'}} value={form.name} onChange={handleChange} required autoComplete="off" />
               </div>
               <div>
                 <label className="label">Email *</label>
-                <input type="email" name="email" className="input" style={{fontSize:'16px'}} value={form.email} onChange={handleChange} required />
+                {/* autoComplete off evita que el navegador pise el email con una credencial guardada */}
+                <input type="email" name="email" className="input" style={{fontSize:'16px'}} value={form.email} onChange={handleChange} required autoComplete="off" />
               </div>
               <div>
                 <label className="label">{editUser ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña *'}</label>
+                {/* new-password evita el autollenado de contraseñas guardadas del sitio */}
                 <input type="password" name="password" className="input" style={{fontSize:'16px'}}
-                  value={form.password} onChange={handleChange} required={!editUser} />
+                  value={form.password} onChange={handleChange} required={!editUser} autoComplete="new-password" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
