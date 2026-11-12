@@ -49,7 +49,7 @@ export default function Mantenimiento() {
   const onSaved = () => { setModal(null); load() }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap md:pr-16 lg:pr-36">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Wrench size={22} className="text-teal-600" /> Mantenimiento</h1>
