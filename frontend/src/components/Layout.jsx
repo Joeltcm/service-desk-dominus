@@ -113,6 +113,7 @@ function NavItem({ item, collapsed, onNavigate, badge }) {
 const FAB_ITEMS = [
   { label: 'Escanear ticket',  action: 'scan',               Icon: QrCode,        bg: 'bg-slate-700',  roles: ['admin','supervisor','agent','superadmin'],          moduleKey: 'tickets' },
   { label: 'Nuevo Ticket',     to: '/tickets/new',           Icon: Ticket,        bg: 'bg-orange-500', roles: ['admin','supervisor','agent','client','superadmin'], moduleKey: 'tickets' },
+  { label: 'Nuevo Mantenimiento', to: '/mantenimiento?action=new', Icon: Wrench, bg: 'bg-teal-600', roles: ['admin','supervisor','agent','superadmin'], moduleKey: 'mantenimiento' },
   { label: 'Nueva Cotización', to: '/quotes?action=new',     Icon: ClipboardList, bg: 'bg-indigo-500', roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'cotizaciones' },
   { label: 'Nueva Factura',    to: '/facturas?action=new',   Icon: Receipt,       bg: 'bg-rose-500',   roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'facturas' },
   { label: 'Nuevo Pedido',     to: '/pedidos?action=new',    Icon: ShoppingCart,  bg: 'bg-sky-500',    roles: ['admin','supervisor','agent','ventas','superadmin'], moduleKey: 'pedidos' },
@@ -270,7 +271,7 @@ export default function Layout({ children }) {
     return normLevel(roleFeats[item.featureKey]) !== 'none'
   })
   // Acciones rápidas del FAB (crear): requieren nivel de EDICIÓN en su módulo.
-  const MODULE_TO_FEATURE = { cotizaciones: 'quotes', contactos: 'contacts', garantias: 'warranties' }
+  const MODULE_TO_FEATURE = { cotizaciones: 'quotes', contactos: 'contacts', garantias: 'warranties', mantenimiento: 'tickets' }
   const fabAllowed = (i) =>
     i.roles.includes(user?.role) &&
     (user?.role === 'superadmin' || !i.moduleKey || (modules !== null && modules[i.moduleKey] !== false)) &&

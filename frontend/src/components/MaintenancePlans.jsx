@@ -153,7 +153,7 @@ function NewPlanModal({ onClose, onSaved }) {
 
   const lbl = 'block text-xs font-medium text-gray-600 mb-1'
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-start justify-between p-5 border-b border-gray-100">
           <div><h2 className="font-bold text-gray-900 flex items-center gap-2"><CalendarClock size={16} className="text-teal-600" /> Nuevo plan de mantenimiento</h2></div>

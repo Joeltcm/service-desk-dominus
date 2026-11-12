@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { getTickets, getAgents, confirmMaintenance, rescheduleMaintenance, createMaintPlan } from '../services/api'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getTickets, getAgents, confirmMaintenance, rescheduleMaintenance, createMaintPlan, getUsers, getStatuses, createTicket } from '../services/api'
+import { missingMaintFields, buildMaintTicket } from '../utils/maintenance'
 import MaintenancePlans from '../components/MaintenancePlans'
 import { useMaintFeatures, featureOn } from '../utils/maintFeatures'
 import { MAINT_TYPES, fmtPanama, toPanamaInput, minutesBetween, parseEquipment } from '../utils/maintenance'
@@ -20,6 +21,11 @@ export default function Mantenimiento() {
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null) // { mode: 'confirm' | 'reschedule', ticket }
   const [tab, setTab] = useState('servicios')
+  const [params, setParams] = useSearchParams()
+  const [showNew, setShowNew] = useState(false)
+  // Se abre cuando llega ?action=new (también si la página ya estaba montada).
+  useEffect(() => { if (params.get('action') === 'new') setShowNew(true) }, [params])
+  const closeNew = () => { setShowNew(false); if (params.get('action')) setParams({}, { replace: true }) }
   const mf = useMaintFeatures()
   const plansOn = featureOn(mf, 'recurring_plans')
 
@@ -48,6 +54,7 @@ export default function Mantenimiento() {
   }, [tickets])
 
   const onSaved = () => { setModal(null); load() }
+
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-6 animate-fade-in">
@@ -79,8 +86,8 @@ export default function Mantenimiento() {
             { label: 'Programados', value: groups[1].items.length, tone: 'border-teal-500 text-teal-700', icon: CalendarClock },
             { label: 'Cerrados', value: groups[2].items.length, tone: 'border-gray-400 text-gray-600', icon: Wrench },
           ].map((k) => (
-            <div key={k.label} className={`card border-t-4 ${k.tone.split(' ')[0]} py-3 px-4`}>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-1.5"><k.icon size={12} /> {k.label}</p>
+            <div key={k.label} className={`card border-t-4 ${k.tone.split(' ')[0]} py-3 px-3 sm:px-4 min-w-0`}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-start gap-1.5 leading-tight break-words"><k.icon size={12} className="hidden sm:block mt-px flex-shrink-0" /> {k.label}</p>
               <p className={`text-2xl font-bold leading-tight mt-1 ${k.tone.split(' ')[1]}`}>{k.value}</p>
             </div>
           ))}
@@ -164,6 +171,8 @@ export default function Mantenimiento() {
         </section>
       ))}
 
+      {showNew && <NewMaintenanceModal onClose={closeNew} onSaved={() => { closeNew(); load() }} />}
+
       {modal?.mode === 'confirm' && (
         <ConfirmModal ticket={modal.ticket} agents={agents} planEnabled={plansOn} onClose={() => setModal(null)} onSaved={onSaved} />
       )}
@@ -176,7 +185,7 @@ export default function Mantenimiento() {
 
 function ModalShell({ title, subtitle, onClose, children, footer }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-start justify-between p-5 border-b border-gray-100">
           <div>
@@ -352,6 +361,121 @@ function RescheduleModal({ ticket, onClose, onSaved }) {
       <div>
         <p className="text-xs font-medium text-gray-600 mb-1">Motivo (opcional)</p>
         <input className="input w-full" placeholder="Ej.: El cliente pidió más tiempo para la flota" value={reason} onChange={(e) => setReason(e.target.value)} style={{ fontSize: '16px' }} />
+      </div>
+    </ModalShell>
+  )
+}
+
+
+// Alta de un mantenimiento por el staff, con el mismo formato que la solicitud pública.
+function NewMaintenanceModal({ onClose, onSaved }) {
+  const [clients, setClients] = useState([])
+  const [clientId, setClientId] = useState('')
+  const [title, setTitle] = useState('')
+  const [maintType, setMaintType] = useState('preventivo')
+  const [equipment, setEquipment] = useState([{ description: '', qty: 1 }])
+  const [requestedDate, setRequestedDate] = useState('')
+  const [contactName, setContactName] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
+  const [location, setLocation] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    getUsers().then((r) => setClients((r.data || []).filter((u) => u.role === 'client' && u.is_active !== false))).catch(() => {})
+  }, [])
+
+  // Al elegir cliente se prellenan contacto y ubicación desde su ficha (editables).
+  const pickClient = (id) => {
+    setClientId(id)
+    const c = clients.find((x) => String(x.id) === String(id))
+    if (c) { setContactName(c.name || ''); setContactEmail(c.email || ''); setContactPhone(c.phone || ''); setLocation(c.address || '') }
+  }
+
+  const setLine = (i, f, v) => setEquipment((ls) => ls.map((l, idx) => (idx === i ? { ...l, [f]: v } : l)))
+
+  const submit = async () => {
+    if (!clientId) return toast.error('Elige el cliente')
+    const draft = { title: title.trim(), notes, maint_type: maintType, equipment, requested_date: requestedDate || null,
+      contact_name: contactName, contact_email: contactEmail, contact_phone: contactPhone, location }
+    const missing = missingMaintFields(draft)
+    if (!draft.title) missing.unshift('Asunto')
+    if (missing.length) return toast.error(`Completa: ${missing.join(', ')}`)
+    setSaving(true)
+    try {
+      const st = await getStatuses().catch(() => ({ data: [] }))
+      const list = st.data || []
+      const statusId = (list.find((s) => /abierto|nuevo|open/i.test(s.name)) || list[0])?.id
+      await createTicket(buildMaintTicket(draft, { statusId, clientId: Number(clientId) }))
+      toast.success('Mantenimiento creado')
+      onSaved()
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'No se pudo crear el mantenimiento')
+    } finally { setSaving(false) }
+  }
+
+  const lbl = 'block text-xs font-medium text-gray-600 mb-1'
+  return (
+    <ModalShell title="Nuevo mantenimiento" subtitle="Se crea como solicitud pendiente de confirmar" onClose={onClose}
+      footer={<>
+        <button onClick={onClose} className="btn-secondary min-h-[44px]">Cancelar</button>
+        <button onClick={submit} disabled={saving} className="btn-primary min-h-[44px]">{saving ? 'Creando…' : 'Crear mantenimiento'}</button>
+      </>}>
+      <div>
+        <label className={lbl}>Cliente *</label>
+        <select className="input w-full" value={clientId} onChange={(e) => pickClient(e.target.value)} style={{ fontSize: '16px' }}>
+          <option value="">Selecciona…</option>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.company ? ` · ${c.company}` : ''}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label className={lbl}>Asunto *</label>
+        <input className="input w-full" placeholder="Ej.: Mantenimiento preventivo de la flota de oficina" value={title} onChange={(e) => setTitle(e.target.value)} style={{ fontSize: '16px' }} />
+      </div>
+
+      <div>
+        <label className={lbl}>Tipo *</label>
+        <div className="grid grid-cols-2 gap-2">
+          {MAINT_TYPES.map((t) => (
+            <button key={t.value} type="button" onClick={() => setMaintType(t.value)}
+              className={`text-left rounded-xl border-2 p-2.5 min-h-[44px] ${maintType === t.value ? 'border-teal-600 bg-teal-50' : 'border-gray-200'}`}>
+              <p className={`text-sm font-semibold ${maintType === t.value ? 'text-teal-800' : 'text-gray-700'}`}>{t.label}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className={lbl}>Equipos de la flota *</label>
+        <div className="space-y-2">
+          {equipment.map((l, i) => (
+            <div key={i} className="flex gap-2">
+              <input className="input flex-1 text-sm" placeholder="Tipo de equipo" value={l.description} onChange={(e) => setLine(i, 'description', e.target.value)} style={{ fontSize: '16px' }} />
+              <input type="number" min="1" className="input w-20 text-sm text-right" value={l.qty} onChange={(e) => setLine(i, 'qty', e.target.value)} style={{ fontSize: '16px' }} />
+              {equipment.length > 1 && <button onClick={() => setEquipment((ls) => ls.filter((_, idx) => idx !== i))} className="text-gray-300 hover:text-red-500 px-2 min-h-[44px]"><X size={16} /></button>}
+            </div>
+          ))}
+        </div>
+        <button onClick={() => setEquipment((ls) => [...ls, { description: '', qty: 1 }])} className="text-xs font-medium text-teal-700 flex items-center gap-1 mt-2 min-h-[44px]"><Plus size={12} /> Agregar equipo</button>
+      </div>
+
+      <div>
+        <label className={lbl}>Fecha propuesta</label>
+        <input type="date" className="input w-full" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} style={{ fontSize: '16px' }} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div><label className={lbl}>Contacto *</label><input className="input w-full" value={contactName} onChange={(e) => setContactName(e.target.value)} style={{ fontSize: '16px' }} /></div>
+        <div><label className={lbl}>Correo *</label><input type="email" className="input w-full" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} style={{ fontSize: '16px' }} /></div>
+        <div><label className={lbl}>Teléfono *</label><input className="input w-full" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={{ fontSize: '16px' }} /></div>
+        <div><label className={lbl}>Ubicación *</label><input className="input w-full" value={location} onChange={(e) => setLocation(e.target.value)} style={{ fontSize: '16px' }} /></div>
+      </div>
+
+      <div>
+        <label className={lbl}>Notas</label>
+        <textarea className="input w-full h-20 resize-none" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ fontSize: '16px' }} />
       </div>
     </ModalShell>
   )
