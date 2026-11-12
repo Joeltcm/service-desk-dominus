@@ -14,3 +14,9 @@ backend/uploads/
 *.db
 .DS_Store
 Thumbs.db
+
+# Secretos y configuración local: nunca al snapshot de producción.
+.env
+**/.env
+**/.env.*
+backend/tickets.db

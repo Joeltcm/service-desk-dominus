@@ -277,7 +277,9 @@ def create_ticket(
     # Vertical it_support: 'Cargador' y 'Categoría' son obligatorios.
     import os
     if os.getenv("PRODUCT_VERTICAL", "mps") == "it_support":
-        if not (data.charger and data.charger.strip()):
+        # Los mantenimientos no llevan cargador (es un concepto de soporte de equipos).
+        is_maint_req = (data.category or "").strip().lower() == "mantenimiento"
+        if not is_maint_req and not (data.charger and data.charger.strip()):
             raise HTTPException(status_code=422, detail="El campo 'Cargador' es obligatorio")
         if not (data.category and data.category.strip()):
             raise HTTPException(status_code=422, detail="El campo 'Categoría' es obligatorio")
