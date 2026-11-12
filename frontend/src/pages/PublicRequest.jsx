@@ -43,6 +43,7 @@ export default function PublicRequest() {
   const [contactPhone, setContactPhone] = useState(user?.phone || '')
   const [location, setLocation] = useState(user?.address || '')
   const [photos, setPhotos] = useState([])
+  const [needAccount, setNeedAccount] = useState(false)
   const mf = useMaintFeatures({ publicOnly: true })
   const photosOn = featureOn(mf, 'client_photos')
 
@@ -88,9 +89,12 @@ export default function PublicRequest() {
       if (missing.length) return toast.error(`Completa: ${missing.join(', ')}`)
     }
     if (!user) {
+      // Sin sesión: se guarda el borrador y el usuario se queda aquí para elegir
+      // iniciar sesión o crear su cuenta (la solicitud se envía sola al ingresar).
       try { localStorage.setItem('pendingRequest', JSON.stringify(draft)) } catch {}
-      toast('Inicia sesión o crea una cuenta para enviar tu solicitud 🔐')
-      navigate('/login')
+      setNeedAccount(true)
+      toast('Para enviar tu solicitud, inicia sesión o crea tu cuenta gratis. Tus datos quedan guardados.', { duration: 6000, icon: '🔐' })
+      document.getElementById('account-box')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
     setSaving(true)
@@ -265,7 +269,10 @@ export default function PublicRequest() {
 
           {/* Aviso: se necesita cuenta para enviar */}
           {!user && (
-            <div className="mt-4 rounded-xl border border-white/15 bg-white/10 p-4">
+            <div id="account-box" className={`mt-4 rounded-xl border bg-white/10 p-4 transition-all ${needAccount ? 'border-amber-300 ring-2 ring-amber-300/60' : 'border-white/15'}`}>
+              {needAccount && (
+                <p className="text-sm font-semibold text-amber-200 mb-2">Ya casi está: inicia sesión o crea tu cuenta para enviar la solicitud.</p>
+              )}
               <p className="text-sm text-blue-50">Para <b className="text-white">enviar</b> tu solicitud necesitas una cuenta (gratis). Guardaremos lo que escribiste y lo enviaremos apenas ingreses.</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <button onClick={() => saveDraftAndGo('/login')} className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium bg-white text-gray-800 rounded-lg hover:bg-gray-100"><LogIn size={15} /> Iniciar sesión</button>
