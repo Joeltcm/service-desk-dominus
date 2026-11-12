@@ -31,6 +31,7 @@ import { getSLAInfo, fmtSlaRemaining } from '../utils/sla'
 import { fmtDT, fmtD, fmtTime, toUTC, getFmtTz } from '../utils/fmt'
 import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
 import { compressImage } from '../utils/imageCompress'
+import MaintenancePanel from '../components/MaintenancePanel'
 import toast from 'react-hot-toast'
 
 const PRIORITY_LABELS = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' }
@@ -1395,6 +1396,14 @@ export default function TicketDetail() {
               </div>
             )}
           </div>
+
+          {/* Mantenimiento: datos del servicio + informe técnico (solo tickets de categoría Mantenimiento) */}
+          {(ticket.category || '').toLowerCase() === 'mantenimiento' && (
+            <MaintenancePanel
+              ticket={ticket}
+              onChanged={() => getTicket(id).then((r) => setTicket(r.data)).catch(() => {})}
+            />
+          )}
 
           {/* CSAT survey — solo para clientes cuando el ticket está resuelto */}
           {!isAgentOrAdmin && ticket.status_rel?.is_closed && (

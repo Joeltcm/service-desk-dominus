@@ -70,6 +70,11 @@ async def upload_attachment(
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
     if current_user.role == models.UserRole.client and ticket.client_id != current_user.id:
         raise HTTPException(status_code=403)
+    # Fotos del cliente en solicitudes de mantenimiento: sujetas al interruptor 'client_photos'.
+    if current_user.role == models.UserRole.client and (ticket.category or "").strip().lower() == "mantenimiento":
+        from routers.system import maint_feature_on
+        if not maint_feature_on(db, "client_photos"):
+            raise HTTPException(status_code=403, detail="La carga de fotos está desactivada para mantenimientos")
 
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=400, detail="Tipo de archivo no permitido")

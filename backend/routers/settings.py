@@ -1334,6 +1334,120 @@ def try_send_reschedule_email(ticket_id: int, scheduled_at, duration_minutes: in
         db.close()
 
 
+def _fmt_panama(dt) -> str:
+    """Fecha y hora en formato dd-mm-aaaa HH:mm, hora de Panamá (UTC-5)."""
+    if dt is None:
+        return ""
+    p = timezone(timedelta(hours=-5))
+    local = dt.astimezone(p) if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(p)
+    return local.strftime("%d-%m-%Y %H:%M")
+
+
+def try_send_maintenance_confirmed_email(ticket_id: int, is_reschedule: bool = False, reminder: bool = False):
+    """Correo al contacto de un mantenimiento: fecha/rango, flota, ubicación y técnico.
+    Best-effort: nunca rompe la confirmación ni la reprogramación."""
+    import html as _html
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        cfg = _smtp_cfg(db)
+        if not cfg:
+            return
+        from routers.system import maint_feature_on
+        if not maint_feature_on(db, "pre_reminder" if reminder else "confirm_email"):
+            return
+        ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+        if not ticket or not ticket.maint_confirmed_start:
+            return
+        to = (ticket.maint_contact_email or (ticket.client.email if ticket.client else "") or "").strip()
+        if not to:
+            return
+        esc = lambda v: _html.escape(str(v or ""))
+        name = ticket.maint_contact_name or (ticket.client.name if ticket.client else "Cliente")
+        try:
+            equipment = json.loads(ticket.maint_equipment or "[]")
+        except Exception:
+            equipment = []
+        flota_rows = "".join(
+            f'<tr><td style="padding:6px 0;font-size:13px;color:#1e293b">{esc(e.get("type"))}</td>'
+            f'<td style="padding:6px 0;text-align:right;font-size:13px;font-weight:600;color:#1e293b">{esc(e.get("qty"))}</td></tr>'
+            for e in equipment
+        ) or '<tr><td colspan="2" style="font-size:13px;color:#64748b">Sin detalle de equipos</td></tr>'
+        start_str = _fmt_panama(ticket.maint_confirmed_start)
+        end_dt = ticket.maint_confirmed_end or (ticket.maint_confirmed_start + timedelta(minutes=ticket.duration_minutes or 60))
+        end_str = _fmt_panama(end_dt)
+        tecnico = ticket.assigned_agent.name if ticket.assigned_agent else "Equipo de Dominus Tech"
+        tipo = "Preventivo" if (ticket.maint_type or "").lower() == "preventivo" else "Correctivo"
+        titulo = ("Recordatorio de mantenimiento" if reminder else
+                  "Mantenimiento reprogramado" if is_reschedule else "Mantenimiento confirmado")
+
+        body = _ticket_email_wrap(f"""
+    <p style="font-size:14px;color:#1e293b;margin:0 0 6px;font-weight:600">Estimado/a {esc(name)},</p>
+    <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.6">
+      {'Le recordamos su atención de mantenimiento <strong>' + esc(tipo) + '</strong> programada para los próximos días:' if reminder else 'Le confirmamos el servicio de mantenimiento <strong>' + esc(tipo) + '</strong>' + (' (con nueva fecha)' if is_reschedule else '') + '. Los detalles son:'}
+    </p>
+    <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin-bottom:18px">
+      <div style="background:#0d9488;padding:12px 16px;text-align:center;color:#fff;font-size:15px;font-weight:700">
+        🛠️ &nbsp;{titulo}
+      </div>
+      <div style="background:#fff;padding:4px 16px 8px">
+        <div style="padding:10px 0"><div style="font-size:10px;color:#9ca3af;text-transform:uppercase;font-weight:600">Fecha y hora</div>
+          <div style="font-size:13px;font-weight:600;color:#1e293b">{esc(start_str)} → {esc(end_str)}</div></div>
+        <div style="padding:10px 0;border-top:1px solid #f1f5f9"><div style="font-size:10px;color:#9ca3af;text-transform:uppercase;font-weight:600">Ubicación</div>
+          <div style="font-size:13px;font-weight:600;color:#1e293b">{esc(ticket.location)}</div></div>
+        <div style="padding:10px 0;border-top:1px solid #f1f5f9"><div style="font-size:10px;color:#9ca3af;text-transform:uppercase;font-weight:600">Técnico asignado</div>
+          <div style="font-size:13px;font-weight:600;color:#1e293b">{esc(tecnico)}</div></div>
+        <div style="padding:10px 0;border-top:1px solid #f1f5f9"><div style="font-size:10px;color:#9ca3af;text-transform:uppercase;font-weight:600;margin-bottom:6px">Equipos de la flota</div>
+          <table style="width:100%;border-collapse:collapse">{flota_rows}</table></div>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#475569;margin:0;line-height:1.6">
+      La fecha es aproximada y puede ajustarse; le avisaremos ante cualquier cambio. Ticket #{ticket.id}.
+    </p>""", db)
+
+        subject = f"[Mantenimiento #{ticket.id}] {titulo}: {start_str}"
+        admin_bcc = _get_setting(db, "admin_notification_email") or None
+        reply_to = _get_setting(db, "imap_user") or None
+        _send_with_logo(cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["from_addr"], cfg["use_tls"],
+                        to, subject, body, bcc=_merge_bcc(admin_bcc), reply_to=reply_to, api_key=cfg.get("api_key"))
+    except Exception as e:
+        logging.warning("Maintenance email failed for ticket %s: %s", ticket_id, e)
+    finally:
+        db.close()
+
+
+def send_maintenance_report_email(db: Session, ticket, pdf_bytes: bytes, filename: str) -> tuple:
+    """Envía el informe técnico (PDF adjunto) al contacto del mantenimiento.
+    Devuelve (ok, mensaje). Síncrono para informar el resultado al técnico."""
+    import html as _html
+    cfg = _smtp_cfg(db)
+    if not cfg:
+        return False, "El correo no está configurado en este sistema."
+    to = (ticket.maint_contact_email or (ticket.client.email if ticket.client else "") or "").strip()
+    if not to:
+        return False, "El mantenimiento no tiene correo de contacto."
+    esc = lambda v: _html.escape(str(v or ""))
+    name = ticket.maint_contact_name or (ticket.client.name if ticket.client else "Cliente")
+    folio = ticket.maint_report_folio or f"#{ticket.id}"
+    body = _ticket_email_wrap(f"""
+    <p style="font-size:14px;color:#1e293b;margin:0 0 6px;font-weight:600">Estimado/a {esc(name)},</p>
+    <p style="font-size:13px;color:#475569;margin:0 0 18px;line-height:1.6">
+      Adjuntamos el <strong>informe técnico</strong> ({esc(folio)}) del servicio de mantenimiento realizado en
+      <strong>{esc(ticket.location)}</strong>. Si tiene alguna consulta, responda a este correo.
+    </p>""", db)
+    subject = f"[Informe técnico {folio}] {ticket.title or ''}".strip()
+    admin_bcc = _get_setting(db, "admin_notification_email") or None
+    reply_to = _get_setting(db, "imap_user") or None
+    try:
+        _send_with_logo(cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["from_addr"], cfg["use_tls"],
+                        to, subject, body, bcc=_merge_bcc(admin_bcc), reply_to=reply_to, api_key=cfg.get("api_key"),
+                        file_attachments=[(filename, pdf_bytes, "application/pdf")])
+        return True, "Informe enviado al contacto."
+    except Exception as e:
+        logging.warning("Maintenance report email failed for ticket %s: %s", ticket.id, e)
+        return False, f"No se pudo enviar el correo: {e}"
+
+
 def _imap_cfg(db: Session):
     host = _get_setting(db, "imap_host")
     if not host:

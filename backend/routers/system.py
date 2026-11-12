@@ -78,7 +78,7 @@ def count_staff_users(db: Session) -> int:
     ).scalar() or 0
 
 ALL_MODULES = [
-    "tickets", "agenda", "proyectos", "dashboard_servicios",
+    "tickets", "mantenimiento", "agenda", "proyectos", "dashboard_servicios",
     "reportes", "knowledge_base",
     "contactos", "oportunidades", "cotizaciones", "pedidos",
     "facturas", "gastos", "inventario", "proveedores",
@@ -299,6 +299,74 @@ def update_modules(
         db.add(models.AppSetting(key="system_modules", value=json.dumps(merged)))
     db.commit()
     return merged
+
+
+# ── Interruptores del módulo de mantenimiento (solo superadmin los cambia) ─────
+MAINT_FEATURES = {
+    "public_card": "Tarjeta 'Solicitar mantenimiento' en la landing",
+    "client_photos": "Clientes adjuntan fotos al solicitar",
+    "confirm_email": "Correo al cliente al confirmar o reprogramar",
+    "pre_reminder": "Recordatorio 24–48 h antes (cliente y técnico)",
+    "recurring_plans": "Planes recurrentes y avisos de próximo/vencido",
+    "dashboard": "Dashboard de mantenimiento",
+    "tech_report": "Informe técnico (PDF, envío y descarga)",
+    "client_signature": "Firma de conformidad del cliente",
+    "checklist": "Checklist de trabajo del técnico",
+}
+DEFAULT_MAINT_FEATURES = {k: True for k in MAINT_FEATURES}
+
+
+def get_maint_features(db: Session) -> dict:
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "maintenance_features").first()
+    if not row or not row.value:
+        return dict(DEFAULT_MAINT_FEATURES)
+    try:
+        stored = json.loads(row.value)
+    except Exception:
+        return dict(DEFAULT_MAINT_FEATURES)
+    return {k: bool(stored.get(k, True)) for k in MAINT_FEATURES}
+
+
+def maint_feature_on(db: Session, key: str) -> bool:
+    return get_maint_features(db).get(key, True)
+
+
+@router.get("/maintenance-features")
+def read_maint_features(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(get_current_user),
+):
+    return {"features": get_maint_features(db), "labels": MAINT_FEATURES}
+
+
+@router.get("/maintenance-features/public")
+def read_public_maint_features(db: Session = Depends(get_db)):
+    """Sin sesión: solo lo que la landing y el formulario público necesitan."""
+    feats = get_maint_features(db)
+    return {"public_card": feats["public_card"], "client_photos": feats["client_photos"]}
+
+
+@router.put("/maintenance-features")
+def update_maint_features(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_superadmin),
+):
+    current = get_maint_features(db)
+    changed = {k: bool(v) for k, v in data.items() if k in MAINT_FEATURES}
+    current.update(changed)
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == "maintenance_features").first()
+    if row:
+        row.value = json.dumps(current)
+    else:
+        db.add(models.AppSetting(key="maintenance_features", value=json.dumps(current)))
+    try:
+        from audit_helper import log_action
+        log_action(db, current_user, "config_mantenimiento", "sistema", details={"cambios": changed})
+    except Exception:
+        pass
+    db.commit()
+    return {"features": current, "labels": MAINT_FEATURES}
 
 
 # ── Trial endpoints ───────────────────────────────────────────────────────────

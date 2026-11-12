@@ -1,93 +1,91 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Eraser } from 'lucide-react'
 
-/**
- * Pad de firma sobre <canvas>. Táctil + mouse (pointer events) para móvil/PWA.
- * Llama onChange(dataUrl) al terminar cada trazo, y onChange('') al limpiar.
- */
-export default function SignaturePad({ onChange, height = 150, label = 'Firma' }) {
+// Pad de firma sobre canvas (mouse, táctil y lápiz vía Pointer Events).
+// `value` es el data URL actual; `onChange` recibe el nuevo data URL (o null al borrar).
+export default function SignaturePad({ value, onChange, height = 150, disabled = false }) {
   const canvasRef = useRef(null)
   const drawing = useRef(false)
-  const last = useRef({ x: 0, y: 0 })
-  const [empty, setEmpty] = useState(true)
+  const lastPt = useRef(null)
 
-  // Ajusta el tamaño real del canvas a su contenedor (nítido en pantallas HiDPI).
+  const ctx = () => canvasRef.current.getContext('2d')
+  const cssW = () => canvasRef.current.clientWidth
+
+  // Configura el canvas (resolución de pantalla) y dibuja la firma existente.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
-    const w = canvas.offsetWidth || 300
-    canvas.width = w * dpr
-    canvas.height = height * dpr
-    const ctx = canvas.getContext('2d')
-    ctx.scale(dpr, dpr)
-    ctx.lineWidth = 2
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.strokeStyle = '#111827'
-  }, [height])
+    const c = canvasRef.current
+    const ratio = window.devicePixelRatio || 1
+    c.width = cssW() * ratio
+    c.height = height * ratio
+    const g = c.getContext('2d')
+    g.setTransform(ratio, 0, 0, ratio, 0, 0)
+    g.lineWidth = 2.2
+    g.lineCap = 'round'
+    g.lineJoin = 'round'
+    g.strokeStyle = '#0f172a'
+    if (value) {
+      const img = new Image()
+      img.onload = () => g.drawImage(img, 0, 0, cssW(), height)
+      img.src = value
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const pos = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const r = canvasRef.current.getBoundingClientRect()
+    return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
 
-  const start = (e) => {
+  const onDown = (e) => {
+    if (disabled) return
     e.preventDefault()
+    canvasRef.current.setPointerCapture?.(e.pointerId)
     drawing.current = true
-    last.current = pos(e)
+    lastPt.current = pos(e)
   }
 
-  const move = (e) => {
+  const onMove = (e) => {
     if (!drawing.current) return
     e.preventDefault()
-    const ctx = canvasRef.current.getContext('2d')
     const p = pos(e)
-    ctx.beginPath()
-    ctx.moveTo(last.current.x, last.current.y)
-    ctx.lineTo(p.x, p.y)
-    ctx.stroke()
-    last.current = p
-    if (empty) setEmpty(false)
+    const g = ctx()
+    g.beginPath()
+    g.moveTo(lastPt.current.x, lastPt.current.y)
+    g.lineTo(p.x, p.y)
+    g.stroke()
+    lastPt.current = p
   }
 
-  const end = (e) => {
+  const onUp = () => {
     if (!drawing.current) return
-    e.preventDefault()
     drawing.current = false
-    if (!empty && onChange) onChange(canvasRef.current.toDataURL('image/png'))
+    onChange?.(canvasRef.current.toDataURL('image/png'))
   }
 
   const clear = () => {
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    setEmpty(true)
-    if (onChange) onChange('')
+    ctx().clearRect(0, 0, cssW(), height)
+    onChange?.(null)
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium text-gray-600">{label}</span>
-        <button
-          type="button"
-          onClick={clear}
-          className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors"
-        >
-          <Eraser size={13} /> Limpiar
-        </button>
+      <div className="relative rounded-lg border-2 border-dashed border-gray-300 bg-white" style={{ touchAction: 'none' }}>
+        <canvas
+          ref={canvasRef}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerLeave={onUp}
+          onPointerCancel={onUp}
+          style={{ width: '100%', height: `${height}px`, display: 'block', cursor: disabled ? 'default' : 'crosshair' }}
+        />
+        {!value && <p className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 pointer-events-none">Firme aquí</p>}
       </div>
-      <canvas
-        ref={canvasRef}
-        style={{ height, touchAction: 'none', width: '100%' }}
-        className="border border-gray-300 rounded-lg bg-white cursor-crosshair"
-        onPointerDown={start}
-        onPointerMove={move}
-        onPointerUp={end}
-        onPointerLeave={end}
-      />
-      {empty && <p className="text-[11px] text-gray-400 mt-1">Firma aquí con el dedo o el mouse</p>}
+      {!disabled && (
+        <button type="button" onClick={clear} className="mt-2 text-xs font-medium text-gray-500 hover:text-gray-800 flex items-center gap-1">
+          <Eraser size={12} /> Borrar firma
+        </button>
+      )}
     </div>
   )
 }

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { companyLogoUrl, getPublicCompanyInfo } from '../services/api'
+import { useMaintFeatures, featureOn } from '../utils/maintFeatures'
 import defaultLogo from '../assets/default-logo.png'
 import dgsLogo from '../assets/dgs-logo.png'
-import { LifeBuoy, ShoppingCart, Ticket, Package, ArrowRight, LogIn } from 'lucide-react'
+import { LifeBuoy, ShoppingCart, Ticket, Package, ArrowRight, LogIn, Wrench } from 'lucide-react'
 
 export default function PublicLanding() {
+  const maintFeatures = useMaintFeatures({ publicOnly: true })
   const navigate = useNavigate()
   const [info, setInfo] = useState({ company_name: '', company_sidebar_color: '' })
   useEffect(() => { getPublicCompanyInfo().then((r) => setInfo(r.data || {})).catch(() => {}) }, [])
@@ -41,7 +43,7 @@ export default function PublicLanding() {
             <p className="text-blue-200 mt-2">¿Cómo te ayudamos hoy? Levanta un ticket o solicita un pedido.</p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
             <button
               onClick={() => navigate('/solicitar?tipo=ticket')}
               className="group relative overflow-hidden rounded-2xl p-6 sm:p-8 text-left bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-lg hover:shadow-xl transition-all hover:-translate-y-0.5"
@@ -63,6 +65,18 @@ export default function PublicLanding() {
               <span className="inline-flex items-center gap-1 text-sm font-semibold mt-4">Empezar <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" /></span>
               <Package size={120} className="absolute -right-6 -bottom-6 text-white/10" />
             </button>
+            {featureOn(maintFeatures, 'public_card') && (
+            <button
+              onClick={() => navigate('/solicitar?tipo=mantenimiento')}
+              className="group relative overflow-hidden rounded-2xl p-6 sm:p-8 text-left bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-lg hover:shadow-xl transition-all hover:-translate-y-0.5"
+            >
+              <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center mb-4"><Wrench size={26} /></div>
+              <h2 className="text-xl font-bold">Solicitar mantenimiento</h2>
+              <p className="text-white/80 text-sm mt-1">Programa un mantenimiento preventivo o correctivo para tu equipo o flota.</p>
+              <span className="inline-flex items-center gap-1 text-sm font-semibold mt-4">Empezar <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" /></span>
+              <Wrench size={120} className="absolute -right-6 -bottom-6 text-white/10" />
+            </button>
+            )}
           </div>
 
           <p className="text-center text-xs text-blue-200/50 mt-6">Al enviar te pediremos iniciar sesión o crear una cuenta (gratis).</p>

@@ -28,10 +28,12 @@ function evKey(ev) {
   return `ticket-${ev.ticket_id}`
 }
 const REMOTE_COLOR = '#7C3AED' // violet-600
+const MAINT_COLOR = '#0D9488' // teal-600: mantenimiento
 
 function evColor(ev) {
   if (ev.visit_status === 'cancelled') return '#EF4444'
   if (ev.is_remote) return REMOTE_COLOR
+  if (ev.is_maintenance) return MAINT_COLOR
   if (ev.source === 'google') return GOOGLE_COLOR
   return ev.status?.color || '#3B82F6'
 }

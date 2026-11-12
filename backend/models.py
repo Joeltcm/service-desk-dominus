@@ -122,6 +122,26 @@ class Ticket(Base):
     csat_submitted_at = Column(DateTime(timezone=True), nullable=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     project_weight = Column(Float, nullable=True)  # % weight within project (0-100)
+    # ── Mantenimiento (solo categoría 'Mantenimiento'; todo nullable) ──
+    maint_type = Column(String(20), nullable=True)            # preventivo | correctivo
+    maint_equipment = Column(Text, nullable=True)             # JSON [{"type","qty"}] (flota)
+    maint_requested_date = Column(Date, nullable=True)        # fecha propuesta por el cliente
+    maint_confirmed_start = Column(DateTime(timezone=True), nullable=True)
+    maint_confirmed_end = Column(DateTime(timezone=True), nullable=True)
+    maint_suggested_date = Column(Date, nullable=True)        # fecha sugerida del plan al crear el servicio
+    maint_plan_id = Column(Integer, ForeignKey("maintenance_plans.id"), nullable=True)
+    maint_contact_name = Column(String(150), nullable=True)
+    maint_contact_email = Column(String(150), nullable=True)
+    maint_contact_phone = Column(String(50), nullable=True)
+    maint_work_done = Column(Text, nullable=True)             # informe técnico
+    maint_observations = Column(Text, nullable=True)
+    maint_recommendations = Column(Text, nullable=True)
+    maint_checklist = Column(Text, nullable=True)             # JSON [{"task","done"}]
+    maint_report_folio = Column(String(20), nullable=True)    # MANT-0001…
+    maint_client_signature = Column(Text, nullable=True)      # data URL PNG
+    maint_client_sign_name = Column(String(150), nullable=True)
+    maint_client_sign_at = Column(DateTime(timezone=True), nullable=True)
+    maint_reminder_sent = Column(Date, nullable=True)         # marcador del recordatorio previo
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     closed_at = Column(DateTime(timezone=True), nullable=True)
@@ -135,6 +155,35 @@ class Ticket(Base):
     attachments = relationship("TicketAttachment", back_populates="ticket")
     visits = relationship("TicketVisit", back_populates="ticket", order_by="TicketVisit.created_at", cascade="all, delete-orphan")
     project = relationship("Project", back_populates="tickets", foreign_keys=[project_id])
+
+
+class MaintenancePlan(Base):
+    """Plan de mantenimiento recurrente (preventivo) para una flota de un cliente.
+    La recurrencia y la próxima fecha sugerida viven aquí; cada atención es un ticket
+    de categoría 'Mantenimiento' ligado vía Ticket.maint_plan_id."""
+    __tablename__ = "maintenance_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    maint_type = Column(String(20), default="preventivo")
+    equipment = Column(Text, nullable=True)                   # JSON [{"type","qty"}] (flota)
+    frequency_months = Column(Integer, nullable=False, default=6)
+    last_service_date = Column(Date, nullable=True)
+    next_suggested_date = Column(Date, nullable=True)
+    status = Column(String(20), default="active")             # active | paused | cancelled
+    contact_name = Column(String(150), nullable=True)
+    contact_email = Column(String(150), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    location = Column(String(255), nullable=True)
+    last_reminder_sent_for = Column(String(20), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    client = relationship("User", foreign_keys=[client_id])
+    services = relationship("Ticket", foreign_keys="Ticket.maint_plan_id")
 
 
 class Project(Base):

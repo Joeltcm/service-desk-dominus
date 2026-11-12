@@ -38,6 +38,8 @@ import ClientPortal from './pages/ClientPortal'
 import MisPedidos from './pages/MisPedidos'
 import PublicLanding from './pages/PublicLanding'
 import PublicRequest from './pages/PublicRequest'
+import Mantenimiento from './pages/Mantenimiento'
+import MantenimientoDashboard from './pages/MantenimientoDashboard'
 import PendingRequestHandler from './components/PendingRequestHandler'
 import ResetPassword from './pages/ResetPassword'
 import Letters from './pages/Letters'
@@ -114,6 +116,8 @@ function AppRoutes() {
       <Route path="/tickets/:id" element={<PrivateRoute><TicketDetail /></PrivateRoute>} />
       <Route path="/tickets/:id/edit" element={<PrivateRoute><TicketForm /></PrivateRoute>} />
       <Route path="/agenda" element={<PrivateRoute><Agenda /></PrivateRoute>} />
+      <Route path="/mantenimiento" element={<PrivateRoute roles={['admin', 'agent', 'supervisor', 'superadmin']}><Mantenimiento /></PrivateRoute>} />
+      <Route path="/mantenimiento/dashboard" element={<PrivateRoute roles={['admin', 'agent', 'supervisor', 'superadmin']}><MantenimientoDashboard /></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
       <Route path="/contacts" element={<PrivateRoute roles={['admin', 'agent', 'supervisor']}><Contacts /></PrivateRoute>} />
       <Route path="/quotes/:ref?" element={<PrivateRoute roles={['admin', 'agent', 'ventas', 'supervisor']}><Quotes /></PrivateRoute>} />

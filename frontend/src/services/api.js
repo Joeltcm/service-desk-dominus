@@ -76,6 +76,25 @@ export const getTicketAssignedCounts = () => api.get('/tickets/assigned-counts')
 export const getTicket = (id) => api.get(`/tickets/${id}`)
 export const createTicket = (data) => api.post('/tickets', data)
 export const updateTicket = (id, data) => api.put(`/tickets/${id}`, data)
+
+// Mantenimiento (categoría 'Mantenimiento')
+export const confirmMaintenance = (id, data) => api.post(`/tickets/${id}/maint-confirm`, data)
+export const rescheduleMaintenance = (id, data) => api.post(`/tickets/${id}/maint-reschedule`, data)
+export const getMaintReport = (id) => api.get(`/tickets/${id}/maint-report`)
+export const saveMaintReport = (id, data) => api.put(`/tickets/${id}/maint-report`, data)
+export const emailMaintReport = (id, pdf_base64) => api.post(`/tickets/${id}/maint-report/email`, { pdf_base64 })
+
+// Planes de mantenimiento recurrente y métricas
+export const getMaintPlans = (params) => api.get('/maintenance/plans', { params })
+export const createMaintPlan = (data) => api.post('/maintenance/plans', data)
+export const updateMaintPlan = (id, data) => api.put(`/maintenance/plans/${id}`, data)
+export const createPlanService = (id) => api.post(`/maintenance/plans/${id}/crear-servicio`)
+export const getMaintStats = () => api.get('/maintenance/stats')
+
+// Interruptores del módulo de mantenimiento
+export const getMaintFeatures = () => api.get('/system/maintenance-features')
+export const getPublicMaintFeatures = () => api.get('/system/maintenance-features/public')
+export const updateMaintFeatures = (data) => api.put('/system/maintenance-features', data)
 export const deleteTicket = (id) => api.delete(`/tickets/${id}`)
 export const deleteTickets = (ids) => api.post('/tickets/bulk-delete', { ids })
 export const linkTicket = (id, parentId) => api.post(`/tickets/${id}/link`, { parent_id: parentId })

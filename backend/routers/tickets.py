@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from database import get_db
 import models, schemas
@@ -287,6 +287,18 @@ def create_ticket(
         client = db.query(models.User).filter(models.User.id == ticket_data["client_id"]).first()
         if client and client.address:
             ticket_data["location"] = client.address
+    # Solicitud de mantenimiento: el cliente debe dar contacto y ubicación (obligatorios).
+    is_maint = (ticket_data.get("category") or "").strip().lower() == "mantenimiento"
+    if is_maint and current_user.role == models.UserRole.client:
+        required = [
+            ("nombre de contacto", ticket_data.get("maint_contact_name")),
+            ("correo", ticket_data.get("maint_contact_email")),
+            ("teléfono", ticket_data.get("maint_contact_phone")),
+            ("ubicación", ticket_data.get("location")),
+        ]
+        missing = [label for label, val in required if not (val or "").strip()]
+        if missing:
+            raise HTTPException(status_code=422, detail="Faltan datos obligatorios: " + ", ".join(missing))
     ticket = models.Ticket(**ticket_data)
     ticket.created_by_id = current_user.id
     db.add(ticket)
@@ -312,6 +324,23 @@ def create_ticket(
     db.add(entry)
     db.commit()
     db.refresh(ticket)
+
+    # Mantenimiento: campana + push al staff (superadmin/admin/supervisor/agente).
+    if is_maint:
+        try:
+            from notify import notify_roles
+            cname = ticket.client.name if ticket.client else "Cliente"
+            notify_roles(
+                db,
+                [models.UserRole.superadmin, models.UserRole.admin, models.UserRole.supervisor, models.UserRole.agent],
+                f"🔧 Solicitud de mantenimiento: {cname}",
+                ticket.title or "",
+                url=f"/tickets/{ticket.id}", kind="maintenance",
+                exclude_user_id=current_user.id,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
 
     # Aviso al agente asignado al crear (campana + push), salvo autoasignación.
     if ticket.assigned_to_id and ticket.assigned_to_id != current_user.id:
@@ -348,9 +377,275 @@ def create_ticket(
                 notify_agents(_db, f"🎫 Nuevo ticket de {client_name}", title, f"/tickets/{ticket_id}", exclude_user_id=creator_id)
         finally:
             _db.close()
-    background_tasks.add_task(_push_new_ticket, ticket.id, ticket.client.name if ticket.client else "Cliente", ticket.title, current_user.id)
+    if not is_maint:  # el mantenimiento ya avisó a su staff arriba (evita push duplicado)
+        background_tasks.add_task(_push_new_ticket, ticket.id, ticket.client.name if ticket.client else "Cliente", ticket.title, current_user.id)
 
     return ticket
+
+
+def _get_maint_ticket(db: Session, ticket_id: int) -> models.Ticket:
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id, models.Ticket.deleted_at.is_(None)).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+    if (ticket.category or "").strip().lower() != "mantenimiento":
+        raise HTTPException(status_code=400, detail="Este ticket no es de mantenimiento")
+    return ticket
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Fechas sin zona se interpretan como hora de Panamá; se guardan en UTC."""
+    from zoneinfo import ZoneInfo
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("America/Panama"))
+    return dt.astimezone(timezone.utc)
+
+
+@router.post("/{ticket_id}/maint-confirm", response_model=schemas.TicketOut)
+def maint_confirm(
+    ticket_id: int,
+    data: schemas.MaintConfirmIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_agent_or_admin),
+):
+    """Confirma un mantenimiento: fija fecha/rango, asigna técnico, agenda la visita
+    (calendario + Programado) y avisa al cliente por campana y correo."""
+    from routers.calendar import create_ticket_visit
+    from routers.settings import try_send_maintenance_confirmed_email, _fmt_panama
+    ticket = _get_maint_ticket(db, ticket_id)
+    already = db.query(models.TicketVisit).filter(
+        models.TicketVisit.ticket_id == ticket.id, models.TicketVisit.status == "scheduled").count()
+    if already:
+        raise HTTPException(status_code=400, detail="Este mantenimiento ya está confirmado. Usa reprogramar.")
+
+    start = _as_utc(data.scheduled_at)
+    end = _as_utc(data.confirmed_end) if data.confirmed_end else start + timedelta(minutes=data.duration_minutes)
+    if end <= start:
+        raise HTTPException(status_code=400, detail="La fecha de fin debe ser posterior al inicio")
+
+    if data.equipment is not None:
+        ticket.maint_equipment = data.equipment
+    if data.location and data.location.strip():
+        ticket.location = data.location.strip()
+    if data.assigned_to_id:
+        ticket.assigned_to_id = data.assigned_to_id
+    ticket.maint_confirmed_start = start
+    ticket.maint_confirmed_end = end
+    ticket.duration_minutes = data.duration_minutes
+    db.commit()
+
+    # Visita en la Agenda. El correo de reagendado se descarta (BackgroundTasks propio
+    # no ejecutado): el correo de mantenimiento es el único aviso al contacto.
+    create_ticket_visit(
+        schemas.CalendarVisitCreate(
+            ticket_id=ticket.id, scheduled_at=start, duration_minutes=data.duration_minutes,
+            location=ticket.location, subject=ticket.title, notes=data.notes,
+        ),
+        BackgroundTasks(), db, current_user,
+    )
+    db.refresh(ticket)
+
+    try:
+        from notify import create_notification
+        create_notification(
+            db, ticket.client_id,
+            "🛠️ Mantenimiento confirmado",
+            f"Atención programada: {_fmt_panama(start)} → {_fmt_panama(end)}",
+            url=f"/tickets/{ticket.id}", kind="maintenance",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    # Aviso al técnico asignado (campana + push).
+    if ticket.assigned_to_id:
+        try:
+            from notify import create_notification as _notify
+            _notify(db, ticket.assigned_to_id, "Mantenimiento asignado",
+                    f"{ticket.title} · {_fmt_panama(start)} → {_fmt_panama(end)}",
+                    url=f"/tickets/{ticket.id}", kind="maintenance")
+            db.commit()
+        except Exception:
+            db.rollback()
+    background_tasks.add_task(try_send_maintenance_confirmed_email, ticket.id, False)
+    return ticket
+
+
+@router.post("/{ticket_id}/maint-reschedule", response_model=schemas.TicketOut)
+def maint_reschedule(
+    ticket_id: int,
+    data: schemas.MaintRescheduleIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_agent_or_admin),
+):
+    """Reprograma o extiende un mantenimiento ya confirmado: mueve la visita del calendario,
+    deja constancia en la línea de tiempo, avisa al cliente y reenvía el correo."""
+    from routers.calendar import reschedule_ticket_visit
+    from routers.settings import try_send_maintenance_confirmed_email, _fmt_panama
+    ticket = _get_maint_ticket(db, ticket_id)
+    visit = db.query(models.TicketVisit).filter(
+        models.TicketVisit.ticket_id == ticket.id, models.TicketVisit.status == "scheduled",
+    ).order_by(models.TicketVisit.scheduled_at.desc()).first()
+    if not visit:
+        raise HTTPException(status_code=400, detail="Aún no hay una fecha confirmada para reprogramar")
+
+    start = _as_utc(data.scheduled_at)
+    end = _as_utc(data.confirmed_end) if data.confirmed_end else start + timedelta(minutes=data.duration_minutes)
+    if end <= start:
+        raise HTTPException(status_code=400, detail="La fecha de fin debe ser posterior al inicio")
+
+    reschedule_ticket_visit(
+        visit.id,
+        schemas.CalendarVisitUpdate(scheduled_at=start, duration_minutes=data.duration_minutes, location=ticket.location),
+        db, current_user,
+    )
+    old = _fmt_panama(ticket.maint_confirmed_start)
+    ticket.maint_confirmed_start = start
+    ticket.maint_confirmed_end = end
+    ticket.duration_minutes = data.duration_minutes
+    detalle = f" Motivo: {data.reason.strip()}" if data.reason and data.reason.strip() else ""
+    db.add(models.TicketTimeline(
+        ticket_id=ticket.id, user_id=current_user.id, entry_type="calendar",
+        content=f"Mantenimiento reprogramado de {old} a {_fmt_panama(start)} → {_fmt_panama(end)}.{detalle}",
+    ))
+    db.commit()
+    db.refresh(ticket)
+
+    try:
+        from notify import create_notification
+        create_notification(
+            db, ticket.client_id, "🛠️ Mantenimiento reprogramado",
+            f"Nueva atención: {_fmt_panama(start)} → {_fmt_panama(end)}",
+            url=f"/tickets/{ticket.id}", kind="maintenance",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    background_tasks.add_task(try_send_maintenance_confirmed_email, ticket.id, True)
+    return ticket
+
+
+def _next_folio(db: Session) -> str:
+    """Folio consecutivo del informe técnico: MANT-0001, MANT-0002…"""
+    rows = db.query(models.Ticket.maint_report_folio).filter(models.Ticket.maint_report_folio.isnot(None)).all()
+    nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
+    return f"MANT-{(max(nums) if nums else 0) + 1:04d}"
+
+
+def _maint_report_payload(ticket: models.Ticket) -> dict:
+    import json as _json
+    def _load(s, default):
+        try:
+            return _json.loads(s) if s else default
+        except Exception:
+            return default
+    return {
+        "id": ticket.id,
+        "title": ticket.title,
+        "folio": ticket.maint_report_folio,
+        "maint_type": ticket.maint_type,
+        "equipment": _load(ticket.maint_equipment, []),
+        "location": ticket.location,
+        "requested_date": ticket.maint_requested_date.isoformat() if ticket.maint_requested_date else None,
+        "confirmed_start": ticket.maint_confirmed_start.isoformat() if ticket.maint_confirmed_start else None,
+        "confirmed_end": ticket.maint_confirmed_end.isoformat() if ticket.maint_confirmed_end else None,
+        "technician": ticket.assigned_agent.name if ticket.assigned_agent else None,
+        "client": {"name": ticket.client.name if ticket.client else "", "company": ticket.client.company if ticket.client else ""},
+        "contact": {"name": ticket.maint_contact_name, "email": ticket.maint_contact_email, "phone": ticket.maint_contact_phone},
+        "work_done": ticket.maint_work_done,
+        "observations": ticket.maint_observations,
+        "recommendations": ticket.maint_recommendations,
+        "checklist": _load(ticket.maint_checklist, []),
+        "client_signature": ticket.maint_client_signature,
+        "client_sign_name": ticket.maint_client_sign_name,
+        "client_sign_at": ticket.maint_client_sign_at.isoformat() if ticket.maint_client_sign_at else None,
+    }
+
+
+@router.get("/{ticket_id}/maint-report")
+def get_maint_report(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Datos del informe técnico. Staff o el cliente dueño del ticket."""
+    from routers.system import maint_feature_on
+    ticket = _get_maint_ticket(db, ticket_id)
+    if current_user.role == models.UserRole.client:
+        if ticket.client_id != current_user.id:
+            raise HTTPException(status_code=403, detail="No autorizado")
+        if not maint_feature_on(db, "tech_report"):
+            raise HTTPException(status_code=404, detail="El informe técnico no está disponible")
+    return _maint_report_payload(ticket)
+
+
+@router.put("/{ticket_id}/maint-report")
+def save_maint_report(
+    ticket_id: int,
+    data: schemas.MaintReportIn,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_agent_or_admin),
+):
+    """Guarda el informe técnico y asigna folio (la primera vez). Registra la firma del cliente."""
+    from routers.system import maint_feature_on
+    if not maint_feature_on(db, "tech_report"):
+        raise HTTPException(status_code=403, detail="El informe técnico está desactivado en la configuración")
+    ticket = _get_maint_ticket(db, ticket_id)
+    if data.work_done is not None:
+        ticket.maint_work_done = data.work_done
+    if data.observations is not None:
+        ticket.maint_observations = data.observations
+    if data.recommendations is not None:
+        ticket.maint_recommendations = data.recommendations
+    if data.checklist is not None and maint_feature_on(db, "checklist"):
+        ticket.maint_checklist = data.checklist
+    if data.client_signature and maint_feature_on(db, "client_signature"):
+        ticket.maint_client_signature = data.client_signature
+        ticket.maint_client_sign_name = (data.client_sign_name or ticket.maint_contact_name or "").strip() or None
+        ticket.maint_client_sign_at = datetime.now(timezone.utc)
+    new_folio = not ticket.maint_report_folio
+    if new_folio:
+        ticket.maint_report_folio = _next_folio(db)
+    db.add(models.TicketTimeline(
+        ticket_id=ticket.id, user_id=current_user.id, entry_type="system",
+        content=(f"Informe técnico {ticket.maint_report_folio} generado" if new_folio else
+                 f"Informe técnico {ticket.maint_report_folio} actualizado"),
+    ))
+    db.commit()
+    db.refresh(ticket)
+    return _maint_report_payload(ticket)
+
+
+@router.post("/{ticket_id}/maint-report/email")
+def email_maint_report(
+    ticket_id: int,
+    data: schemas.MaintEmailIn,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_agent_or_admin),
+):
+    """Envía el informe técnico (PDF generado en el navegador) al contacto del mantenimiento."""
+    import base64 as _b64
+    from routers.settings import send_maintenance_report_email
+    from routers.system import maint_feature_on
+    if not maint_feature_on(db, "tech_report"):
+        raise HTTPException(status_code=403, detail="El informe técnico está desactivado en la configuración")
+    ticket = _get_maint_ticket(db, ticket_id)
+    if not ticket.maint_report_folio:
+        raise HTTPException(status_code=400, detail="Guarda el informe antes de enviarlo")
+    try:
+        pdf = _b64.b64decode(data.pdf_base64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="PDF inválido")
+    filename = f"{ticket.maint_report_folio}.pdf"
+    ok, msg = send_maintenance_report_email(db, ticket, pdf, filename)
+    if not ok:
+        raise HTTPException(status_code=503, detail=msg)
+    db.add(models.TicketTimeline(
+        ticket_id=ticket.id, user_id=current_user.id, entry_type="system",
+        content=f"Informe técnico {ticket.maint_report_folio} enviado al contacto ({ticket.maint_contact_email or 'correo del cliente'})",
+    ))
+    db.commit()
+    return {"ok": True, "message": msg}
 
 
 @router.get("/assigned-counts")
@@ -476,9 +771,14 @@ def update_ticket(
         )
         db.add(entry)
         if new_status and new_status.name.lower() in ["resuelto", "resolved", "cerrado", "closed", "entregado"]:
+            was_closed = ticket.closed_at is not None
             ticket.closed_at = datetime.now(timezone.utc)
             # Auto-asignación al resolver: si está sin asignar, el que resuelve lo toma.
             _maybe_autoassign(db, ticket, current_user, "resolver")
+            # Atención de un plan de mantenimiento: avanza la recurrencia (solo al cerrar por primera vez).
+            if ticket.maint_plan_id and not was_closed:
+                from routers.maintenance import advance_plan_after_service
+                advance_plan_after_service(db, ticket)
 
         # SLA: pausar o reanudar según el nuevo estado
         now = datetime.utcnow()

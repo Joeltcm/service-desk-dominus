@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createTicket, createClientDispatch, getStatuses } from '../services/api'
+import { missingMaintFields, buildMaintTicket } from '../utils/maintenance'
 import toast from 'react-hot-toast'
 
 /**
@@ -26,7 +27,16 @@ export default function PendingRequestHandler() {
     localStorage.removeItem('pendingRequest')
     ;(async () => {
       try {
-        if (draft.type === 'pedido') {
+        if (draft.type === 'mantenimiento') {
+          const missing = missingMaintFields(draft)
+          if (missing.length) throw new Error(`Faltan datos: ${missing.join(', ')}`)
+          const r = await getStatuses().catch(() => ({ data: [] }))
+          const st = r.data || []
+          const statusId = (st.find((s) => /abierto|nuevo|open/i.test(s.name)) || st[0])?.id
+          await createTicket(buildMaintTicket(draft, { statusId, clientId: user.id }))
+          toast.success('¡Listo! Tu solicitud de mantenimiento fue enviada.')
+          navigate('/tickets')
+        } else if (draft.type === 'pedido') {
           await createClientDispatch({ title: draft.title, notes: draft.notes || null, items: draft.items || null })
           toast.success('¡Listo! Tu pedido fue enviado. Un agente lo revisará.')
           navigate('/mis-pedidos')

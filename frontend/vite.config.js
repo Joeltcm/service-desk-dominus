@@ -81,7 +81,9 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api': 'http://localhost:8080',
+      // Permite apuntar a otro backend local (p. ej. correr Dominus en paralelo
+      // al repo original) sin tocar el código: VITE_API_TARGET=http://localhost:8081
+      '/api': process.env.VITE_API_TARGET || 'http://localhost:8080',
     },
   },
 })

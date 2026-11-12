@@ -6,10 +6,11 @@ import { NavLink, useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { useTouchSwipe } from '../utils/useTouchSwipe'
 import { useAuth } from '../context/AuthContext'
 import { getTrialStatus, getBillingStatus, getTicketAssignedCounts, getDispatchAssignedCounts } from '../services/api'
+import { useMaintFeatures, featureOn } from '../utils/maintFeatures'
 import { useUnsavedChanges } from '../context/UnsavedChangesContext'
 import {
   LayoutDashboard, Ticket, BookOpen, BarChart2,
-  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle, Home, AlertTriangle
+  LogOut, Menu, X, ChevronDown, CalendarDays, UserCircle, ContactRound, Truck, ShoppingCart, ShieldCheck, PackageCheck, ClipboardList, Receipt, TrendingUp, Settings, Settings2, TrendingDown, FileText, Mail, Trash2, Package, Banknote, HandCoins, Wallet, Target, KeyRound, Plus, Smartphone, FolderKanban, FileSignature, Printer, Layers, Clock, Lock, QrCode, Boxes, HelpCircle, Home, AlertTriangle, Wrench
 } from 'lucide-react'
 import TicketScanner from './TicketScanner'
 import NotificationBell from './NotificationBell'
@@ -25,6 +26,8 @@ const navItems = [
   { to: '/ventas',            group: 'main',      subgroup: null,       featureKey: 'dashboard_ventas',    moduleKey: 'dashboard_ventas',    label: 'Dashboard Ventas',      icon: TrendingUp,      roles: ['admin', 'supervisor', 'agent', 'ventas', 'superadmin'],  color: 'text-emerald-500', bg: 'bg-emerald-500/15' },
   { to: '/inicio',            group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: null,                  label: 'Inicio',                icon: Home,            roles: ['client'],                    color: 'text-blue-500',    bg: 'bg-blue-500/15' },
   { to: '/tickets',           group: 'main',      subgroup: null,       featureKey: 'tickets',             moduleKey: 'tickets',             label: 'Tickets',               icon: Ticket,          roles: ['admin', 'supervisor', 'agent', 'client', 'supplies', 'superadmin'], color: 'text-orange-500',  bg: 'bg-orange-500/15' },
+  { to: '/mantenimiento',     group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: 'mantenimiento',       label: 'Mantenimiento',         icon: Wrench,          roles: ['admin', 'supervisor', 'agent', 'superadmin'],            color: 'text-teal-500',    bg: 'bg-teal-500/15' },
+  { to: '/mantenimiento/dashboard', group: 'main', subgroup: null,   featureKey: null,                  moduleKey: 'mantenimiento',       label: 'Dashboard Mantenimiento', icon: BarChart2,  roles: ['admin', 'supervisor', 'agent', 'superadmin'],            color: 'text-teal-600',    bg: 'bg-teal-500/15' },
   { to: '/mis-pedidos',       group: 'main',      subgroup: null,       featureKey: null,                  moduleKey: null,                  label: 'Mis Pedidos',           icon: Package,         roles: ['client'],                    color: 'text-blue-500',    bg: 'bg-blue-500/15' },
   { to: '/mis-documentos',    group: 'main',      subgroup: null,       featureKey: 'mis_documentos',      moduleKey: null,                  label: 'Mis Documentos',        icon: FileText,        roles: ['client'],                    color: 'text-indigo-500',  bg: 'bg-indigo-500/15' },
   { to: '/agenda',            group: 'main',      subgroup: null,       featureKey: 'agenda',              moduleKey: 'agenda',              label: 'Agenda',                icon: CalendarDays,    roles: ['admin', 'supervisor', 'agent', 'client', 'superadmin'],  color: 'text-violet-500',  bg: 'bg-violet-500/15' },
@@ -229,6 +232,7 @@ export default function Layout({ children }) {
   const { company_name: companyName, company_app_name: appName, company_sidebar_color: sidebarColor, has_logo: hasLogo } = useCompany()
   const logoSrc = hasLogo ? '/api/settings/logo' : defaultLogo
   const { modules } = useModules()
+  const mantFeatures = useMaintFeatures()
 
   useEffect(() => {
     const name = appName || companyName || 'Service Desk'
@@ -253,6 +257,7 @@ export default function Layout({ children }) {
   const mainSwipe    = useTouchSwipe({ onSwipeRight: () => setMobileOpen(true), edgeOnly: 24 })
   const visibleItems = navItems.filter(item => {
     if (!item.roles.includes(user?.role)) return false
+    if (item.to === '/mantenimiento/dashboard' && !featureOn(mantFeatures, 'dashboard')) return false
     // superadmin sees all modules always
     if (user?.role === 'superadmin') return true
     // while modules are loading (null), hide any item that has a moduleKey

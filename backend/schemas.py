@@ -144,6 +144,46 @@ class TicketCreate(BaseModel):
     scheduled_at: Optional[datetime] = None
     tags: Optional[str] = Field(None, max_length=500)
     project_id: Optional[int] = None
+    # ── Mantenimiento (solo categoría 'Mantenimiento') ──
+    maint_type: Optional[str] = Field(None, max_length=20)          # preventivo | correctivo
+    maint_equipment: Optional[str] = None                           # JSON [{"type","qty"}]
+    maint_requested_date: Optional[_Date] = None
+    maint_contact_name: Optional[str] = Field(None, max_length=150)
+    maint_contact_email: Optional[str] = Field(None, max_length=150)
+    maint_contact_phone: Optional[str] = Field(None, max_length=50)
+
+
+class MaintConfirmIn(BaseModel):
+    """Confirmación del agente: equipos/ubicación corregidos + fecha/hora o rango."""
+    equipment: Optional[str] = None            # JSON [{"type","qty"}] (si se corrige la flota)
+    location: Optional[str] = Field(None, max_length=255)
+    scheduled_at: datetime                     # inicio (fecha y hora)
+    confirmed_end: Optional[datetime] = None   # fin del rango aproximado (opcional)
+    duration_minutes: int = Field(60, ge=15, le=2880)
+    assigned_to_id: Optional[int] = None       # técnico asignado
+    notes: Optional[str] = None
+
+
+class MaintReportIn(BaseModel):
+    """Informe técnico: lo llena el técnico al atender y, si aplica, la firma del cliente."""
+    work_done: Optional[str] = Field(None, max_length=10000)
+    observations: Optional[str] = Field(None, max_length=10000)
+    recommendations: Optional[str] = Field(None, max_length=10000)
+    checklist: Optional[str] = None            # JSON [{"task","done"}]
+    client_signature: Optional[str] = None     # data URL PNG de la firma
+    client_sign_name: Optional[str] = Field(None, max_length=150)
+
+
+class MaintEmailIn(BaseModel):
+    pdf_base64: str                            # PDF generado en el navegador
+
+
+class MaintRescheduleIn(BaseModel):
+    """Reprogramar / extender el servicio ya agendado."""
+    scheduled_at: datetime
+    confirmed_end: Optional[datetime] = None
+    duration_minutes: int = Field(60, ge=15, le=2880)
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class TicketUpdate(BaseModel):
@@ -245,6 +285,24 @@ class TicketOut(BaseModel):
     csat_submitted_at: Optional[datetime] = None
     project_id: Optional[int] = None
     project: Optional["ProjectMini"] = None
+    # ── Mantenimiento ──
+    maint_type: Optional[str] = None
+    maint_equipment: Optional[str] = None
+    maint_requested_date: Optional[_Date] = None
+    maint_confirmed_start: Optional[datetime] = None
+    maint_confirmed_end: Optional[datetime] = None
+    maint_suggested_date: Optional[_Date] = None
+    maint_plan_id: Optional[int] = None
+    maint_contact_name: Optional[str] = None
+    maint_contact_email: Optional[str] = None
+    maint_contact_phone: Optional[str] = None
+    maint_work_done: Optional[str] = None
+    maint_observations: Optional[str] = None
+    maint_recommendations: Optional[str] = None
+    maint_checklist: Optional[str] = None
+    maint_report_folio: Optional[str] = None
+    maint_client_sign_name: Optional[str] = None
+    maint_client_sign_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime]
     closed_at: Optional[datetime]
@@ -275,6 +333,18 @@ class TicketListItem(BaseModel):
     project_id: Optional[int] = None
     project_weight: Optional[float] = None
     project: Optional["ProjectMini"] = None
+    # ── Mantenimiento (para listar sin llamadas extra) ──
+    maint_type: Optional[str] = None
+    maint_equipment: Optional[str] = None
+    maint_requested_date: Optional[_Date] = None
+    maint_confirmed_start: Optional[datetime] = None
+    maint_confirmed_end: Optional[datetime] = None
+    maint_plan_id: Optional[int] = None
+    maint_contact_name: Optional[str] = None
+    maint_contact_email: Optional[str] = None
+    maint_contact_phone: Optional[str] = None
+    maint_report_folio: Optional[str] = None
+    closed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime]
 

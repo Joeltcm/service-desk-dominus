@@ -12,14 +12,44 @@ from database import engine, SessionLocal, is_sqlite, get_db as _get_db_main
 import models
 import storage
 from auth import get_password_hash, get_current_user
-from routers import auth, users, tickets, attachments, calendar, knowledge_base, dashboard, reports, contacts, suppliers, orders, warranties, despacho, companies, quotes, invoices, ventas, settings, expenses, letters, papelera, audit, inventory, opportunities, licenses, push, canned_responses, projects, contracts, printers, supplies, system, stats, part_requests, notifications
+from routers import auth, users, tickets, attachments, calendar, knowledge_base, dashboard, reports, contacts, suppliers, orders, warranties, despacho, companies, quotes, invoices, ventas, settings, expenses, letters, papelera, audit, inventory, opportunities, licenses, push, canned_responses, projects, contracts, printers, supplies, system, stats, part_requests, notifications, maintenance
 
 models.Base.metadata.create_all(bind=engine)
 
 # Migración suave: agregar columnas nuevas si no existen (SQLite)
+# Columnas del módulo de mantenimiento en tickets (todas nullable; idempotentes).
+MAINT_TICKET_COLUMNS = [
+    ("maint_type",              "VARCHAR(20)"),
+    ("maint_equipment",         "TEXT"),
+    ("maint_requested_date",    "DATE"),
+    ("maint_confirmed_start",   "TIMESTAMP WITH TIME ZONE"),
+    ("maint_confirmed_end",     "TIMESTAMP WITH TIME ZONE"),
+    ("maint_suggested_date",    "DATE"),
+    ("maint_plan_id",           "INTEGER REFERENCES maintenance_plans(id)"),
+    ("maint_contact_name",      "VARCHAR(150)"),
+    ("maint_contact_email",     "VARCHAR(150)"),
+    ("maint_contact_phone",     "VARCHAR(50)"),
+    ("maint_work_done",         "TEXT"),
+    ("maint_observations",      "TEXT"),
+    ("maint_recommendations",   "TEXT"),
+    ("maint_checklist",         "TEXT"),
+    ("maint_report_folio",      "VARCHAR(20)"),
+    ("maint_client_signature",  "TEXT"),
+    ("maint_client_sign_name",  "VARCHAR(150)"),
+    ("maint_client_sign_at",    "TIMESTAMP WITH TIME ZONE"),
+    ("maint_reminder_sent",     "DATE"),
+]
+
+
 def _migrate():
     from sqlalchemy import text
     with engine.connect() as conn:
+        for col, typedef in MAINT_TICKET_COLUMNS:
+            try:
+                conn.execute(text(f"ALTER TABLE tickets ADD COLUMN {col} {typedef}"))
+                conn.commit()
+            except Exception:
+                pass
         for col, typedef in [
             ("address", "VARCHAR(500)"),
             ("terms_accepted_at", "TIMESTAMPTZ"),
@@ -519,6 +549,21 @@ def _migrate_pg():
             conn.commit()
         except Exception:
             pass
+        # ── Mantenimiento: columnas de tickets + categoría 'Mantenimiento' (idempotente) ──
+        for col, typedef in MAINT_TICKET_COLUMNS:
+            try:
+                conn.execute(text(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {col} {typedef}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        try:
+            exists_cat = conn.execute(text("SELECT 1 FROM ticket_categories WHERE name = 'Mantenimiento'")).fetchone()
+            if not exists_cat:
+                max_order = conn.execute(text("SELECT COALESCE(MAX(\"order\"), 0) FROM ticket_categories")).scalar() or 0
+                conn.execute(text("INSERT INTO ticket_categories (name, \"order\") VALUES ('Mantenimiento', :o)"), {"o": max_order + 1})
+                conn.commit()
+        except Exception:
+            conn.rollback()
         # ── Ticket: quién lo levantó (created_by) + backfill desde la línea de tiempo ──
         try:
             conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_by_id INTEGER REFERENCES users(id)"))
@@ -2245,6 +2290,86 @@ def _start_billing_watcher():
 
 _start_billing_watcher()
 
+
+def _run_maintenance_watch():
+    """Una pasada del aviso de mantenimiento. Nunca crea tickets:
+    (a) planes activos con la fecha sugerida a ≤15 días o vencida → aviso al staff, una vez por ciclo;
+    (b) visitas de mantenimiento confirmadas entre 24 y 48 h → recordatorio al cliente (correo + campana)
+        y al técnico asignado (campana + push), una vez por día."""
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from database import SessionLocal
+    from routers.maintenance import _today
+    from notify import create_notification, notify_roles
+    from routers.settings import try_send_maintenance_confirmed_email
+    from sqlalchemy import func as _func
+    from routers.system import maint_feature_on
+    db = SessionLocal()
+    try:
+        today = _today()
+        plans = [] if not maint_feature_on(db, "recurring_plans") else db.query(models.MaintenancePlan).filter(
+            models.MaintenancePlan.status == "active", models.MaintenancePlan.deleted_at.is_(None)).all()
+        for p in plans:
+            if not p.next_suggested_date:
+                continue
+            days = (p.next_suggested_date - today).days
+            if days > 15:
+                continue
+            marker = p.next_suggested_date.isoformat()
+            if p.last_reminder_sent_for == marker:
+                continue
+            cliente = p.client.name if p.client else ""
+            titulo = (f"Mantenimiento vencido: {p.title}" if days < 0
+                      else f"Mantenimiento próximo ({days} día{'s' if days != 1 else ''}): {p.title}")
+            notify_roles(db, [models.UserRole.superadmin, models.UserRole.admin,
+                              models.UserRole.supervisor, models.UserRole.agent],
+                         titulo, f"Cliente: {cliente} · Fecha sugerida {p.next_suggested_date.strftime('%d-%m-%Y')}",
+                         url="/mantenimiento", kind="maintenance")
+            p.last_reminder_sent_for = marker
+        db.commit()
+
+        now = _dt.now(_tz.utc).replace(tzinfo=None)  # las fechas se guardan en UTC sin zona
+        visits = [] if not maint_feature_on(db, "pre_reminder") else db.query(models.TicketVisit).join(models.Ticket, models.TicketVisit.ticket_id == models.Ticket.id).filter(
+            models.TicketVisit.status == "scheduled",
+            models.TicketVisit.scheduled_at >= now + _td(hours=24),
+            models.TicketVisit.scheduled_at <= now + _td(hours=48),
+            models.Ticket.deleted_at.is_(None),
+            _func.lower(models.Ticket.category) == "mantenimiento",
+        ).all()
+        for v in visits:
+            t = v.ticket
+            if t.maint_reminder_sent == today:
+                continue
+            from zoneinfo import ZoneInfo as _ZI
+            fecha = v.scheduled_at.replace(tzinfo=_tz.utc).astimezone(_ZI("America/Panama")).strftime("%d-%m-%Y %H:%M")
+            if t.assigned_to_id:
+                create_notification(db, t.assigned_to_id, "Mantenimiento mañana",
+                                    f"{t.title} · {fecha}", url=f"/tickets/{t.id}", kind="maintenance")
+            create_notification(db, t.client_id, "Recordatorio de mantenimiento",
+                                f"Atención programada: {fecha}", url=f"/tickets/{t.id}", kind="maintenance")
+            t.maint_reminder_sent = today
+            db.commit()
+            try_send_maintenance_confirmed_email(t.id, False, True)
+    finally:
+        db.close()
+
+
+def _start_maintenance_watcher():
+    import threading, time
+
+    def _loop():
+        time.sleep(150)  # tras el arranque
+        while True:
+            try:
+                _run_maintenance_watch()
+            except Exception as exc:
+                logging.warning("maintenance watcher error: %s", exc)
+            time.sleep(6 * 3600)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
+_start_maintenance_watcher()
+
 app = FastAPI(title="Service Desk", version="1.0.0")
 
 
@@ -2311,6 +2436,7 @@ app.include_router(contracts.router,     dependencies=[Depends(require_module("c
 app.include_router(printers.router,      dependencies=[Depends(require_module("impresoras")), Depends(require_module_write("impresoras"))])
 app.include_router(supplies.router,      dependencies=[Depends(require_module("suministros")), Depends(require_module_write("suministros"))])
 app.include_router(letters.router,       dependencies=[Depends(require_module("cartas")), Depends(require_module_write("cartas"))])
+app.include_router(maintenance.router,  dependencies=[Depends(require_module("mantenimiento")), Depends(require_module_write("mantenimiento"))])
 app.include_router(stats.router)
 
 
@@ -2372,6 +2498,11 @@ def seed_database():
                 db.add(models.TicketCategory(name=name, order=i))
             db.commit()
             print("✓ Categorías de ticket creadas")
+
+        # Categoría 'Mantenimiento' (idempotente: también para BDs ya sembradas)
+        if not db.query(models.TicketCategory).filter(models.TicketCategory.name == "Mantenimiento").first():
+            db.add(models.TicketCategory(name="Mantenimiento", order=8))
+            db.commit()
 
         # Admin inicial — en su propia transacción para que exista SIEMPRE,
         # aunque falle cualquier otro seed. Credenciales por variable de entorno.

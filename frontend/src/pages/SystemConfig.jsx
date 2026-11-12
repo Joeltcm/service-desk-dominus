@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { Settings2, Save, ToggleLeft, ToggleRight, Shield, Clock, Users, ScrollText, CreditCard, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment, setBillingDate, setBillingConfig } from '../services/api'
+import { getSystemModules, updateSystemModules, getTrialConfig, updateTrial, getMaxUsers, setMaxUsers, getBillingConfig, confirmBillingPayment, setBillingDate, setBillingConfig, getMaintFeatures, updateMaintFeatures } from '../services/api'
 import { useModules } from '../context/ModulesContext'
 import { useCompany } from '../context/CompanyContext'
 import { RoleFeaturesPanel, AuditPanel } from './Settings'
+import { resetMaintFeatures } from '../utils/maintFeatures'
 
 // En vertical 'it_support' el grupo de impresión se presenta como "Equipos"
 // (el módulo 'impresoras' habilita la sección de Equipos).
@@ -27,6 +28,7 @@ const MODULE_GROUPS = [
     group: 'Servicio',
     items: [
       { key: 'tickets',             label: 'Tickets',                  desc: 'Sistema principal de soporte y seguimiento' },
+      { key: 'mantenimiento',       label: 'Mantenimiento',            desc: 'Solicitudes preventivas y correctivas, flotas, agenda e informes' },
       { key: 'agenda',              label: 'Agenda',                   desc: 'Calendario, visitas y programación' },
       { key: 'proyectos',           label: 'Proyectos',                desc: 'Gestión de proyectos y pesos de tickets' },
       { key: 'dashboard_servicios', label: 'Dashboard',                 desc: 'Panel de métricas de soporte' },
@@ -408,6 +410,9 @@ export default function SystemConfig() {
         </button>
       </div>
 
+      {/* Mantenimiento: interruptores de funciones */}
+      <MaintFeaturesCard />
+
       {/* Trial period */}
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
@@ -541,6 +546,50 @@ export default function SystemConfig() {
           Registro de inicios de sesión (exitosos y fallidos), creación/edición/eliminación de registros y otros cambios importantes.
         </p>
         <AuditPanel />
+      </div>
+    </div>
+  )
+}
+
+
+// Interruptores del módulo de mantenimiento: cada función se enciende o apaga aquí.
+function MaintFeaturesCard() {
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(null)
+  useEffect(() => { getMaintFeatures().then((r) => setData(r.data)).catch(() => {}) }, [])
+  if (!data) return null
+
+  const toggle = async (key) => {
+    const next = !data.features[key]
+    setBusy(key)
+    try {
+      const r = await updateMaintFeatures({ [key]: next })
+      setData((d) => ({ ...d, features: r.data.features }))
+      resetMaintFeatures()
+      toast.success(`${data.labels[key]}: ${next ? 'activado' : 'desactivado'}`)
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'No se pudo guardar')
+    } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="card space-y-3">
+      <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+        <Settings2 size={14} className="text-teal-600" /> Mantenimiento · Funciones
+      </h2>
+      <p className="text-xs text-gray-400">Activa o desactiva cada función del módulo. Los cambios aplican al recargar.</p>
+      <div className="divide-y divide-gray-100">
+        {Object.entries(data.labels).map(([key, label]) => {
+          const on = !!data.features[key]
+          return (
+            <div key={key} className="flex items-center justify-between gap-3 py-2.5">
+              <p className="text-sm text-gray-700">{label}</p>
+              <button onClick={() => toggle(key)} disabled={busy === key} aria-label={label}>
+                {on ? <ToggleRight size={24} className="text-teal-600" /> : <ToggleLeft size={24} className="text-gray-300" />}
+              </button>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

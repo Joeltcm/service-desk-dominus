@@ -472,6 +472,7 @@ def get_agenda(
             "visit_id": v.id,
             "visit_status": v.status,
             "is_remote": v.is_remote,
+            "is_maintenance": (t.category or "").strip().lower() == "mantenimiento",
             "order_id": None,
             "dispatch_id": None,
             "google_event_id": None,
