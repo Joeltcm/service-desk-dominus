@@ -1,5 +1,6 @@
 import { showConfirm } from '../utils/confirm'
 import React, { useEffect, useState } from 'react'
+import { ticketRef } from '../utils/ticketRef'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getTickets, getStatuses, getCategories, deleteTickets, getAgents, updateTicket } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -326,7 +327,7 @@ export default function Tickets() {
                         <div className="flex-1 min-w-0">
                           {/* Number + category */}
                           <div className="flex items-center gap-2 mb-1.5">
-                            <span className="text-xs font-mono text-gray-400">#{t.id}</span>
+                            <span className="text-xs font-mono text-gray-400">{ticketRef(t)}</span>
                             {t.category && (
                               <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
                                 <Tag size={10} /> {t.category}

@@ -34,6 +34,7 @@ MAINT_TICKET_COLUMNS = [
     ("maint_recommendations",   "TEXT"),
     ("maint_checklist",         "TEXT"),
     ("maint_report_folio",      "VARCHAR(20)"),
+    ("maint_number",            "VARCHAR(20)"),
     ("maint_client_signature",  "TEXT"),
     ("maint_client_sign_name",  "VARCHAR(150)"),
     ("maint_client_sign_at",    "TIMESTAMP WITH TIME ZONE"),
@@ -2236,6 +2237,37 @@ def _seed_billing():
 
 
 _seed_billing()
+
+
+def _backfill_maint_numbers():
+    """Asigna MANT-#### a los mantenimientos existentes (en orden de creación). Idempotente."""
+    from routers.tickets import next_maint_number
+    db = SessionLocal()
+    try:
+        pendientes = db.query(models.Ticket).filter(
+            models.Ticket.deleted_at.is_(None),
+            func_lower(models.Ticket.category) == "mantenimiento",
+            models.Ticket.maint_number.is_(None),
+        ).order_by(models.Ticket.id).all()
+        for t in pendientes:
+            t.maint_number = next_maint_number(db)
+            db.flush()
+        if pendientes:
+            db.commit()
+            logging.info("_backfill_maint_numbers: %d mantenimientos numerados", len(pendientes))
+    except Exception as e:
+        db.rollback()
+        logging.warning("_backfill_maint_numbers error: %s", e)
+    finally:
+        db.close()
+
+
+def func_lower(col):
+    from sqlalchemy import func as _f
+    return _f.lower(col)
+
+
+_backfill_maint_numbers()
 
 
 def _start_billing_watcher():

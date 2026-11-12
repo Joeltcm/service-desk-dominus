@@ -137,7 +137,8 @@ class Ticket(Base):
     maint_observations = Column(Text, nullable=True)
     maint_recommendations = Column(Text, nullable=True)
     maint_checklist = Column(Text, nullable=True)             # JSON [{"task","done"}]
-    maint_report_folio = Column(String(20), nullable=True)    # MANT-0001…
+    maint_number = Column(String(20), nullable=True, index=True)  # MANT-0001… (secuencia propia de mantenimientos)
+    maint_report_folio = Column(String(20), nullable=True)    # MANT-0001… (mismo número que maint_number)
     maint_client_signature = Column(Text, nullable=True)      # data URL PNG
     maint_client_sign_name = Column(String(150), nullable=True)
     maint_client_sign_at = Column(DateTime(timezone=True), nullable=True)

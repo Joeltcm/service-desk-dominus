@@ -6,6 +6,7 @@ import { useMaintFeatures, featureOn } from '../utils/maintFeatures'
 import { MAINT_TYPES, fmtPanama, toPanamaInput, minutesBetween, parseEquipment } from '../utils/maintenance'
 import { Wrench, X, Plus, MapPin, Phone, Mail, CalendarClock, CalendarPlus, RefreshCw, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { ticketRef, ticketLabel } from '../utils/ticketRef'
 
 const TYPE_CHIP = {
   preventivo: 'bg-teal-50 text-teal-700 border-teal-200',
@@ -105,7 +106,7 @@ export default function Mantenimiento() {
               <article key={t.id} className={`card space-y-3 border-l-4 ${tipo === 'correctivo' ? 'border-l-rose-400' : 'border-l-teal-500'}`}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <p className="text-xs text-gray-400">Ticket #{t.id}{t.maint_report_folio ? ` · ${t.maint_report_folio}` : ''}</p>
+                    <p className="text-xs text-gray-400 font-mono">{ticketRef(t)}</p>
                     <h3 className="font-semibold text-gray-900 truncate">{t.title}</h3>
                     <p className="text-xs text-gray-500">{t.client?.name}{t.client?.company ? ` · ${t.client.company}` : ''}</p>
                   </div>
@@ -242,7 +243,7 @@ function ConfirmModal({ ticket, agents, planEnabled = true, onClose, onSaved }) 
   }
 
   return (
-    <ModalShell title="Confirmar mantenimiento" subtitle={`Ticket #${ticket.id} · ${ticket.title}`} onClose={onClose}
+    <ModalShell title="Confirmar mantenimiento" subtitle={`${ticketLabel(ticket)} · ${ticket.title}`} onClose={onClose}
       footer={<>
         <button onClick={onClose} className="btn-secondary">Cancelar</button>
         <button onClick={submit} disabled={saving} className="btn-primary">{saving ? 'Confirmando…' : 'Confirmar y avisar'}</button>

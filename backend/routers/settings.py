@@ -1378,6 +1378,7 @@ def try_send_maintenance_confirmed_email(ticket_id: int, is_reschedule: bool = F
         end_str = _fmt_panama(end_dt)
         tecnico = ticket.assigned_agent.name if ticket.assigned_agent else "Equipo de Dominus Tech"
         tipo = "Preventivo" if (ticket.maint_type or "").lower() == "preventivo" else "Correctivo"
+        ref = ticket.maint_number or f"#{ticket.id}"
         titulo = ("Recordatorio de mantenimiento" if reminder else
                   "Mantenimiento reprogramado" if is_reschedule else "Mantenimiento confirmado")
 
@@ -1402,10 +1403,10 @@ def try_send_maintenance_confirmed_email(ticket_id: int, is_reschedule: bool = F
       </div>
     </div>
     <p style="font-size:13px;color:#475569;margin:0;line-height:1.6">
-      La fecha es aproximada y puede ajustarse; le avisaremos ante cualquier cambio. Ticket #{ticket.id}.
+      La fecha es aproximada y puede ajustarse; le avisaremos ante cualquier cambio. Número de servicio: {esc(ref)}.
     </p>""", db)
 
-        subject = f"[Mantenimiento #{ticket.id}] {titulo}: {start_str}"
+        subject = f"[Mantenimiento {ref}] {titulo}: {start_str}"
         admin_bcc = _get_setting(db, "admin_notification_email") or None
         reply_to = _get_setting(db, "imap_user") or None
         _send_with_logo(cfg["host"], cfg["port"], cfg["user"], cfg["password"], cfg["from_addr"], cfg["use_tls"],

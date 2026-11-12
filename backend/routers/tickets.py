@@ -305,6 +305,8 @@ def create_ticket(
     ticket.created_by_id = current_user.id
     db.add(ticket)
     db.flush()
+    if is_maint:
+        ticket.maint_number = next_maint_number(db)
 
     # Calcular SLA deadline según prioridad y horario hábil
     now = datetime.utcnow()
@@ -531,11 +533,14 @@ def maint_reschedule(
     return ticket
 
 
-def _next_folio(db: Session) -> str:
-    """Folio consecutivo del informe técnico: MANT-0001, MANT-0002…"""
-    rows = db.query(models.Ticket.maint_report_folio).filter(models.Ticket.maint_report_folio.isnot(None)).all()
+def next_maint_number(db: Session) -> str:
+    """Número propio de mantenimientos: MANT-0001, MANT-0002… (independiente de los tickets)."""
+    rows = db.query(models.Ticket.maint_number).filter(models.Ticket.maint_number.isnot(None)).all()
     nums = [int(r[0].split("-")[-1]) for r in rows if r[0] and r[0].split("-")[-1].isdigit()]
     return f"MANT-{(max(nums) if nums else 0) + 1:04d}"
+
+
+_next_folio = next_maint_number
 
 
 def _maint_report_payload(ticket: models.Ticket) -> dict:
@@ -611,7 +616,9 @@ def save_maint_report(
         ticket.maint_client_sign_at = datetime.now(timezone.utc)
     new_folio = not ticket.maint_report_folio
     if new_folio:
-        ticket.maint_report_folio = _next_folio(db)
+        # El folio del informe es el mismo número del mantenimiento.
+        ticket.maint_report_folio = ticket.maint_number or next_maint_number(db)
+        ticket.maint_number = ticket.maint_report_folio
     db.add(models.TicketTimeline(
         ticket_id=ticket.id, user_id=current_user.id, entry_type="system",
         content=(f"Informe técnico {ticket.maint_report_folio} generado" if new_folio else
@@ -754,6 +761,9 @@ def update_ticket(
         update_data.pop('client_id', None)
     for k, v in update_data.items():
         setattr(ticket, k, v)
+    # Un ticket recategorizado como mantenimiento recibe su número propio.
+    if (ticket.category or "").strip().lower() == "mantenimiento" and not ticket.maint_number:
+        ticket.maint_number = next_maint_number(db)
 
     # 'assigned_to_id' explícito a null debe DESASIGNAR (exclude_none lo omitiría).
     if 'assigned_to_id' in data.model_fields_set and current_user.role != models.UserRole.client:

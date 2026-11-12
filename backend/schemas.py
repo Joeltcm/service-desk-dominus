@@ -301,6 +301,7 @@ class TicketOut(BaseModel):
     maint_recommendations: Optional[str] = None
     maint_checklist: Optional[str] = None
     maint_report_folio: Optional[str] = None
+    maint_number: Optional[str] = None
     maint_client_sign_name: Optional[str] = None
     maint_client_sign_at: Optional[datetime] = None
     created_at: datetime
@@ -344,6 +345,7 @@ class TicketListItem(BaseModel):
     maint_contact_email: Optional[str] = None
     maint_contact_phone: Optional[str] = None
     maint_report_folio: Optional[str] = None
+    maint_number: Optional[str] = None
     closed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime]

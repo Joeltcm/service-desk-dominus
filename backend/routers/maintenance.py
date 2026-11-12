@@ -319,7 +319,7 @@ def maintenance_stats(
     by_client = Counter((t.client.name if t.client else "—") for t in maint)
 
     def _brief_ticket(t):
-        return {"id": t.id, "title": t.title, "client": t.client.name if t.client else "",
+        return {"id": t.id, "number": t.maint_number or f"#{t.id}", "title": t.title, "client": t.client.name if t.client else "",
                 "maint_type": t.maint_type, "status": t.status_rel.name if t.status_rel else ""}
 
     return {

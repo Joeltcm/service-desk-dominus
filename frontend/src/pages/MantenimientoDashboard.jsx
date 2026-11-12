@@ -96,7 +96,7 @@ export default function MantenimientoDashboard() {
               {d.pending.items.length === 0 && <p className="text-sm text-gray-400">No hay solicitudes abiertas.</p>}
               {d.pending.items.map((t) => (
                 <button key={t.id} onClick={() => navigate(`/tickets/${t.id}`)} className="w-full flex items-center justify-between gap-3 text-left rounded-lg px-2 py-2 hover:bg-gray-50">
-                  <div className="min-w-0"><p className="text-sm font-medium text-gray-800 truncate">#{t.id} · {t.title}</p><p className="text-xs text-gray-500 truncate">{t.client}{t.maint_type ? ` · ${t.maint_type}` : ''}</p></div>
+                  <div className="min-w-0"><p className="text-sm font-medium text-gray-800 truncate">{t.number} · {t.title}</p><p className="text-xs text-gray-500 truncate">{t.client}{t.maint_type ? ` · ${t.maint_type}` : ''}</p></div>
                   <span className="text-xs text-gray-500 flex items-center gap-1 flex-shrink-0">{t.status} <ExternalLink size={11} /></span>
                 </button>
               ))}

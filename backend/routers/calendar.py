@@ -43,7 +43,7 @@ def _get_flow():
 
 def _build_event_title(ticket_id: int, location: str, subject: str, client_name: str = "", client_company: str = "") -> str:
     """Formato: Ticket #ID - Contacto (Empresa) - Ubicación - Asunto"""
-    parts = [f"Ticket #{ticket_id}"]
+    parts = [ticket_id if isinstance(ticket_id, str) else f"Ticket #{ticket_id}"]
     contact = client_name.strip() if client_name else ""
     if client_company and client_company.strip():
         contact = f"{contact} ({client_company.strip()})" if contact else client_company.strip()
@@ -292,7 +292,7 @@ def create_calendar_event(
 
     client_name    = ticket.client.name    if ticket.client else ""
     client_company = ticket.client.company if ticket.client else ""
-    event_title = _build_event_title(ticket.id, location, subject, client_name, client_company)
+    event_title = _build_event_title(ticket.maint_number or ticket.id, location, subject, client_name, client_company)
 
     event_body = {
         "summary": event_title,
@@ -476,7 +476,7 @@ def get_agenda(
             "order_id": None,
             "dispatch_id": None,
             "google_event_id": None,
-            "title": _build_event_title(t.id, location, subject, t.client.name if t.client else "", t.client.company if t.client else ""),
+            "title": _build_event_title(t.maint_number or t.id, location, subject, t.client.name if t.client else "", t.client.company if t.client else ""),
             "raw_title": t.title,
             "location": location,
             "subject": subject,
@@ -510,7 +510,7 @@ def get_agenda(
             "order_id": None,
             "dispatch_id": None,
             "google_event_id": None,
-            "title": _build_event_title(t.id, location, subject, t.client.name if t.client else "", t.client.company if t.client else ""),
+            "title": _build_event_title(t.maint_number or t.id, location, subject, t.client.name if t.client else "", t.client.company if t.client else ""),
             "raw_title": t.title,
             "location": location,
             "subject": subject,
@@ -952,7 +952,7 @@ def create_ticket_visit(
 
     client_name    = ticket.client.name    if ticket.client else ""
     client_company = ticket.client.company if ticket.client else ""
-    event_title = _build_event_title(ticket.id, location, subject, client_name, client_company)
+    event_title = _build_event_title(ticket.maint_number or ticket.id, location, subject, client_name, client_company)
 
     # Google Calendar is optional — push event only if user has a valid token
     calendar_event_id = None
@@ -1067,7 +1067,7 @@ def push_visit_to_google(
     subject = ticket.subject or ticket.title
     client_name = ticket.client.name if ticket.client else ""
     client_company = ticket.client.company if ticket.client else ""
-    event_title = _build_event_title(ticket.id, location, subject, client_name, client_company)
+    event_title = _build_event_title(ticket.maint_number or ticket.id, location, subject, client_name, client_company)
 
     start_dt = visit.scheduled_at
     end_dt = start_dt + timedelta(minutes=visit.duration_minutes or 60)
@@ -1159,7 +1159,7 @@ def reschedule_ticket_visit(
             subject = ticket.subject or ticket.title
             client_name = ticket.client.name if ticket.client else ""
             client_company = ticket.client.company if ticket.client else ""
-            event_title = _build_event_title(ticket.id, location, subject, client_name, client_company)
+            event_title = _build_event_title(ticket.maint_number or ticket.id, location, subject, client_name, client_company)
             patch_body = {
                 "summary": event_title,
                 "start": {"dateTime": start_dt.isoformat(), "timeZone": "America/Panama"},
@@ -1466,7 +1466,7 @@ def sync_calendar_events(
             subject = ticket.subject or ticket.title
             client_name = ticket.client.name if ticket.client else ""
             client_company = ticket.client.company if ticket.client else ""
-            event_title = _build_event_title(ticket.id, location, subject, client_name, client_company)
+            event_title = _build_event_title(ticket.maint_number or ticket.id, location, subject, client_name, client_company)
             start_dt = _to_utc_aware(v.scheduled_at) if v.scheduled_at else None
             if not start_dt:
                 continue

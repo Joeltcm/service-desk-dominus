@@ -33,6 +33,7 @@ import { fromZonedTime, formatInTimeZone } from 'date-fns-tz'
 import { compressImage } from '../utils/imageCompress'
 import MaintenancePanel from '../components/MaintenancePanel'
 import toast from 'react-hot-toast'
+import { ticketRef, ticketLabel } from '../utils/ticketRef'
 
 const PRIORITY_LABELS = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' }
 
@@ -159,7 +160,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Informe Técnico — Ticket #${ticket.id}</title>
+  <title>Informe Técnico — ${ticketLabel(ticket)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, 'Segoe UI', system-ui, -apple-system, sans-serif; color: #111; background: #fff; font-size: 13px; line-height: 1.5; }
@@ -192,7 +193,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
       </div>
       <div style="text-align:right">
         <div style="font-size:16pt;font-weight:bold;color:#1e3a5f">INFORME TÉCNICO</div>
-        <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">Ticket N° #${ticket.id}</div>
+        <div style="font-size:10pt;color:#444;margin-top:4px;font-family:monospace">Ticket N° ${ticketRef(ticket)}</div>
       </div>
     </div>
 
@@ -300,7 +301,7 @@ function buildReportHTML(ticket, timeline, attachments, imageMap = {}, companyNa
 
   <!-- ═══ FOOTER (estilo casa) ═══ -->
   <div style="margin:0 36px;padding:10px 0 20px;border-top:1px solid #ddd;font-size:7.5pt;color:#888;text-align:center">
-    ${coName} · ${coAddress} · RUC: ${coRuc} · Informe Técnico · Ticket N° #${ticket.id}
+    ${coName} · ${coAddress} · RUC: ${coRuc} · Informe Técnico · Ticket N° ${ticketRef(ticket)}
   </div>
 
 </div><!-- /page -->
@@ -335,7 +336,7 @@ function buildThermalTicketHTML(ticket) {
     </div>
     ${line}
     <div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px">
-      <span>TICKET #${ticket.id}</span><span>${esc(created)}</span>
+      <span>TICKET ${ticketRef(ticket).replace("#", "")}</span><span>${esc(created)}</span>
     </div>
     <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:2px">
       <span>Estado: <b>${esc(ticket.status_rel?.name || '—')}</b></span>
@@ -913,7 +914,7 @@ export default function TicketDetail() {
         ``,
         `Le informamos sobre una actualización en su ticket de servicio:`,
         ``,
-        `*🎫 Ticket #${ticket.id} — ${ticket.title}*`,
+        `*🎫 ${ticketLabel(ticket)} — ${ticket.title}*`,
         ``,
         plainText,
         ``,
@@ -1223,7 +1224,7 @@ export default function TicketDetail() {
       const imageMap = await buildImageMap()
       const html = buildReportHTML(ticket, timeline, attachments, imageMap, coName)
       const filename = `Ticket-${ticket.id}.pdf`
-      const title = `Ticket #${ticket.id} — ${ticket.title}`
+      const title = `${ticketLabel(ticket)} — ${ticket.title}`
 
       if (isIOS) {
         if (!writePdfViewerToWindow(iosWin, html)) {
@@ -1279,7 +1280,7 @@ export default function TicketDetail() {
       ``,
       `Le informamos sobre una actualización en su ticket de servicio:`,
       ``,
-      `*🎫 Ticket #${ticket.id} — ${ticket.title}*`,
+      `*🎫 ${ticketLabel(ticket)} — ${ticket.title}*`,
       ``,
       `Adjunto encontrará el informe completo en formato PDF con todos los detalles del servicio prestado.`,
       ``,
@@ -1324,7 +1325,7 @@ export default function TicketDetail() {
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-gray-400 font-mono text-sm">#{ticket.id}</span>
+            <span className="text-gray-400 font-mono text-sm">{ticketRef(ticket)}</span>
             <PriorityBadge priority={ticket.priority} />
           </div>
           <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">{ticket.title}</h1>
@@ -2618,7 +2619,7 @@ export default function TicketDetail() {
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-xs font-semibold text-blue-700 mb-1">Formato del evento en Google Calendar:</p>
                 <p className="text-xs text-blue-600 font-mono break-all">
-                  Ticket #{id} · {ticket.client?.name}{ticket.client?.company ? ` (${ticket.client.company})` : ''} · {calendarForm.location || 'Ubicación'} · {calendarForm.subject || 'Asunto'}
+                  {ticketLabel(ticket)} · {ticket.client?.name}{ticket.client?.company ? ` (${ticket.client.company})` : ''} · {calendarForm.location || 'Ubicación'} · {calendarForm.subject || 'Asunto'}
                 </p>
               </div>
 
