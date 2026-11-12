@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createTicket, createClientDispatch, getStatuses } from '../services/api'
 import { missingMaintFields, buildMaintTicket } from '../utils/maintenance'
+import { saveSolicitudDraft, draftFromPending } from '../utils/solicitudDraft'
 import toast from 'react-hot-toast'
 
 /**
@@ -24,7 +25,7 @@ export default function PendingRequestHandler() {
     // El funnel es de clientes: solo autoenviamos si quien entra es cliente.
     if (user.role !== 'client') return
     doneRef.current = true
-    localStorage.removeItem('pendingRequest')
+    // El borrador se conserva hasta que el envío sea exitoso (ver catch más abajo).
     ;(async () => {
       try {
         if (draft.type === 'mantenimiento') {
@@ -34,10 +35,12 @@ export default function PendingRequestHandler() {
           const st = r.data || []
           const statusId = (st.find((s) => /abierto|nuevo|open/i.test(s.name)) || st[0])?.id
           await createTicket(buildMaintTicket(draft, { statusId, clientId: user.id }))
+          localStorage.removeItem('pendingRequest')
           toast.success('¡Listo! Tu solicitud de mantenimiento fue enviada.')
           navigate('/tickets')
         } else if (draft.type === 'pedido') {
           await createClientDispatch({ title: draft.title, notes: draft.notes || null, items: draft.items || null })
+          localStorage.removeItem('pendingRequest')
           toast.success('¡Listo! Tu pedido fue enviado. Un agente lo revisará.')
           navigate('/mis-pedidos')
         } else {
@@ -56,12 +59,16 @@ export default function PendingRequestHandler() {
             category: 'Solicitud web',
             charger: 'Sin cargador',
           })
+          localStorage.removeItem('pendingRequest')
           toast.success('¡Listo! Tu ticket fue creado.')
           navigate('/tickets')
         }
       } catch (err) {
-        toast.error('No pudimos enviar tu solicitud automáticamente. Vuelve a intentarlo desde el portal.')
-        navigate('/inicio')
+        // Falló el envío: los datos vuelven al formulario para que el cliente no los pierda.
+        const tipo = draft.type === 'mantenimiento' ? 'mantenimiento' : draft.type === 'pedido' ? 'pedido' : 'ticket'
+        saveSolicitudDraft(tipo, draftFromPending(draft))
+        toast.error(err?.response?.data?.detail || 'No pudimos enviar tu solicitud. Tus datos están guardados: revisa y vuelve a enviar.')
+        navigate(`/solicitar?tipo=${tipo}`)
       }
     })()
   }, [user, navigate])

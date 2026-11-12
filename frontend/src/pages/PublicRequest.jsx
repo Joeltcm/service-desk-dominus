@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createClientDispatch, createTicket, getStatuses, companyLogoUrl, getPublicCompanyInfo, uploadAttachment } from '../services/api'
 import { useMaintFeatures, featureOn } from '../utils/maintFeatures'
+import { loadSolicitudDraft, saveSolicitudDraft, clearSolicitudDraft } from '../utils/solicitudDraft'
 import { MAINT_TYPES, missingMaintFields, buildMaintTicket } from '../utils/maintenance'
 import defaultLogo from '../assets/default-logo.png'
 import dgsLogo from '../assets/dgs-logo.png'
@@ -31,19 +32,26 @@ export default function PublicRequest() {
   const bg = info.company_sidebar_color || '#1a3353'
   const onLogoError = (e) => { e.currentTarget.onerror = null; e.currentTarget.src = defaultLogo }
 
-  const [title, setTitle] = useState('')
-  const [notes, setNotes] = useState('')
-  const [lines, setLines] = useState([{ description: '', qty: 1 }])
+  // Borrador guardado de una captura anterior (recarga, fallo de envío o inicio de sesión).
+  const [restored] = useState(() => loadSolicitudDraft(tipo))
+  const [title, setTitle] = useState(restored?.title ?? '')
+  const [notes, setNotes] = useState(restored?.notes ?? '')
+  const [lines, setLines] = useState(restored?.lines?.length ? restored.lines : [{ description: '', qty: 1 }])
   const [saving, setSaving] = useState(false)
   // Mantenimiento: tipo, fecha propuesta y datos de contacto (obligatorios).
-  const [maintType, setMaintType] = useState('preventivo')
-  const [requestedDate, setRequestedDate] = useState('')
-  const [contactName, setContactName] = useState(user?.name || '')
-  const [contactEmail, setContactEmail] = useState(user?.email || '')
-  const [contactPhone, setContactPhone] = useState(user?.phone || '')
-  const [location, setLocation] = useState(user?.address || '')
+  const [maintType, setMaintType] = useState(restored?.maintType || 'preventivo')
+  const [requestedDate, setRequestedDate] = useState(restored?.requestedDate || '')
+  const [contactName, setContactName] = useState(restored?.contactName || user?.name || '')
+  const [contactEmail, setContactEmail] = useState(restored?.contactEmail || user?.email || '')
+  const [contactPhone, setContactPhone] = useState(restored?.contactPhone || user?.phone || '')
+  const [location, setLocation] = useState(restored?.location || user?.address || '')
   const [photos, setPhotos] = useState([])
   const [needAccount, setNeedAccount] = useState(false)
+
+  // Autoguardado: cada cambio queda en el navegador hasta que el envío sea exitoso.
+  useEffect(() => {
+    saveSolicitudDraft(tipo, { title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location })
+  }, [tipo, title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location])
   const mf = useMaintFeatures({ publicOnly: true })
   const photosOn = featureOn(mf, 'client_photos')
 
@@ -108,10 +116,12 @@ export default function PublicRequest() {
         for (const f of photos) {
           try { await uploadAttachment(created.data.id, f) } catch { /* una foto fallida no bloquea la solicitud */ }
         }
+        clearSolicitudDraft(tipo)
         toast.success('Solicitud de mantenimiento enviada. Te confirmaremos la disponibilidad.')
         navigate('/tickets')
       } else if (isPedido) {
         await createClientDispatch({ title: draft.title, notes: draft.notes || null, items: draft.items })
+        clearSolicitudDraft(tipo)
         toast.success('Pedido enviado. Un agente lo revisará.')
         navigate('/mis-pedidos')
       } else {
@@ -119,6 +129,7 @@ export default function PublicRequest() {
         const st = r.data || []
         const statusId = (st.find((s) => /abierto|nuevo|open/i.test(s.name)) || st[0])?.id
         await createTicket({ title: draft.title, description: draft.notes || '', priority: 'medium', status_id: statusId, client_id: user.id, category: 'Solicitud web', charger: 'Sin cargador' })
+        clearSolicitudDraft(tipo)
         toast.success('Ticket creado.')
         navigate('/tickets')
       }
@@ -163,6 +174,13 @@ export default function PublicRequest() {
               <p className="text-xs text-blue-200">{T.sub}</p>
             </div>
           </div>
+
+          {restored?.savedAt && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <b>Recuperamos tu solicitud en curso.</b> Revísala y envíala de nuevo.
+              {isMant && ' Si habías adjuntado fotos, vuelve a agregarlas.'}
+            </div>
+          )}
 
           <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6 space-y-4">
             <div>
