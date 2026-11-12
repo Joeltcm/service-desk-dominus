@@ -177,7 +177,7 @@ export default function MaintenancePanel({ ticket, onChanged }) {
 
       {equipos.length > 0 && (
         <div className="rounded-lg bg-gray-50 p-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Flota</p>
+          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Flota</p>
           <ul className="text-sm text-gray-700 space-y-0.5">
             {equipos.map((e, i) => <li key={i} className="flex justify-between"><span>{e.type}</span><span className="font-semibold">× {e.qty}</span></li>)}
           </ul>
@@ -220,7 +220,7 @@ export default function MaintenancePanel({ ticket, onChanged }) {
             <p className="text-xs font-medium text-gray-600 mb-2">Checklist</p>
             <div className="space-y-1.5">
               {form.checklist.map((c, i) => (
-                <button key={i} type="button" onClick={() => toggleTask(i)} className="w-full flex items-center gap-2 text-left text-sm text-gray-700 hover:bg-gray-50 rounded-md px-2 py-1.5">
+                <button key={i} type="button" onClick={() => toggleTask(i)} className="w-full min-h-[44px] flex items-center gap-2 text-left text-sm text-gray-700 hover:bg-gray-50 rounded-md px-2 py-2">
                   {c.done ? <CheckSquare size={16} className="text-teal-600 flex-shrink-0" /> : <Square size={16} className="text-gray-300 flex-shrink-0" />}
                   <span className={c.done ? 'line-through text-gray-400' : ''}>{c.task}</span>
                 </button>

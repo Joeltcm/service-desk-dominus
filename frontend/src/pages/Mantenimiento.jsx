@@ -117,7 +117,7 @@ export default function Mantenimiento() {
 
                 {equipos.length > 0 && (
                   <div className="rounded-lg bg-gray-50 p-3">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Flota</p>
+                    <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Flota</p>
                     <ul className="text-sm text-gray-700 space-y-0.5">
                       {equipos.map((e, i) => <li key={i} className="flex justify-between"><span>{e.type}</span><span className="font-semibold">× {e.qty}</span></li>)}
                     </ul>

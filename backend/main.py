@@ -2690,10 +2690,11 @@ if os.path.isdir(_FRONTEND_DIST):
                 "start_url": "/", "scope": "/", "display": "standalone",
                 "orientation": "portrait-primary",
                 "background_color": "#0f172a", "theme_color": sidebar, "lang": "es",
+                # Ícono cuadrado de 512 px (el backend lo genera así en /api/settings/pwa-icon).
+                # No se declaran tamaños que la imagen no tiene.
                 "icons": [
-                    {"src": "/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-                    {"src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-                    {"src": "/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+                    {"src": "/api/settings/pwa-icon", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                    {"src": "/api/settings/pwa-icon", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
                 ],
             }
             return FResponse(content=json.dumps(manifest), media_type="application/json")
