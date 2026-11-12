@@ -50,7 +50,7 @@ export default function Mantenimiento() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap md:pr-16 lg:pr-36">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Wrench size={22} className="text-teal-600" /> Mantenimiento</h1>
           <p className="text-sm text-gray-500 mt-0.5">Solicitudes preventivas y correctivas de clientes y flotas.</p>
@@ -71,6 +71,21 @@ export default function Mantenimiento() {
 
       {tab === 'servicios' && loading && <div className="card text-center text-gray-400 text-sm py-10">Cargando…</div>}
 
+      {tab === 'servicios' && !loading && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Por confirmar', value: groups[0].items.length, tone: 'border-amber-400 text-amber-700', icon: CalendarPlus },
+            { label: 'Programados', value: groups[1].items.length, tone: 'border-teal-500 text-teal-700', icon: CalendarClock },
+            { label: 'Cerrados', value: groups[2].items.length, tone: 'border-gray-400 text-gray-600', icon: Wrench },
+          ].map((k) => (
+            <div key={k.label} className={`card border-t-4 ${k.tone.split(' ')[0]} py-3 px-4`}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-1.5"><k.icon size={12} /> {k.label}</p>
+              <p className={`text-2xl font-bold leading-tight mt-1 ${k.tone.split(' ')[1]}`}>{k.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {tab === 'servicios' && !loading && groups.map((g) => (
         <section key={g.key} className="space-y-3">
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-2">
@@ -87,7 +102,7 @@ export default function Mantenimiento() {
             const tipo = (t.maint_type || '').toLowerCase()
             const confirmed = !!t.maint_confirmed_start
             return (
-              <article key={t.id} className="card space-y-3">
+              <article key={t.id} className={`card space-y-3 border-l-4 ${tipo === 'correctivo' ? 'border-l-rose-400' : 'border-l-teal-500'}`}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
                     <p className="text-xs text-gray-400">Ticket #{t.id}{t.maint_report_folio ? ` · ${t.maint_report_folio}` : ''}</p>
@@ -113,9 +128,9 @@ export default function Mantenimiento() {
                     <p className="text-xs text-gray-400">Fecha propuesta</p>
                     <p className="text-gray-700">{t.maint_requested_date ? t.maint_requested_date.split('-').reverse().join('-') : '—'}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-gray-400">{confirmed ? 'Atención confirmada' : 'Atención'}</p>
-                    <p className="text-gray-700">
+                  <div className={`rounded-lg p-2.5 ${confirmed ? 'bg-teal-50 border border-teal-100' : 'bg-amber-50 border border-amber-100'}`}>
+                    <p className={`text-[11px] font-semibold uppercase tracking-wide ${confirmed ? 'text-teal-700' : 'text-amber-700'}`}>{confirmed ? 'Atención confirmada' : 'Atención'}</p>
+                    <p className="text-gray-800 font-medium">
                       {confirmed ? `${fmtPanama(t.maint_confirmed_start)} → ${fmtPanama(t.maint_confirmed_end)}` : 'Pendiente de confirmar'}
                     </p>
                   </div>

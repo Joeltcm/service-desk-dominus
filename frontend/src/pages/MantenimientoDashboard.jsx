@@ -43,7 +43,7 @@ export default function MantenimientoDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center justify-between gap-3 flex-wrap md:pr-16 lg:pr-36">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Wrench size={22} className="text-teal-600" /> Dashboard de mantenimiento</h1>
           <p className="text-sm text-gray-500 mt-0.5">Lo que viene, lo vencido y cómo cumplimos los servicios.{d ? ` Corte: ${dmy(d.as_of)}.` : ''}</p>
