@@ -388,6 +388,79 @@ Ajustes generales de la empresa y control de accesos (solo administradores).
 
 > **Tip:** los accesos por rol tienen tres niveles: **sin acceso**, **lectura** y **edición**.""",
     },
+
+    {
+        "title": "🛠️ Mantenimiento: solicitudes, visitas, informes y planes",
+        "tags": "mantenimiento, preventivo, correctivo, flota, técnico, informe, plan, ayuda, guía",
+        "content": """# Mantenimiento
+
+El módulo **Mantenimiento** gestiona los servicios **preventivos** y **correctivos** de los clientes, incluidas sus **flotas** de equipos.
+
+## Dónde está
+
+- **Menú › Inicio › Mantenimiento**: solicitudes y servicios, en las pestañas **Servicios** y **Planes recurrentes**.
+- **Menú › Inicio › Dashboard Mantenimiento**: indicadores de planes, vencidos, pendientes y cumplimiento.
+
+## 1. Solicitud del cliente
+
+El cliente entra a la landing y elige **Solicitar mantenimiento**. Indica:
+
+- Tipo: **preventivo** o **correctivo**.
+- Equipos de la flota (tipo y cantidad).
+- Fecha propuesta (opcional).
+- **Datos obligatorios**: nombre del contacto, correo, teléfono y ubicación.
+
+Con sesión iniciada también puede adjuntar fotos del problema. Al enviarla, el staff recibe una campana y una notificación push.
+
+## 2. Confirmar la visita (técnico obligatorio)
+
+En **Servicios › Por confirmar**, pulsa **Confirmar fecha**:
+
+1. Revisa equipos y ubicación (vienen precargados).
+2. Indica **inicio** y **fin o rango** (hora de Panamá).
+3. **Asigna un técnico. Es obligatorio**: sin técnico no se puede confirmar.
+4. Opcional: marca **Hacer recurrente** para convertirlo en un plan.
+
+Al confirmar, la visita aparece en la **Agenda** (en color verde azulado), el técnico recibe un aviso y el cliente recibe un correo con fecha, flota, ubicación y técnico.
+
+## 3. Reprogramar o extender
+
+Desde una visita confirmada, **Reprogramar / extender** cambia la fecha o amplía el rango. Se actualiza la Agenda, queda registro en la línea de tiempo y se avisa al cliente.
+
+Para cambiar de técnico después de confirmar, usa el campo **Técnico asignado** del ticket.
+
+## 4. Informe técnico
+
+En el detalle del ticket (sección **Mantenimiento**):
+
+- Registra el **trabajo realizado**, las **observaciones** y las **recomendaciones**.
+- Marca el **checklist** de la visita.
+- Adjunta **fotos** del trabajo y elige cuáles incluir.
+- Captura la **firma de conformidad** del cliente.
+- Pulsa **Guardar informe**. La primera vez se asigna un folio (MANT-0001, MANT-0002…).
+- Con el informe guardado: **Informe técnico** (vista previa), **Descargar PDF** o **Enviar al cliente** por correo.
+
+El cliente también descarga su informe desde su ticket.
+
+## 5. Planes recurrentes
+
+Un plan guarda la flota del cliente y la **frecuencia** (cada mes, 3, 6 o 12 meses).
+
+- Muestra la **próxima fecha sugerida**.
+- Al cerrar una atención del plan, la siguiente fecha se calcula sola.
+- El sistema **avisa** al staff cuando faltan 15 días o la fecha ya venció. **No crea tickets por su cuenta**: tú decides cuándo agendar.
+- **Crear atención** genera la atención preventiva para confirmarla después.
+- Puedes **pausar**, **reanudar** o **cancelar** un plan.
+
+## 6. Recordatorios
+
+Entre 24 y 48 horas antes de una visita confirmada, el cliente recibe un recordatorio por correo y el técnico recibe un aviso.
+
+## Interruptores (solo superadmin)
+
+En **Configuración del sistema › Mantenimiento · Funciones** se puede activar o desactivar cada función: tarjeta pública, correos, recordatorios, planes, dashboard, informe técnico, firma, checklist y fotos del cliente. Los cambios aplican de inmediato.
+""",
+    },
 ]
 
 

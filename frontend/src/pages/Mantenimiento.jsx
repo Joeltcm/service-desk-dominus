@@ -210,6 +210,7 @@ function ConfirmModal({ ticket, agents, planEnabled = true, onClose, onSaved }) 
 
   const submit = async () => {
     if (!start) return toast.error('Indica la fecha y hora de inicio')
+    if (!assigned) return toast.error('Asigna un técnico para confirmar la visita')
     const mins = end ? minutesBetween(start, end) : 60
     if (end && (mins === null || mins < 15)) return toast.error('La fecha de fin debe ser al menos 15 min posterior al inicio')
     const eq = equipment.filter((e) => e.type.trim()).map((e) => ({ type: e.type.trim(), qty: Number(e.qty) || 1 }))
@@ -221,7 +222,7 @@ function ConfirmModal({ ticket, agents, planEnabled = true, onClose, onSaved }) 
         scheduled_at: `${start}:00`,
         confirmed_end: end ? `${end}:00` : null,
         duration_minutes: mins || 60,
-        assigned_to_id: assigned ? Number(assigned) : null,
+        assigned_to_id: Number(assigned),
         notes: notes.trim() || null,
       })
       if (makePlan) {
@@ -277,9 +278,9 @@ function ConfirmModal({ ticket, agents, planEnabled = true, onClose, onSaved }) 
       </div>
 
       <div>
-        <p className="text-xs font-medium text-gray-600 mb-1">Técnico asignado</p>
-        <select className="input w-full" value={assigned} onChange={(e) => setAssigned(e.target.value)} style={{ fontSize: '16px' }}>
-          <option value="">Sin asignar</option>
+        <p className="text-xs font-medium text-gray-600 mb-1">Técnico asignado <span className="text-red-600">*</span></p>
+        <select className={`input w-full ${!assigned ? 'border-amber-300' : ''}`} value={assigned} required onChange={(e) => setAssigned(e.target.value)} style={{ fontSize: '16px' }}>
+          <option value="">Selecciona un técnico…</option>
           {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
       </div>

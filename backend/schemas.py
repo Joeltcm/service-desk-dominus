@@ -160,7 +160,7 @@ class MaintConfirmIn(BaseModel):
     scheduled_at: datetime                     # inicio (fecha y hora)
     confirmed_end: Optional[datetime] = None   # fin del rango aproximado (opcional)
     duration_minutes: int = Field(60, ge=15, le=2880)
-    assigned_to_id: Optional[int] = None       # técnico asignado
+    assigned_to_id: int                        # técnico asignado (obligatorio)
     notes: Optional[str] = None
 
 

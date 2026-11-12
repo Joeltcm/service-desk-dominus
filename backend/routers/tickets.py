@@ -429,8 +429,12 @@ def maint_confirm(
         ticket.maint_equipment = data.equipment
     if data.location and data.location.strip():
         ticket.location = data.location.strip()
-    if data.assigned_to_id:
-        ticket.assigned_to_id = data.assigned_to_id
+    # Técnico obligatorio: debe ser un usuario activo de staff (admin, supervisor o agente).
+    tech = db.query(models.User).filter(models.User.id == data.assigned_to_id).first()
+    if not tech or not tech.is_active or tech.role not in (
+            models.UserRole.admin, models.UserRole.supervisor, models.UserRole.agent):
+        raise HTTPException(status_code=400, detail="Asigna un técnico válido (admin, supervisor o agente activo)")
+    ticket.assigned_to_id = tech.id
     ticket.maint_confirmed_start = start
     ticket.maint_confirmed_end = end
     ticket.duration_minutes = data.duration_minutes
