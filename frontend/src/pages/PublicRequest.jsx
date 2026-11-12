@@ -48,10 +48,15 @@ export default function PublicRequest() {
   const [photos, setPhotos] = useState([])
   const [needAccount, setNeedAccount] = useState(false)
 
-  // Autoguardado: cada cambio queda en el navegador hasta que el envío sea exitoso.
+  // Autoguardado: solo cuando hay contenido real (no por el mero hecho de abrir el formulario),
+  // y se conserva hasta que el envío sea exitoso. Sin contenido, se limpia cualquier borrador viejo.
   useEffect(() => {
-    saveSolicitudDraft(tipo, { title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location })
-  }, [tipo, title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location])
+    const draft = { title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location }
+    // "Contenido real" = lo que el usuario escribió (no los campos de contacto que vienen prellenados).
+    const hasContent = !!(title.trim() || notes.trim() || lines.some((l) => (l.description || '').trim()) || (isMant && requestedDate))
+    if (hasContent) saveSolicitudDraft(tipo, draft)
+    else clearSolicitudDraft(tipo)
+  }, [tipo, isMant, title, notes, lines, maintType, requestedDate, contactName, contactEmail, contactPhone, location])
   const mf = useMaintFeatures({ publicOnly: true })
   const photosOn = featureOn(mf, 'client_photos')
 
@@ -175,7 +180,7 @@ export default function PublicRequest() {
             </div>
           </div>
 
-          {restored?.savedAt && (
+          {restored?.savedAt && (restored.title?.trim() || restored.notes?.trim() || restored.lines?.some((l) => (l.description || '').trim()) || restored.requestedDate) && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <b>Recuperamos tu solicitud en curso.</b> Revísala y envíala de nuevo.
               {isMant && ' Si habías adjuntado fotos, vuelve a agregarlas.'}
